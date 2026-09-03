@@ -60,7 +60,11 @@ export function DateStrip({ dates, value, onChange, filed = [] }: DateStripProps
             <Text style={[styles.number, selected && styles.textSelected]}>
               {dayNumberLabel(careDate)}
             </Text>
-            <View style={[styles.dot, hasEntry && styles.dotFiled, selected && styles.dotOnSelected]} />
+            {/* The dot means "this day already has an entry", so it is only painted when
+                there is one. Selection decides its colour, not whether it shows. */}
+            <View
+              style={[styles.dot, hasEntry && (selected ? styles.dotOnSelected : styles.dotFiled)]}
+            />
           </Pressable>
         );
       })}
