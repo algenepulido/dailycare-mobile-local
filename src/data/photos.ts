@@ -11,6 +11,7 @@
 
 import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
+import { Alert, Linking } from 'react-native';
 
 import { newId } from './ids';
 
@@ -25,6 +26,11 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
 };
 
 export type PhotoSource = 'camera' | 'library';
+
+const SOURCE_LABEL: Record<PhotoSource, string> = {
+  camera: 'the camera',
+  library: 'your photos',
+};
 
 function photoDirectory(): Directory {
   const directory = new Directory(Paths.document, PHOTO_DIRECTORY);
@@ -51,29 +57,65 @@ function persist(sourceUri: string): string {
 }
 
 /**
- * Asks for the permission this source needs. Returns false when the caregiver declines,
- * so the caller can leave the screen as it was rather than failing silently.
+ * Explains a permanent refusal instead of leaving the caregiver tapping a button that
+ * does nothing.
+ *
+ * Android stops showing its own prompt once someone has denied with "don't ask again",
+ * and every later request returns denied straight away. Without this, the photo buttons
+ * simply stop responding and there is nothing on screen to say why.
+ */
+function explainRefusal(source: PhotoSource) {
+  Alert.alert(
+    `DailyCare can't reach ${SOURCE_LABEL[source]}`,
+    `Permission was turned off, so this has to be switched back on in Settings before a photo can be added.`,
+    [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Open settings', onPress: () => void Linking.openSettings() },
+    ],
+  );
+}
+
+/**
+ * Asks for the permission this source needs.
+ *
+ * `canAskAgain` is the difference between "they said no this time" and "the system will
+ * never ask again", and only the second one needs explaining.
  */
 async function ensurePermission(source: PhotoSource): Promise<boolean> {
   const result =
     source === 'camera'
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
-  return result.granted;
+
+  if (result.granted) return true;
+  if (!result.canAskAgain) explainRefusal(source);
+  return false;
 }
 
 /** Returns the stored URI, or null when the caregiver cancelled or declined access. */
 export async function pickPhoto(source: PhotoSource): Promise<string | null> {
   if (!(await ensurePermission(source))) return null;
 
-  const result =
-    source === 'camera'
-      ? await ImagePicker.launchCameraAsync(PICKER_OPTIONS)
-      : await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
+  try {
+    const result =
+      source === 'camera'
+        ? await ImagePicker.launchCameraAsync(PICKER_OPTIONS)
+        : await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
 
-  if (result.canceled || result.assets.length === 0) return null;
+    if (result.canceled || result.assets.length === 0) return null;
 
-  return persist(result.assets[0].uri);
+    return persist(result.assets[0].uri);
+  } catch {
+    // A device with no camera, or a picker the system refused to open. Saying so beats
+    // a button that looks broken.
+    Alert.alert(
+      `DailyCare couldn't open ${SOURCE_LABEL[source]}`,
+      source === 'camera'
+        ? 'This device may not have a camera available. A photo can still be chosen from the gallery.'
+        : 'The gallery could not be opened on this device.',
+    );
+    return null;
+  }
 }
 
 /** Removes a stored photo. Missing files are ignored — the record is what matters. */
