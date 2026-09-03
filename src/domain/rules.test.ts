@@ -1,0 +1,95 @@
+import { buildChanges, buildChecklist, mealCounts } from './rules';
+import type { CheckIn } from './types';
+import { DEFAULT_BASELINE } from './types';
+
+const baseline = DEFAULT_BASELINE; // Calm / Fair / Restless
+
+function entry(overrides: Partial<CheckIn> = {}): CheckIn {
+  return {
+    id: 'check-in',
+    residentId: 'resident',
+    caregiverId: 'caregiver',
+    careDate: '2026-09-03',
+    meals: { breakfast: 'full', lunch: 'partial', dinner: 'none' },
+    medication: { am: true, pm: false },
+    hygiene: { shower: true, grooming: false },
+    mood: baseline.mood,
+    appetite: baseline.appetite,
+    sleep: baseline.sleep,
+    concerns: [],
+    supplementalMedication: '',
+    note: '',
+    photoUri: null,
+    createdAt: '2026-09-03T09:00:00.000Z',
+    updatedAt: '2026-09-03T09:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('what the family is told', () => {
+  it('says nothing when the day matched the resident’s usual', () => {
+    expect(buildChanges(entry(), baseline)).toHaveLength(0);
+  });
+
+  it('reports a difference and names the baseline beside it', () => {
+    expect(buildChanges(entry({ mood: 'Withdrawn' }), baseline)).toEqual([
+      { kind: 'Mood', value: 'Withdrawn', baselineNote: 'usually Calm', alert: false },
+    ]);
+  });
+
+  it('raises an alert for an agitated or confused day', () => {
+    expect(buildChanges(entry({ mood: 'Agitated' }), baseline)[0].alert).toBe(true);
+    expect(buildChanges(entry({ mood: 'Confused' }), baseline)[0].alert).toBe(true);
+  });
+
+  it('raises an alert when food is refused', () => {
+    expect(buildChanges(entry({ appetite: 'Refused' }), baseline)[0].alert).toBe(true);
+  });
+
+  it('raises an alert for a sleepless night', () => {
+    // The prototype flagged this in the input but never carried it into the summary.
+    expect(buildChanges(entry({ sleep: "Didn't sleep" }), baseline)[0].alert).toBe(true);
+  });
+
+  it('stays quiet about a restless night for a resident who is usually restless', () => {
+    expect(buildChanges(entry({ sleep: 'Restless' }), baseline)).toHaveLength(0);
+  });
+
+  it('always alerts on a flagged concern', () => {
+    const changes = buildChanges(entry({ concerns: ['Sundowning', 'Pain'] }), baseline);
+    expect(changes.map((change) => [change.kind, change.value, change.alert])).toEqual([
+      ['Concern', 'Sundowning', true],
+      ['Concern', 'Pain', true],
+    ]);
+  });
+});
+
+describe('the care checklist', () => {
+  it('counts a partial meal as eaten and says which one it was', () => {
+    expect(mealCounts({ breakfast: 'full', lunch: 'partial', dinner: 'none' })).toEqual({
+      done: 2,
+      items: ['Breakfast', 'Lunch (partial)'],
+    });
+  });
+
+  it('totals each group', () => {
+    expect(buildChecklist(entry()).map((group) => [group.label, group.done, group.total])).toEqual([
+      ['Meals', 2, 3],
+      ['Medication', 1, 2],
+      ['Hygiene', 1, 2],
+    ]);
+  });
+
+  it('carries supplemental medication with the medication group', () => {
+    const checklist = buildChecklist(entry({ supplementalMedication: 'Paracetamol' }));
+    expect(checklist[1].extra).toBe('Paracetamol');
+  });
+
+  it('leaves the extra unset when nothing was entered', () => {
+    expect(buildChecklist(entry()).map((group) => group.extra)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+});

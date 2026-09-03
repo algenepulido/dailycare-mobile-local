@@ -26,6 +26,17 @@ npx expo start
 Press `a` for an Android emulator, `i` for an iOS simulator, or scan the QR code with a
 development build on a device.
 
+## Verifying
+
+```bash
+npm run verify      # types, then tests
+npm run typecheck   # tsc only
+npm test            # jest only
+```
+
+The product rules — what the family is told, and what counts as worth flagging — are
+covered by tests, because that logic is the part a change can quietly get wrong.
+
 ## Layout
 
 ```
@@ -34,8 +45,10 @@ src/
   theme/        Design tokens. Every colour, size and type style comes from here.
   domain/       Entities, option sets, and the product rules that decide what the
                 summary says.
-  data/         Storage. Screens talk to the repository interface, never to storage
-                directly, so the backend can replace it without touching the UI.
+  data/         Storage, IDs and photos. Screens talk to the repository interface,
+                never to storage directly, so the backend can replace it without
+                touching the UI.
+  state/        Session, and the check-in form reducer.
 ```
 
 ## Notes for later milestones

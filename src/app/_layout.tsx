@@ -21,6 +21,7 @@ export default function RootLayout() {
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="setup" options={{ headerShown: false }} />
+          <Stack.Screen name="summary" options={{ title: 'Preview', presentation: 'modal' }} />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>

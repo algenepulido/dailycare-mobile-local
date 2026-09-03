@@ -4,14 +4,22 @@ import { color, control, radius, space, type } from '@/theme/tokens';
 
 type Layout = 'wrap' | 'segmented';
 
+/**
+ * `options` is the only place the option type is inferred from.
+ *
+ * Without this, TypeScript gathers candidates from every member of the props union at
+ * once — including a single-select `value: T` sitting next to a multi-select `T[]` — and
+ * falls back to `string` when they disagree. Pinning inference to one position means
+ * every call site gets the literal union without having to name it.
+ */
 interface BaseProps<T extends string> {
   options: readonly T[];
   /** 'wrap' flows chips onto as many lines as needed. 'segmented' splits one row evenly. */
   layout?: Layout;
   /** Options that should read as needing attention once chosen. */
-  alertValues?: readonly T[];
+  alertValues?: readonly NoInfer<T>[];
   /** Turns a stored value into what the caregiver reads. Defaults to the value itself. */
-  formatLabel?: (option: T) => string;
+  formatLabel?: (option: NoInfer<T>) => string;
   /** Sits under the group. Used for the resident's baseline, as "usually Calm". */
   hint?: string;
   disabled?: boolean;
@@ -19,15 +27,15 @@ interface BaseProps<T extends string> {
 
 interface SingleSelectProps<T extends string> extends BaseProps<T> {
   multiple?: false;
-  value: T | null;
-  onChange: (value: T) => void;
+  value: NoInfer<T> | null;
+  onChange: (value: NoInfer<T>) => void;
 }
 
 interface MultiSelectProps<T extends string> extends BaseProps<T> {
   multiple: true;
-  value: readonly T[];
+  value: readonly NoInfer<T>[];
   /** Fires with the option that was tapped. The caller decides how to add or remove it. */
-  onChange: (value: T) => void;
+  onChange: (value: NoInfer<T>) => void;
 }
 
 export type ChoiceGroupProps<T extends string> = SingleSelectProps<T> | MultiSelectProps<T>;

@@ -30,6 +30,7 @@ export interface Repository {
   saveCaregiver(caregiver: Caregiver): Promise<void>;
 
   listCheckIns(residentId: ID): Promise<CheckIn[]>;
+  getCheckIn(id: ID): Promise<CheckIn | null>;
   saveCheckIn(checkIn: CheckIn): Promise<void>;
   /** The most recent entry filed for that day, matching how the weekly report resolves
    *  more than one update for the same date. */
@@ -95,6 +96,11 @@ export const repository: Repository = {
     return checkIns
       .filter((checkIn) => checkIn.residentId === residentId)
       .sort((a, b) => b.careDate.localeCompare(a.careDate));
+  },
+
+  async getCheckIn(id) {
+    const checkIns = await readList<CheckIn>(KEY.checkIns);
+    return checkIns.find((checkIn) => checkIn.id === id) ?? null;
   },
 
   async saveCheckIn(checkIn) {
