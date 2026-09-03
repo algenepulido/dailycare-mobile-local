@@ -37,8 +37,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "DailyCare needs your photo library so you can attach a picture from the day to a resident\u2019s update.",
-          "cameraPermission": "DailyCare needs the camera so you can take a picture of the day to send with a resident\u2019s update."
+          "photosPermission": "DailyCare needs your photo library so you can attach a picture from the day to a resident’s update.",
+          "cameraPermission": "DailyCare needs the camera so you can take a picture of the day to send with a resident’s update."
         }
       ],
       [
@@ -53,6 +53,13 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "backgroundColor": "#FBF7F0"
+    "backgroundColor": "#FBF7F0",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7a13714f-f2d7-4dfd-b742-4673f5ec74d6"
+      }
+    },
+    "owner": "jenithsolution"
   }
 }
