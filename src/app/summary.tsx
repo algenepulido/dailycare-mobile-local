@@ -40,6 +40,19 @@ export default function SummaryScreen() {
     };
   }, [checkInId]);
 
+  /**
+   * Pop back to the check-in rather than pushing a second copy of it.
+   *
+   * router.replace here left the original check-in screen mounted underneath and put a
+   * fresh one on top, so every entry a caregiver filed added another dead screen still
+   * holding its own form state. Falls back to replace only when there is nothing to pop,
+   * which is the case if someone opens this route directly.
+   */
+  const backToCheckIn = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -50,7 +63,7 @@ export default function SummaryScreen() {
 
   if (!checkIn || !resident || !caregiver) {
     return (
-      <Screen footer={<Button label="Back to the check-in" onPress={() => router.replace('/')} />}>
+      <Screen footer={<Button label="Back to the check-in" onPress={backToCheckIn} />}>
         <Text style={styles.title}>Nothing to show</Text>
         <Text style={styles.lede}>That entry is no longer on this device.</Text>
       </Screen>
@@ -61,7 +74,7 @@ export default function SummaryScreen() {
   const checklist = buildChecklist(checkIn);
 
   return (
-    <Screen footer={<Button label="Back to the check-in" onPress={() => router.replace('/')} />}>
+    <Screen footer={<Button label="Back to the check-in" onPress={backToCheckIn} />}>
       <Text style={styles.eyebrow}>Daily care summary</Text>
       <Text style={styles.title}>{resident.displayName}</Text>
       <Text style={styles.lede}>
