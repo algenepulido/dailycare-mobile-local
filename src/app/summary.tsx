@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { Button, Card, Screen, SectionLabel } from '@/components';
+import { Button, Card, Screen } from '@/components';
 import { repository } from '@/data/repository';
 import { longLabel } from '@/domain/dates';
 import { buildChanges, buildChecklist } from '@/domain/rules';
@@ -56,7 +56,7 @@ export default function SummaryScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={color.clay} />
+        <ActivityIndicator color={color.purple} />
       </View>
     );
   }
@@ -81,8 +81,7 @@ export default function SummaryScreen() {
         {longLabel(checkIn.careDate)} · from {caregiver.displayName}
       </Text>
 
-      <Card>
-        <SectionLabel>What changed today</SectionLabel>
+      <Card title="What changed today">
         {changes.length === 0 ? (
           <Text style={styles.quiet}>A day like their usual. Nothing stood out.</Text>
         ) : (
@@ -90,23 +89,20 @@ export default function SummaryScreen() {
         )}
       </Card>
 
-      <Card>
-        <SectionLabel>Care checklist</SectionLabel>
+      <Card title="Care checklist">
         {checklist.map((group) => (
           <ChecklistRow key={group.label} group={group} />
         ))}
       </Card>
 
       {checkIn.note ? (
-        <Card>
-          <SectionLabel>{`Note from ${caregiver.displayName}`}</SectionLabel>
+        <Card title={`Note from ${caregiver.displayName}`}>
           <Text style={styles.note}>{checkIn.note}</Text>
         </Card>
       ) : null}
 
       {checkIn.photoUri ? (
-        <Card>
-          <SectionLabel>Photo from today</SectionLabel>
+        <Card title="Photo from today">
           <Image source={{ uri: checkIn.photoUri }} style={styles.photo} contentFit="cover" />
         </Card>
       ) : null}
@@ -150,9 +146,9 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.paper,
+    backgroundColor: color.paperDeep,
   },
-  eyebrow: { ...type.label, color: color.clay },
+  eyebrow: { ...type.marker, color: color.purple, letterSpacing: 1 },
   title: { ...type.display, color: color.ink, marginTop: -space.sm },
   lede: { ...type.bodySmall, color: color.inkSoft, marginTop: -space.sm },
   quiet: { ...type.body, color: color.inkSoft },
@@ -178,12 +174,12 @@ const styles = StyleSheet.create({
 
   checklistRow: { gap: space.xs },
   checklistHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  checklistLabel: { ...type.heading, color: color.ink },
+  checklistLabel: { ...type.body, fontFamily: type.fieldLabel.fontFamily, color: color.ink },
   checklistCount: { ...type.caption, color: color.inkFaint },
   checklistItems: { ...type.bodySmall, color: color.inkMuted },
   checklistExtra: { ...type.caption, color: color.inkSoft },
 
   note: { ...type.body, color: color.inkMuted },
-  photo: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: color.paperDeep },
+  photo: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, backgroundColor: color.paperDeep },
   footnote: { ...type.caption, color: color.inkFaint },
 });

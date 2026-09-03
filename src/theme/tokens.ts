@@ -1,74 +1,101 @@
 /**
- * Design tokens for DailyCare.
+ * Design tokens for DailyCare+.
  *
- * Colour values are lifted from the InkTree caregiver prototype stylesheet, so the app
- * starts from the product's existing visual language instead of a new one. Type, spacing,
- * radius and control sizes are set here too.
+ * These are InkTree's real tokens, taken from the Daily Care package stylesheet — purple
+ * primary on white surfaces with near-black text, not the cream and terracotta the older
+ * caregiver web page used.
  *
  * Everything visual reads from this file. Changing the look later is editing values here,
  * not touching screens.
  */
 
-import { Platform } from 'react-native';
-
 export const color = {
   // Grounds
-  paper: '#FBF7F0',
-  paperDeep: '#F1E8DA',
+  paper: '#FFFFFF',
+  paperDeep: '#F5F5F7',
   surface: '#FFFFFF',
 
   // Text, darkest to lightest
-  ink: '#1A1410',
-  inkMuted: '#3A3128',
-  inkSoft: '#6B5F52',
-  inkFaint: '#9A8E7F',
+  ink: '#0C0C0C',
+  inkMuted: '#333333',
+  inkSoft: '#6E6E6E',
+  inkFaint: '#9A9AA2',
 
   // Hairlines
-  line: 'rgba(26, 20, 16, 0.09)',
-  lineStrong: 'rgba(26, 20, 16, 0.16)',
+  line: 'rgba(12, 12, 14, 0.09)',
+  lineStrong: 'rgba(12, 12, 14, 0.16)',
+
+  // Brand
+  purple: '#923CF6',
+  purpleDeep: '#7A2FF0',
+  purpleSoft: '#F1E9FE',
+  peach: '#F3ECFD',
+  peachDeep: '#E7D8FA',
 
   // Accents
-  clay: '#C8784F',
-  claySoft: '#F2DBCB',
-  purple: '#8B47E8',
-  sage: '#87A07C',
-  sageSoft: '#E0E9D9',
+  clay: '#FF9933',
+  claySoft: '#FFE7CC',
+  honey: '#FFB84D',
+  honeySoft: '#FFEBCC',
+  rose: '#EC407A',
+  roseSoft: '#FBDCE8',
+  sky: '#5368EE',
+  skySoft: '#E1E5FB',
 
-  // Status. Separate from the accents on purpose.
-  warn: '#E0A100',
-  warnSoft: '#F8E9BE',
-  alert: '#E02718',
-  alertSoft: '#FBDAD5',
-
-  honeySoft: '#F6E6C4',
-  roseSoft: '#F2DCDE',
+  // Status. Separate from the brand on purpose.
+  sage: '#4FB85E',
+  sageSoft: '#E2F5E4',
+  warn: '#E8952B',
+  warnSoft: '#FFEBCF',
+  alert: '#F0483F',
+  alertSoft: '#FFE0DE',
 } as const;
 
 /**
- * The weekly report pairs a serif for headings with the system sans for body text.
- * Georgia ships on iOS; Android resolves 'serif' to Noto Serif, which is close enough
- * to hold the same register.
+ * Headings are set in the serif, everything else in the sans, matching the reference.
+ * The serif is subset to Latin — the full face carries a Korean glyph set this app has
+ * no use for, and it costs nine megabytes.
  */
-export const font = {
-  serif: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }),
-  body: Platform.select({ ios: 'System', android: 'sans-serif', default: 'System' }),
+export const fontFamily = {
+  serif: 'NanumMyeongjo-Bold',
+  sans: 'RethinkSans-Regular',
+  sansMedium: 'RethinkSans-Medium',
+  sansBold: 'RethinkSans-ExtraBold',
+} as const;
+
+/** Loaded once at startup. Keys must match the names above. */
+export const fontAssets = {
+  'NanumMyeongjo-Bold': require('../../assets/fonts/NanumMyeongjo-Bold.ttf'),
+  'RethinkSans-Regular': require('../../assets/fonts/RethinkSans-Regular.ttf'),
+  'RethinkSans-Medium': require('../../assets/fonts/RethinkSans-Medium.ttf'),
+  'RethinkSans-ExtraBold': require('../../assets/fonts/RethinkSans-ExtraBold.ttf'),
 } as const;
 
 export const type = {
-  display: { fontFamily: font.serif, fontSize: 30, lineHeight: 36, letterSpacing: -0.4 },
-  title: { fontFamily: font.serif, fontSize: 22, lineHeight: 28, letterSpacing: -0.2 },
-  heading: { fontFamily: font.body, fontSize: 17, lineHeight: 23, fontWeight: '600' as const },
-  body: { fontFamily: font.body, fontSize: 16, lineHeight: 23 },
-  bodySmall: { fontFamily: font.body, fontSize: 14, lineHeight: 20 },
-  label: {
-    fontFamily: font.body,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: '600' as const,
-    letterSpacing: 0.9,
+  /** Screen title. "Daily Care Information" in the reference. */
+  display: { fontFamily: fontFamily.serif, fontSize: 30, lineHeight: 33, letterSpacing: -0.6 },
+  /** Section heading above a card. "Anything different today?" */
+  section: { fontFamily: fontFamily.serif, fontSize: 22, lineHeight: 27, letterSpacing: -0.2 },
+  /** Card heading. "Meals", "Medication", "Note for Admin". */
+  cardTitle: { fontFamily: fontFamily.serif, fontSize: 20, lineHeight: 25 },
+
+  body: { fontFamily: fontFamily.sans, fontSize: 15, lineHeight: 21 },
+  /** Checklist rows sit larger than body — they are the thing being tapped. */
+  bodyLarge: { fontFamily: fontFamily.sans, fontSize: 18, lineHeight: 24 },
+  bodySmall: { fontFamily: fontFamily.sans, fontSize: 14, lineHeight: 20 },
+  caption: { fontFamily: fontFamily.sans, fontSize: 13, lineHeight: 18 },
+  /** Field labels beside an observation row. */
+  fieldLabel: { fontFamily: fontFamily.sansMedium, fontSize: 13, lineHeight: 17 },
+  /** The "CHANGED" marker and the caregiver badge. */
+  marker: {
+    fontFamily: fontFamily.sansBold,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.5,
     textTransform: 'uppercase' as const,
   },
-  caption: { fontFamily: font.body, fontSize: 13, lineHeight: 18 },
+  chip: { fontFamily: fontFamily.sansMedium, fontSize: 14, lineHeight: 18 },
+  button: { fontFamily: fontFamily.sansBold, fontSize: 16, lineHeight: 20 },
 } as const;
 
 /** 4pt scale. Use these rather than raw numbers. */
@@ -77,34 +104,28 @@ export const space = {
   sm: 8,
   md: 12,
   lg: 16,
-  xl: 24,
+  xl: 22,
   xxl: 32,
   xxxl: 48,
 } as const;
 
+/** Cards in the reference are generously rounded — 22, and 999 for chips. */
 export const radius = {
-  sm: 8,
-  md: 14,
-  lg: 22,
+  sm: 9,
+  md: 12,
+  lg: 16,
+  card: 22,
   pill: 999,
 } as const;
 
 /** Minimum 44pt for anything a thumb has to hit. */
 export const control = {
   height: 48,
-  heightSmall: 36,
+  chipHeight: 40,
+  checkbox: 28,
+  saveHeight: 56,
   hitSlop: { top: 8, bottom: 8, left: 8, right: 8 },
 } as const;
 
-export const shadow = {
-  card: {
-    shadowColor: '#1A1410',
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
-} as const;
-
-export const theme = { color, font, type, space, radius, control, shadow } as const;
+export const theme = { color, fontFamily, fontAssets, type, space, radius, control } as const;
 export default theme;

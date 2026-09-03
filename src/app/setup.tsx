@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
-import { Button, Card, ChoiceGroup, Field, Screen, SectionLabel } from '@/components';
+import { Button, Card, ObservationRow, Field, Screen } from '@/components';
 import { useSession } from '@/state/session';
 import type { Appetite, Mood, Sleep } from '@/domain/types';
 import { APPETITES, DEFAULT_BASELINE, MOODS, SLEEPS } from '@/domain/types';
@@ -54,42 +54,39 @@ export default function SetupScreen() {
         Everything here stays on this device. Use made-up names while we build.
       </Text>
 
-      <Card>
-        <SectionLabel>Who is logging</SectionLabel>
+      <Card title="Who is logging">
         <Field
-          label="Caregiver name"
           value={caregiverName}
           onChangeText={setCaregiverName}
           placeholder="Maria"
+          accessibilityLabel="Caregiver name"
           autoCapitalize="words"
         />
       </Card>
 
-      <Card>
-        <SectionLabel>Who they are logging for</SectionLabel>
+      <Card title="Who they are logging for">
         <Field
-          label="Resident name"
           value={residentName}
           onChangeText={setResidentName}
           placeholder="Rosie"
+          accessibilityLabel="Resident name"
           autoCapitalize="words"
         />
       </Card>
 
-      <Card>
-        <SectionLabel>What they are usually like</SectionLabel>
+      <Card title="What they are usually like">
         <Text style={styles.help}>
           The family only hears about mood, appetite and sleep on the days they differ from this.
         </Text>
-
-        <Text style={styles.field}>Mood</Text>
-        <ChoiceGroup options={MOODS} value={mood} onChange={setMood} />
-
-        <Text style={styles.field}>Appetite</Text>
-        <ChoiceGroup options={APPETITES} value={appetite} onChange={setAppetite} />
-
-        <Text style={styles.field}>Sleep</Text>
-        <ChoiceGroup options={SLEEPS} value={sleep} onChange={setSleep} />
+        <ObservationRow label="Mood" options={MOODS} value={mood} baseline={mood} onChange={setMood} />
+        <ObservationRow
+          label="Appetite"
+          options={APPETITES}
+          value={appetite}
+          baseline={appetite}
+          onChange={setAppetite}
+        />
+        <ObservationRow label="Sleep" options={SLEEPS} value={sleep} baseline={sleep} onChange={setSleep} />
       </Card>
     </Screen>
   );
@@ -98,6 +95,5 @@ export default function SetupScreen() {
 const styles = StyleSheet.create({
   title: { ...type.display, color: color.ink },
   lede: { ...type.body, color: color.inkSoft, marginTop: -space.sm },
-  help: { ...type.caption, color: color.inkSoft },
-  field: { ...type.label, color: color.inkFaint, marginTop: space.xs },
+  help: { ...type.caption, color: color.inkSoft, marginBottom: space.sm },
 });

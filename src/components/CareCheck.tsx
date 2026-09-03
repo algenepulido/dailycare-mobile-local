@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { color, control, radius, space, type } from '@/theme/tokens';
 
-interface ToggleRowProps {
+interface CareCheckProps {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -10,10 +10,12 @@ interface ToggleRowProps {
 }
 
 /**
- * A labelled row that is either done or not. Carries medication slots and hygiene tasks,
- * where the only thing recorded is whether it happened.
+ * A single thing that either happened or didn't — a meal, a dose, a shower.
+ *
+ * Deliberately large: this is what a caregiver taps a dozen times a day, often standing
+ * up, often on someone else's phone.
  */
-export function ToggleRow({ label, checked, onChange, disabled = false }: ToggleRowProps) {
+export function CareCheck({ label, checked, onChange, disabled = false }: CareCheckProps) {
   return (
     <Pressable
       onPress={() => onChange(!checked)}
@@ -23,36 +25,30 @@ export function ToggleRow({ label, checked, onChange, disabled = false }: Toggle
       accessibilityLabel={label}
       style={({ pressed }) => [styles.row, pressed && styles.pressed, disabled && styles.disabled]}
     >
-      <Text style={[styles.label, checked && styles.labelChecked]}>{label}</Text>
       <View style={[styles.box, checked && styles.boxChecked]}>
         {checked ? <Text style={styles.tick}>✓</Text> : null}
       </View>
+      <Text style={[styles.label, checked && styles.labelChecked]}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    minHeight: control.height,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.md,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 11 },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.4 },
-  label: { ...type.body, color: color.inkMuted, flexShrink: 1 },
-  labelChecked: { color: color.ink },
   box: {
-    width: 26,
-    height: 26,
+    width: control.checkbox,
+    height: control.checkbox,
     borderRadius: radius.sm,
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: color.lineStrong,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.surface,
+    backgroundColor: 'transparent',
   },
   boxChecked: { backgroundColor: color.sage, borderColor: color.sage },
-  tick: { color: color.surface, fontSize: 15, fontWeight: '700', lineHeight: 18 },
+  tick: { color: color.paper, fontSize: 16, fontWeight: '700', lineHeight: 19 },
+  label: { ...type.bodyLarge, color: color.inkMuted, flex: 1 },
+  labelChecked: { color: color.ink },
 });

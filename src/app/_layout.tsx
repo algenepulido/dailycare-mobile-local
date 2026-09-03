@@ -1,11 +1,25 @@
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { SessionProvider } from '@/state/session';
-import { color } from '@/theme/tokens';
+import { color, fontAssets } from '@/theme/tokens';
 
 export default function RootLayout() {
+  const [fontsReady] = useFonts(fontAssets);
+
+  // Rendering before the faces load shows a system fallback and then reflows every
+  // heading, which is worse than a moment of nothing.
+  if (!fontsReady) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={color.purple} />
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <SessionProvider>
@@ -13,10 +27,10 @@ export default function RootLayout() {
         <Stack
           screenOptions={{
             headerShadowVisible: false,
-            headerStyle: { backgroundColor: color.paper },
+            headerStyle: { backgroundColor: color.paperDeep },
             headerTintColor: color.ink,
             headerTitleStyle: { color: color.ink },
-            contentStyle: { backgroundColor: color.paper },
+            contentStyle: { backgroundColor: color.paperDeep },
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -27,3 +41,12 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.paperDeep,
+  },
+});

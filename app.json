@@ -17,7 +17,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundColor": "#FBF7F0"
+        "backgroundColor": "#FFFFFF"
       },
       "predictiveBackGestureEnabled": false,
       "package": "ai.inktree.dailycare",
@@ -44,16 +44,17 @@
         {
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 180,
-          "backgroundColor": "#FBF7F0",
+          "backgroundColor": "#FFFFFF",
           "resizeMode": "contain"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "backgroundColor": "#FBF7F0",
+    "backgroundColor": "#F5F5F7",
     "extra": {
       "router": {},
       "eas": {

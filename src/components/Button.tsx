@@ -10,6 +10,7 @@ interface ButtonProps {
   busy?: boolean;
 }
 
+/** The save action. Near-black and full width, the way the reference anchors a screen. */
 export function Button({
   label,
   onPress,
@@ -18,6 +19,7 @@ export function Button({
   busy = false,
 }: ButtonProps) {
   const inactive = disabled || busy;
+  const primary = variant === 'primary';
 
   return (
     <Pressable
@@ -28,15 +30,15 @@ export function Button({
       accessibilityLabel={label}
       style={({ pressed }) => [
         styles.base,
-        variant === 'primary' ? styles.primary : styles.secondary,
+        primary ? styles.primary : styles.secondary,
         inactive && styles.inactive,
         pressed && styles.pressed,
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={variant === 'primary' ? color.paper : color.ink} />
+        <ActivityIndicator color={primary ? color.paper : color.ink} />
       ) : (
-        <Text style={[styles.label, variant === 'primary' ? styles.labelPrimary : styles.labelSecondary]}>
+        <Text style={[styles.label, primary ? styles.labelPrimary : styles.labelSecondary]}>
           {label}
         </Text>
       )}
@@ -46,18 +48,17 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: control.height,
+    height: control.saveHeight,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.xl,
-    borderRadius: radius.pill,
-    borderWidth: 1,
+    borderRadius: control.saveHeight / 2,
   },
-  primary: { backgroundColor: color.clay, borderColor: color.clay },
-  secondary: { backgroundColor: color.surface, borderColor: color.lineStrong },
-  inactive: { opacity: 0.45 },
-  pressed: { opacity: 0.8 },
-  label: { ...type.body, fontWeight: '600' },
+  primary: { backgroundColor: color.ink },
+  secondary: { backgroundColor: color.surface, borderWidth: 1.5, borderColor: color.line },
+  inactive: { opacity: 0.4 },
+  pressed: { opacity: 0.85 },
+  label: { ...type.button },
   labelPrimary: { color: color.paper },
   labelSecondary: { color: color.ink },
 });

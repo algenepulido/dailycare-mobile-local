@@ -1,9 +1,11 @@
 export { Button } from './Button';
 export { Card } from './Card';
-export { ChoiceGroup } from './ChoiceGroup';
-export { DateStrip } from './DateStrip';
+export { CareCheck } from './CareCheck';
+export { Chip } from './Chip';
+export { ChipGroup } from './ChipGroup';
 export { Field } from './Field';
+export { MealRow } from './MealRow';
+export { ObservationRow } from './ObservationRow';
 export { PhotoTile } from './PhotoTile';
 export { Screen } from './Screen';
-export { SectionLabel } from './SectionLabel';
-export { ToggleRow } from './ToggleRow';
+export { SectionHeading } from './SectionHeading';

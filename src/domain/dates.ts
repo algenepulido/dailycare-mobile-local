@@ -26,6 +26,11 @@ export function today(): string {
   return toCareDate(new Date());
 }
 
+/** The one day back a caregiver reaches for most — catching up on last night. */
+export function yesterday(): string {
+  return backdateWindow(2)[1];
+}
+
 /**
  * The days a caregiver may file against, most recent first. The window matches the
  * prototype, so an entry can be caught up on but not invented weeks later.

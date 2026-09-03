@@ -40,21 +40,19 @@ export function Screen({ children, scroll = true, footer }: ScreenProps) {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: color.paper,
+    backgroundColor: color.paperDeep,
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: space.lg,
-    paddingTop: space.lg,
+    paddingHorizontal: space.xl,
+    paddingTop: space.md,
     paddingBottom: space.xxl,
-    gap: space.lg,
+    gap: space.sm,
   },
   footer: {
-    paddingHorizontal: space.lg,
+    paddingHorizontal: space.xl,
     paddingTop: space.md,
-    paddingBottom: space.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.lineStrong,
-    backgroundColor: color.paper,
+    paddingBottom: space.xl,
+    backgroundColor: color.paperDeep,
   },
 });
