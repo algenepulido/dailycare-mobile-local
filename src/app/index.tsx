@@ -1,24 +1,56 @@
-import { StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { Card, Screen, SectionLabel } from '@/components';
+import { relativeLabel, today } from '@/domain/dates';
+import { useSession } from '@/state/session';
 import { color, space, type } from '@/theme/tokens';
 
-export default function Home() {
-  return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.body}>
-        <Text style={styles.eyebrow}>Caregiver</Text>
-        <Text style={styles.title}>DailyCare</Text>
-        <Text style={styles.lede}>Setup and the daily check-in land here next.</Text>
+/**
+ * The caregiver's home. Sends anyone without a session to setup first, so no screen
+ * further in has to handle a missing resident.
+ */
+export default function HomeScreen() {
+  const { caregiver, resident, ready } = useSession();
+
+  if (!ready) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={color.clay} />
       </View>
-    </SafeAreaView>
+    );
+  }
+
+  if (!caregiver || !resident) {
+    return <Redirect href="/setup" />;
+  }
+
+  return (
+    <Screen>
+      <Text style={styles.eyebrow}>{relativeLabel(today())}</Text>
+      <Text style={styles.title}>{resident.displayName}</Text>
+
+      <Card>
+        <SectionLabel>Usually</SectionLabel>
+        <Text style={styles.body}>
+          {resident.baseline.mood} · {resident.baseline.appetite} · {resident.baseline.sleep}
+        </Text>
+      </Card>
+
+      <Card>
+        <SectionLabel>Logging as</SectionLabel>
+        <Text style={styles.body}>{caregiver.displayName}</Text>
+      </Card>
+
+      <Text style={styles.pending}>The daily check-in lands here next.</Text>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: color.paper },
-  body: { flex: 1, paddingHorizontal: space.xl, paddingTop: space.xxl, gap: space.sm },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.paper },
   eyebrow: { ...type.label, color: color.clay },
-  title: { ...type.display, color: color.ink },
-  lede: { ...type.body, color: color.inkSoft },
+  title: { ...type.display, color: color.ink, marginTop: -space.sm },
+  body: { ...type.body, color: color.inkMuted },
+  pending: { ...type.caption, color: color.inkFaint },
 });
