@@ -7,6 +7,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider } from '@/state/session';
 import { color, fontAssets } from '@/theme/tokens';
 
+/**
+ * One screen. The names sheet and the review sheet are sheets over it, not routes, so
+ * the report stays visible underneath and closing puts something down rather than
+ * navigating away.
+ */
 export default function RootLayout() {
   const [fontsReady] = useFonts(fontAssets);
 
@@ -24,18 +29,8 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <SessionProvider>
         <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShadowVisible: false,
-            headerStyle: { backgroundColor: color.paper },
-            headerTintColor: color.ink,
-            headerTitleStyle: { color: color.ink },
-            contentStyle: { backgroundColor: color.paper },
-          }}
-        >
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="setup" options={{ headerShown: false }} />
-          <Stack.Screen name="summary" options={{ title: 'Preview', presentation: 'modal' }} />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.paper } }}>
+          <Stack.Screen name="index" />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>
@@ -43,10 +38,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: color.paper,
-  },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.paper },
 });

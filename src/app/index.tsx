@@ -1,4 +1,3 @@
-import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -9,6 +8,8 @@ import {
   CareDateButton,
   ChipGroup,
   MealRow,
+  NamesSheet,
+  ReviewSheet,
   Field,
   ObservationRow,
   PhotoTile,
@@ -17,10 +18,13 @@ import {
 } from '@/components';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
+import { buildChanges, buildChecklist } from '@/domain/rules';
 import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS, SLEEP_CAN_ALERT } from '@/domain/rules';
-import type { Meal } from '@/domain/types';
-import { APPETITES, CONCERNS, MEALS, MOODS, SLEEPS } from '@/domain/types';
+import type { CheckIn, Meal } from '@/domain/types';
+import { APPETITES, CONCERNS, DEFAULT_BASELINE, MEALS, MOODS, SLEEPS } from '@/domain/types';
+import type { CheckInDraft } from '@/state/checkInForm';
 import { useCheckInForm } from '@/state/checkInForm';
+import { longLabel } from '@/domain/dates';
 import { useSession } from '@/state/session';
 import { color, radii, sizes, type } from '@/theme/tokens';
 
@@ -31,7 +35,8 @@ const MEAL_LABEL: Record<Meal, string> = {
 };
 
 export default function CareReportScreen() {
-  const { caregiver, resident, ready } = useSession();
+  const { caregiver, resident, ready, startSession } = useSession();
+  const [namesOpen, setNamesOpen] = useState(false);
 
   if (!ready) {
     return (
@@ -41,20 +46,40 @@ export default function CareReportScreen() {
     );
   }
 
+  // First run has no report to show behind the sheet, and no way to dismiss it either.
   if (!caregiver || !resident) {
-    return <Redirect href="/setup" />;
+    return (
+      <View style={styles.centered}>
+        <NamesSheet
+          open
+          caregiverName=""
+          residentName=""
+          dismissible={false}
+          onClose={() => {}}
+          onSave={(caregiverName, residentName) =>
+            void startSession({ caregiverName, residentName, baseline: DEFAULT_BASELINE })
+          }
+        />
+      </View>
+    );
   }
 
-  return <CareReport />;
+  return <CareReport namesOpen={namesOpen} setNamesOpen={setNamesOpen} />;
 }
 
 /**
  * Split out so the form hook only runs once a resident exists. Calling it above the
  * redirect would mean loading a day for a resident that is not there yet.
  */
-function CareReport() {
-  const router = useRouter();
-  const { caregiver, resident } = useSession();
+function CareReport({
+  namesOpen,
+  setNamesOpen,
+}: {
+  namesOpen: boolean;
+  setNamesOpen: (open: boolean) => void;
+}) {
+  const { caregiver, resident, renameSession } = useSession();
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
@@ -87,17 +112,17 @@ function CareReport() {
   }
 
   async function handleReview() {
-    const saved = await form.save();
-    if (saved) router.push({ pathname: '/summary', params: { checkInId: saved.id } });
+    await form.save();
+    setReviewOpen(true);
   }
 
-  const openNames = () => router.push('/setup');
+  const openNames = () => setNamesOpen(true);
 
   return (
     <Screen
       footer={
         <Button
-          label="Review summary"
+          label="Review & send"
           onPress={handleReview}
           busy={form.saving}
           disabled={form.loading}
@@ -242,6 +267,27 @@ function CareReport() {
           bare
         />
       </Card>
+      <NamesSheet
+        open={namesOpen}
+        caregiverName={caregiver.displayName}
+        residentName={resident.displayName}
+        onClose={() => setNamesOpen(false)}
+        onSave={(caregiverName, residentName) => {
+          void renameSession(caregiverName, residentName);
+          setNamesOpen(false);
+        }}
+      />
+
+      <ReviewSheet
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        clientName={resident.displayName}
+        dateLabel={longLabel(draft.careDate)}
+        changes={buildChanges(asCheckIn(draft), resident.baseline)}
+        checklist={buildChecklist(asCheckIn(draft))}
+        note={draft.note}
+        photoUri={draft.photoUri}
+      />
     </Screen>
   );
 }
@@ -297,6 +343,21 @@ function SupplementalMed({ value, onChange }: { value: string; onChange: (v: str
       />
     </View>
   );
+}
+
+/**
+ * The review sheet reads a finished entry, but the form holds a draft. This adapts one
+ * to the other so the preview is live rather than only correct after a save.
+ */
+function asCheckIn(draft: CheckInDraft): CheckIn {
+  return {
+    id: 'preview',
+    residentId: 'preview',
+    caregiverId: 'preview',
+    ...draft,
+    createdAt: '',
+    updatedAt: '',
+  };
 }
 
 function initials(name: string): string {

@@ -25,6 +25,8 @@ interface SessionValue {
     baseline: Baseline;
   }): Promise<void>;
   updateResident(resident: Resident): Promise<void>;
+  /** Correct who is logging and for whom, without losing what has been filed. */
+  renameSession(caregiverName: string, residentName: string): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -91,6 +93,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setResident(next);
   }, []);
 
+  const renameSession = useCallback<SessionValue['renameSession']>(
+    async (caregiverName, residentName) => {
+      if (caregiver) {
+        const next = { ...caregiver, displayName: caregiverName.trim() };
+        await repository.saveCaregiver(next);
+        setCaregiver(next);
+      }
+      if (resident) {
+        const next = { ...resident, displayName: residentName.trim() };
+        await repository.saveResident(next);
+        setResident(next);
+      }
+    },
+    [caregiver, resident],
+  );
+
   const clear = useCallback<SessionValue['clear']>(async () => {
     await repository.reset();
     setCaregiver(null);
@@ -98,8 +116,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<SessionValue>(
-    () => ({ caregiver, resident, ready, startSession, updateResident, clear }),
-    [caregiver, resident, ready, startSession, updateResident, clear],
+    () => ({ caregiver, resident, ready, startSession, updateResident, renameSession, clear }),
+    [caregiver, resident, ready, startSession, updateResident, renameSession, clear],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
