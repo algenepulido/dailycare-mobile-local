@@ -2,20 +2,16 @@ import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { color, space } from '@/theme/tokens';
+import { color, sizes } from "@/theme/tokens";
 
 interface ScreenProps {
   children: ReactNode;
-  /** Scrolls by default. Turn off for screens that must not move, such as a camera view. */
   scroll?: boolean;
-  /** Pinned to the bottom, outside the scrolling area. Use for a primary action. */
+  /** Pinned to the bottom, clear of the scrolling content. */
   footer?: ReactNode;
 }
 
-/**
- * Every screen starts here, so background, safe area and horizontal rhythm are decided
- * in one place rather than repeated per screen.
- */
+/** Paper surface, 22pt gutters, and enough bottom padding to clear the fixed action. */
 export function Screen({ children, scroll = true, footer }: ScreenProps) {
   const body = scroll ? (
     <ScrollView
@@ -38,21 +34,18 @@ export function Screen({ children, scroll = true, footer }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: color.paperDeep,
-  },
+  safe: { flex: 1, backgroundColor: color.paper },
   content: {
     flexGrow: 1,
-    paddingHorizontal: space.xl,
-    paddingTop: space.md,
-    paddingBottom: space.xxl,
-    gap: space.sm,
+    paddingHorizontal: sizes.screenPaddingH,
+    paddingTop: 14,
+    paddingBottom: sizes.scrollBottomPadding,
+    gap: sizes.cardGap,
   },
   footer: {
-    paddingHorizontal: space.xl,
-    paddingTop: space.md,
-    paddingBottom: space.xl,
-    backgroundColor: color.paperDeep,
+    paddingHorizontal: sizes.screenPaddingH,
+    paddingTop: 14,
+    paddingBottom: 30,
+    backgroundColor: color.paper,
   },
 });

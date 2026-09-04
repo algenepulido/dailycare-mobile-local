@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
-import { space } from '@/theme/tokens';
+import { sizes } from "@/theme/tokens";
 
 import { Chip } from './Chip';
 
@@ -35,5 +35,5 @@ export function ChipGroup<T extends string>({
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 });

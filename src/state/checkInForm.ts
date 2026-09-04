@@ -6,11 +6,13 @@
  * the caregiver sees; this file owns what a change means.
  */
 
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 
 import { newId, nowIso } from '@/data/ids';
 import { repository } from '@/data/repository';
 import { today } from '@/domain/dates';
+import { clearDraft, loadDraft, saveDraft } from './draft';
 import type {
   Appetite,
   Baseline,
@@ -163,6 +165,7 @@ export function useCheckInForm({
   const [existingId, setExistingId] = useState<ID | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const draftDayRef = useRef<string>(today());
 
   const loadDay = useCallback(
     async (careDate: string) => {
@@ -185,10 +188,44 @@ export function useCheckInForm({
     setFiledDates([...new Set(entries.map((entry) => entry.careDate))]);
   }, [residentId]);
 
+  /**
+   * Restore the in-progress draft before anything else, so a caregiver who reopens the
+   * app mid-shift finds their ticks where they left them. A stored day that is not today
+   * is discarded inside loadDraft.
+   */
   useEffect(() => {
-    void loadDay(today());
-    void refreshFiledDates();
+    let cancelled = false;
+    async function restore() {
+      const stored = await loadDraft();
+      if (cancelled) return;
+      if (stored) {
+        setExistingId(null);
+        dispatch({ type: 'replace', draft: stored });
+        setLoading(false);
+      } else {
+        await loadDay(today());
+      }
+      await refreshFiledDates();
+    }
+    void restore();
+    return () => {
+      cancelled = true;
+    };
   }, [loadDay, refreshFiledDates]);
+
+  // Native apps stay resident, so a form left open overnight has to be caught on return.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      if (draftDayRef.current !== today()) void loadDay(today());
+    });
+    return () => sub.remove();
+  }, [loadDay]);
+
+  useEffect(() => {
+    draftDayRef.current = draft.careDate;
+    if (!loading) saveDraft(draft);
+  }, [draft, loading]);
 
   const selectDate = useCallback(
     (careDate: string) => {
@@ -221,6 +258,7 @@ export function useCheckInForm({
         updatedAt: timestamp,
       };
       await repository.saveCheckIn(checkIn);
+      await clearDraft();
       setExistingId(checkIn.id);
       await refreshFiledDates();
       return checkIn;

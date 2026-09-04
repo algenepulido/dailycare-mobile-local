@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { color, radius, space, type } from '@/theme/tokens';
+import { color, radii, type } from "@/theme/tokens";
 
 interface CardProps {
   children: ReactNode;
@@ -9,7 +9,7 @@ interface CardProps {
   title?: string;
 }
 
-/** A white card with a hairline border. Flat — the reference carries no elevation. */
+/** White card on the paper surface, hairline border, radius 22. No elevation. */
 export function Card({ children, title }: CardProps) {
   return (
     <View style={styles.card}>
@@ -21,12 +21,12 @@ export function Card({ children, title }: CardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: color.surface,
-    borderRadius: radius.card,
+    backgroundColor: color.white,
+    borderRadius: radii.card,
     borderWidth: 1,
     borderColor: color.line,
-    paddingVertical: space.md,
-    paddingHorizontal: space.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
   },
-  title: { ...type.cardTitle, color: color.ink, marginBottom: space.xs },
+  title: { ...type.cardTitle, color: color.ink, marginBottom: 2 },
 });

@@ -1,6 +1,6 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 
-import { color, control, radius, space, type } from '@/theme/tokens';
+import { color, opacity, radii, sizes, type } from "@/theme/tokens";
 
 interface ButtonProps {
   label: string;
@@ -10,7 +10,7 @@ interface ButtonProps {
   busy?: boolean;
 }
 
-/** The save action. Near-black and full width, the way the reference anchors a screen. */
+/** Full-width ink pill, 56pt. The one action anchoring a screen or a sheet. */
 export function Button({
   label,
   onPress,
@@ -36,7 +36,7 @@ export function Button({
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={primary ? color.paper : color.ink} />
+        <ActivityIndicator color={primary ? color.white : color.ink} />
       ) : (
         <Text style={[styles.label, primary ? styles.labelPrimary : styles.labelSecondary]}>
           {label}
@@ -48,17 +48,17 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    height: control.saveHeight,
+    height: sizes.pillButtonHeight,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: space.xl,
-    borderRadius: control.saveHeight / 2,
+    paddingHorizontal: 22,
+    borderRadius: radii.pillButton,
   },
   primary: { backgroundColor: color.ink },
-  secondary: { backgroundColor: color.surface, borderWidth: 1.5, borderColor: color.line },
-  inactive: { opacity: 0.4 },
+  secondary: { backgroundColor: color.white, borderWidth: 1.5, borderColor: color.line },
+  inactive: { opacity: opacity.disabled },
   pressed: { opacity: 0.85 },
-  label: { ...type.button },
-  labelPrimary: { color: color.paper },
+  label: { ...type.buttonPrimary },
+  labelPrimary: { color: color.white },
   labelSecondary: { color: color.ink },
 });

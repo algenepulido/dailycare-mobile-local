@@ -89,7 +89,10 @@ export interface ChecklistGroup {
   label: string;
   done: number;
   total: number;
-  items: string[];
+  /** Items that happened. Meals carry how much was eaten. */
+  doneItems: string[];
+  /** Items that did not. Rendered as "Not done: …" in the summary. */
+  missedItems: string[];
   /** Free text appended to the medication group, when the caregiver entered any. */
   extra?: string;
 }
@@ -100,37 +103,68 @@ const MEAL_LABELS: Record<Meal, string> = {
   dinner: 'Dinner',
 };
 
-/** Anything other than 'none' counts as done. Partial is still a meal that happened. */
-export function mealCounts(meals: Record<Meal, MealState>): { done: number; items: string[] } {
+/**
+ * Anything other than 'none' counts as a meal that happened; how much was eaten rides
+ * along in brackets so the family reads "Lunch (partial)" rather than a bare count.
+ */
+export function mealCounts(meals: Record<Meal, MealState>): {
+  done: number;
+  items: string[];
+  missed: string[];
+} {
   const items: string[] = [];
+  const missed: string[] = [];
   for (const meal of MEALS) {
     const state = meals[meal];
-    if (state === 'none') continue;
-    items.push(state === 'partial' ? `${MEAL_LABELS[meal]} (partial)` : MEAL_LABELS[meal]);
+    if (state === 'none') {
+      missed.push(MEAL_LABELS[meal]);
+      continue;
+    }
+    items.push(`${MEAL_LABELS[meal]} (${state === 'partial' ? 'partial' : 'full'})`);
   }
-  return { done: items.length, items };
+  return { done: items.length, items, missed };
+}
+
+function split(pairs: [string, boolean][]): { done: string[]; missed: string[] } {
+  const done: string[] = [];
+  const missed: string[] = [];
+  for (const [label, ok] of pairs) (ok ? done : missed).push(label);
+  return { done, missed };
 }
 
 export function buildChecklist(checkIn: CheckIn): ChecklistGroup[] {
   const meals = mealCounts(checkIn.meals);
-
-  const medicationItems: string[] = [];
-  if (checkIn.medication.am) medicationItems.push('A.M');
-  if (checkIn.medication.pm) medicationItems.push('P.M');
-
-  const hygieneItems: string[] = [];
-  if (checkIn.hygiene.shower) hygieneItems.push('Shower');
-  if (checkIn.hygiene.grooming) hygieneItems.push('Grooming');
+  const meds = split([
+    ['A.M', checkIn.medication.am],
+    ['P.M', checkIn.medication.pm],
+  ]);
+  const hygiene = split([
+    ['Shower', checkIn.hygiene.shower],
+    ['Grooming', checkIn.hygiene.grooming],
+  ]);
 
   return [
-    { label: 'Meals', done: meals.done, total: MEALS.length, items: meals.items },
+    {
+      label: 'Meals',
+      done: meals.done,
+      total: MEALS.length,
+      doneItems: meals.items,
+      missedItems: meals.missed,
+    },
     {
       label: 'Medication',
-      done: medicationItems.length,
+      done: meds.done.length,
       total: 2,
-      items: medicationItems,
+      doneItems: meds.done,
+      missedItems: meds.missed,
       extra: checkIn.supplementalMedication.trim() || undefined,
     },
-    { label: 'Hygiene', done: hygieneItems.length, total: 2, items: hygieneItems },
+    {
+      label: 'Hygiene',
+      done: hygiene.done.length,
+      total: 2,
+      doneItems: hygiene.done,
+      missedItems: hygiene.missed,
+    },
   ];
 }

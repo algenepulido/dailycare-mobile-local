@@ -15,7 +15,7 @@ export default function RootLayout() {
   if (!fontsReady) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator color={color.purple} />
+        <ActivityIndicator color={color.clay} />
       </View>
     );
   }
@@ -27,10 +27,10 @@ export default function RootLayout() {
         <Stack
           screenOptions={{
             headerShadowVisible: false,
-            headerStyle: { backgroundColor: color.paperDeep },
+            headerStyle: { backgroundColor: color.paper },
             headerTintColor: color.ink,
             headerTitleStyle: { color: color.ink },
-            contentStyle: { backgroundColor: color.paperDeep },
+            contentStyle: { backgroundColor: color.paper },
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -47,6 +47,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.paperDeep,
+    backgroundColor: color.paper,
   },
 });

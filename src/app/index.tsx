@@ -6,35 +6,28 @@ import {
   Button,
   Card,
   CareCheck,
+  CareDateButton,
+  Chip,
   ChipGroup,
   Field,
-  MealRow,
   ObservationRow,
   PhotoTile,
   Screen,
   SectionHeading,
 } from '@/components';
-import { deletePhoto, pickPhoto } from '@/data/photos';
+import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
-import { longLabel, relativeLabel, today, yesterday } from '@/domain/dates';
 import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS, SLEEP_CAN_ALERT } from '@/domain/rules';
-import type { Meal, MealState } from '@/domain/types';
-import { APPETITES, CONCERNS, MEALS, MEAL_STATES, MOODS, SLEEPS } from '@/domain/types';
+import type { Meal } from '@/domain/types';
+import { APPETITES, CONCERNS, MEALS, MOODS, SLEEPS } from '@/domain/types';
 import { useCheckInForm } from '@/state/checkInForm';
 import { useSession } from '@/state/session';
-import { color, radius, space, type } from '@/theme/tokens';
+import { color, radii, sizes, type } from '@/theme/tokens';
 
 const MEAL_LABEL: Record<Meal, string> = {
   breakfast: 'Breakfast',
   lunch: 'Lunch',
   dinner: 'Dinner',
-};
-
-/** Short enough for three chips beside a meal name on a narrow phone. */
-const MEAL_STATE_LABEL: Record<MealState, string> = {
-  none: 'None',
-  partial: 'Some',
-  full: 'All',
 };
 
 export default function CareReportScreen() {
@@ -43,7 +36,7 @@ export default function CareReportScreen() {
   if (!ready) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={color.purple} />
+        <ActivityIndicator color={color.clay} />
       </View>
     );
   }
@@ -63,6 +56,7 @@ function CareReport() {
   const router = useRouter();
   const { caregiver, resident } = useSession();
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   // Guarded by the caller, but narrowing has to happen for the compiler too.
   if (!caregiver || !resident) return null;
@@ -73,13 +67,14 @@ function CareReport() {
     baseline: resident.baseline,
   });
   const { draft, dispatch } = form;
-  const onToday = draft.careDate === today();
 
   async function handlePickPhoto(source: PhotoSource) {
     setPhotoBusy(true);
+    setPhotoError(null);
     try {
-      const uri = await pickPhoto(source);
-      if (uri) dispatch({ type: 'setPhoto', uri });
+      const result = await pickPhoto(source);
+      if (result.uri) dispatch({ type: 'setPhoto', uri: result.uri });
+      if (result.failed) setPhotoError(PHOTO_READ_ERROR);
     } finally {
       setPhotoBusy(false);
     }
@@ -88,67 +83,93 @@ function CareReport() {
   function handleRemovePhoto() {
     if (draft.photoUri) deletePhoto(draft.photoUri);
     dispatch({ type: 'setPhoto', uri: null });
+    setPhotoError(null);
   }
 
-  async function handleSave() {
+  async function handleReview() {
     const saved = await form.save();
     if (saved) router.push({ pathname: '/summary', params: { checkInId: saved.id } });
   }
+
+  const openNames = () => router.push('/setup');
 
   return (
     <Screen
       footer={
         <Button
-          label={form.editingExisting ? 'Update daily care' : 'Save daily care'}
-          onPress={handleSave}
+          label="Review summary"
+          onPress={handleReview}
           busy={form.saving}
           disabled={form.loading}
         />
       }
     >
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarLetter}>{caregiver.displayName.charAt(0).toUpperCase()}</Text>
-        </View>
+        <Pressable
+          onPress={openNames}
+          accessibilityRole="button"
+          accessibilityLabel="Change who is logging"
+          style={({ pressed }) => [styles.avatarLarge, pressed && styles.pressed]}
+        >
+          <Text style={styles.avatarLargeText}>{initials(caregiver.displayName)}</Text>
+        </Pressable>
         <View style={styles.badge}>
           <Text style={styles.badgeText}>Caregiver</Text>
         </View>
+        <View style={styles.headerSpacer} />
       </View>
 
       <View>
         <Text style={styles.title}>Daily Care Information</Text>
-        <Text style={styles.subtitle}>Caregiver to family</Text>
+        <Text style={styles.subtitle}>From {caregiver.displayName}</Text>
       </View>
 
-      {/* Which resident, and which day. Today unless someone deliberately steps back. */}
-      <View style={styles.dayRow}>
-        <Text style={styles.residentName}>{resident.displayName}</Text>
-        <Text style={styles.dot}>·</Text>
-        <Text style={styles.dayLabel}>
-          {onToday ? longLabel(draft.careDate) : relativeLabel(draft.careDate)}
-        </Text>
+      <View style={styles.clientRow}>
         <Pressable
-          onPress={() => form.selectDate(onToday ? yesterday() : today())}
-          hitSlop={16}
+          onPress={openNames}
           accessibilityRole="button"
-          accessibilityLabel={onToday ? 'Log yesterday instead' : 'Back to today'}
-          style={({ pressed }) => [styles.dayAction, pressed && styles.pressed]}
+          accessibilityLabel={`Logging for ${resident.displayName}. Tap to change.`}
+          style={({ pressed }) => [styles.clientButton, pressed && styles.pressed]}
         >
-          <Text style={styles.dayActionText}>{onToday ? 'Yesterday' : 'Today'}</Text>
+          <View style={styles.avatarSmall}>
+            <Text style={styles.avatarSmallText}>{initials(resident.displayName)}</Text>
+          </View>
+          <Text style={styles.clientName}>{resident.displayName}</Text>
         </Pressable>
+        <Text style={styles.separator}>·</Text>
+        <CareDateButton careDate={draft.careDate} onChange={form.selectDate} />
       </View>
 
       <Card title="Meals">
-        {MEALS.map((meal) => (
-          <MealRow
-            key={meal}
-            label={MEAL_LABEL[meal]}
-            options={MEAL_STATES}
-            value={draft.meals[meal]}
-            onChange={(state) => dispatch({ type: 'setMeal', meal, state })}
-            formatLabel={(state) => MEAL_STATE_LABEL[state]}
-          />
-        ))}
+        {MEALS.map((meal) => {
+          const state = draft.meals[meal];
+          return (
+            <CareCheck
+              key={meal}
+              label={MEAL_LABEL[meal]}
+              checked={state !== 'none'}
+              onChange={(checked) =>
+                dispatch({ type: 'setMeal', meal, state: checked ? 'full' : 'none' })
+              }
+              // Asked only once the meal happened, so a normal day is three taps and no
+              // decisions. How much they ate is a follow-up, not a front-loaded choice.
+              detail={
+                <>
+                  <Chip
+                    label="All"
+                    selected={state === 'full'}
+                    onPress={() => dispatch({ type: 'setMeal', meal, state: 'full' })}
+                  />
+                  <Chip
+                    label="Partial"
+                    selected={state === 'partial'}
+                    onPress={() => dispatch({ type: 'setMeal', meal, state: 'partial' })}
+                  />
+                </>
+              }
+            />
+          );
+        })}
       </Card>
 
       <Card title="Medication">
@@ -181,10 +202,12 @@ function CareReport() {
         />
       </Card>
 
-      <SectionHeading
-        title="Anything different today?"
-        hint="Most days stay the same. Just tap what changed."
-      />
+      <View style={styles.sectionGap}>
+        <SectionHeading
+          title="Anything different today?"
+          hint="Most days stay the same. Just tap what changed."
+        />
+      </View>
       <Card>
         <ObservationRow
           label="Mood"
@@ -225,14 +248,15 @@ function CareReport() {
         onChoose={() => handlePickPhoto('library')}
         onRemove={handleRemovePhoto}
         busy={photoBusy}
+        error={photoError}
       />
 
-      <Card title="Note for the family">
+      <Card title="Note">
         <Field
           value={draft.note}
           onChangeText={(value) => dispatch({ type: 'setNote', value })}
           placeholder="Add anything worth mentioning…"
-          accessibilityLabel="Note for the family"
+          accessibilityLabel="Note"
           multiline
           bare
         />
@@ -247,13 +271,7 @@ function CareReport() {
  * Most days there isn't one, and an always-open field reads as something left blank
  * rather than something that didn't happen.
  */
-function SupplementalMed({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
+function SupplementalMed({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(value.length > 0);
 
   if (!open) {
@@ -300,58 +318,61 @@ function SupplementalMed({
   );
 }
 
+function initials(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || '?';
+}
+
 const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: color.paperDeep,
-  },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.paper },
+  pressed: { opacity: 0.7 },
 
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
+  avatarLarge: {
+    width: sizes.avatarLarge,
+    height: sizes.avatarLarge,
+    borderRadius: radii.chip,
     backgroundColor: color.honeySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarLetter: { ...type.button, color: color.clay },
+  avatarLargeText: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 16, color: color.ink2 },
+  headerSpacer: { width: sizes.avatarLarge },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: space.md,
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: radius.pill,
+    borderRadius: radii.chip,
     backgroundColor: color.claySoft,
   },
-  badgeText: { ...type.marker, color: color.clay, letterSpacing: 1 },
+  badgeText: { ...type.badge, color: color.clay },
 
-  title: { ...type.display, color: color.ink },
-  subtitle: { ...type.bodySmall, color: color.inkSoft, marginTop: space.xs },
+  title: { ...type.screenTitle, color: color.ink },
+  subtitle: { fontFamily: type.meta.fontFamily, fontSize: 14, color: color.ink3, marginTop: 4 },
 
-  dayRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  residentName: { ...type.body, fontFamily: type.fieldLabel.fontFamily, color: color.ink },
-  dot: { ...type.body, color: color.inkFaint },
-  dayLabel: { ...type.bodySmall, color: color.inkSoft, flex: 1 },
-  dayAction: {
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: color.purpleSoft,
+  clientRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
+  clientButton: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatarSmall: {
+    width: sizes.avatarSmall,
+    height: sizes.avatarSmall,
+    borderRadius: radii.chip,
+    backgroundColor: color.claySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  dayActionText: { ...type.caption, color: color.purpleDeep },
-  pressed: { opacity: 0.7 },
+  avatarSmallText: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 11, color: color.ink2 },
+  clientName: { fontFamily: type.chip.fontFamily, fontSize: 15, color: color.ink },
+  separator: { color: color.ink4 },
 
-  flagLabel: { ...type.fieldLabel, color: color.inkMuted, marginBottom: 10 },
+  sectionGap: { marginTop: 14 },
+  flagLabel: { ...type.fieldLabel, marginTop: 4, marginBottom: 10 },
 
   suppTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
+    gap: 8,
     marginTop: 10,
-    paddingTop: space.md,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: color.line,
   },
@@ -361,16 +382,16 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: color.lineStrong,
+    borderColor: color.line2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  suppPlusMark: { ...type.caption, color: color.inkSoft, lineHeight: 16 },
-  suppTriggerText: { ...type.body, color: color.inkSoft },
-  suppOptional: { color: color.inkFaint },
+  suppPlusMark: { fontFamily: type.meta.fontFamily, fontSize: 13, color: color.ink3, lineHeight: 16 },
+  suppTriggerText: { ...type.body, color: color.ink3 },
+  suppOptional: { color: color.ink4 },
 
-  suppOpen: { marginTop: 10, paddingTop: space.md, borderTopWidth: 1, borderTopColor: color.line, gap: space.sm },
+  suppOpen: { marginTop: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: color.line, gap: 8 },
   suppHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  suppLabel: { ...type.fieldLabel, color: color.inkMuted },
-  suppRemove: { ...type.caption, color: color.inkSoft },
+  suppLabel: { ...type.fieldLabel },
+  suppRemove: { ...type.meta },
 });

@@ -27,6 +27,16 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
 
 export type PhotoSource = 'camera' | 'library';
 
+export interface PickResult {
+  uri: string | null;
+  /** True when a file was chosen but could not be read. */
+  failed: boolean;
+}
+
+/** Exact copy from product-spec § 3.6. */
+export const PHOTO_READ_ERROR =
+  'Couldn\u2019t read that photo. Try a different one, or take a screenshot of it and attach the screenshot.';
+
 const SOURCE_LABEL: Record<PhotoSource, string> = {
   camera: 'the camera',
   library: 'your photos',
@@ -92,9 +102,9 @@ async function ensurePermission(source: PhotoSource): Promise<boolean> {
   return false;
 }
 
-/** Returns the stored URI, or null when the caregiver cancelled or declined access. */
-export async function pickPhoto(source: PhotoSource): Promise<string | null> {
-  if (!(await ensurePermission(source))) return null;
+/** Null URI means cancelled or refused; `failed` means a file was picked but unreadable. */
+export async function pickPhoto(source: PhotoSource): Promise<PickResult> {
+  if (!(await ensurePermission(source))) return { uri: null, failed: false };
 
   try {
     const result =
@@ -102,9 +112,9 @@ export async function pickPhoto(source: PhotoSource): Promise<string | null> {
         ? await ImagePicker.launchCameraAsync(PICKER_OPTIONS)
         : await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
 
-    if (result.canceled || result.assets.length === 0) return null;
+    if (result.canceled || result.assets.length === 0) return { uri: null, failed: false };
 
-    return persist(result.assets[0].uri);
+    return { uri: persist(result.assets[0].uri), failed: false };
   } catch {
     // A device with no camera, or a picker the system refused to open. Saying so beats
     // a button that looks broken.
@@ -114,7 +124,7 @@ export async function pickPhoto(source: PhotoSource): Promise<string | null> {
         ? 'This device may not have a camera available. A photo can still be chosen from the gallery.'
         : 'The gallery could not be opened on this device.',
     );
-    return null;
+    return { uri: null, failed: true };
   }
 }
 

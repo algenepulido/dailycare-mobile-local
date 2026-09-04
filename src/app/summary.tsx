@@ -3,21 +3,20 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { Button, Card, Screen } from '@/components';
+import { Button, Screen } from '@/components';
 import { repository } from '@/data/repository';
 import { longLabel } from '@/domain/dates';
 import { buildChanges, buildChecklist } from '@/domain/rules';
 import type { Change, ChecklistGroup } from '@/domain/rules';
 import type { CheckIn } from '@/domain/types';
 import { useSession } from '@/state/session';
-import { color, radius, space, type } from '@/theme/tokens';
+import { color, radii, sizes, type } from '@/theme/tokens';
 
 /**
  * What the family would receive, built from the entry that was just filed.
  *
- * Content matches the daily email — what changed, the care checklist, the note and the
- * photo. It is not a copy of that email's layout: the visual direction is decided after
- * this build is in Trevor's hands.
+ * Sections and their order follow product-spec § 7.1 — what changed, the care checklist,
+ * the note, then the photo. Nothing is sent in this milestone; this is the preview.
  */
 export default function SummaryScreen() {
   const router = useRouter();
@@ -41,14 +40,11 @@ export default function SummaryScreen() {
   }, [checkInId]);
 
   /**
-   * Pop back to the check-in rather than pushing a second copy of it.
-   *
-   * router.replace here left the original check-in screen mounted underneath and put a
-   * fresh one on top, so every entry a caregiver filed added another dead screen still
-   * holding its own form state. Falls back to replace only when there is nothing to pop,
-   * which is the case if someone opens this route directly.
+   * Pop back to the report rather than pushing a second copy of it. Falls back to
+   * replace only when there is nothing to pop, which is the case if someone opens this
+   * route directly.
    */
-  const backToCheckIn = () => {
+  const close = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/');
   };
@@ -56,16 +52,16 @@ export default function SummaryScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={color.purple} />
+        <ActivityIndicator color={color.clay} />
       </View>
     );
   }
 
   if (!checkIn || !resident || !caregiver) {
     return (
-      <Screen footer={<Button label="Back to the check-in" onPress={backToCheckIn} />}>
+      <Screen footer={<Button label="Back to the report" onPress={close} />}>
         <Text style={styles.title}>Nothing to show</Text>
-        <Text style={styles.lede}>That entry is no longer on this device.</Text>
+        <Text style={styles.subtitle}>That entry is no longer on this device.</Text>
       </Screen>
     );
   }
@@ -74,38 +70,47 @@ export default function SummaryScreen() {
   const checklist = buildChecklist(checkIn);
 
   return (
-    <Screen footer={<Button label="Back to the check-in" onPress={backToCheckIn} />}>
-      <Text style={styles.eyebrow}>Daily care summary</Text>
-      <Text style={styles.title}>{resident.displayName}</Text>
-      <Text style={styles.lede}>
-        {longLabel(checkIn.careDate)} · from {caregiver.displayName}
+    <Screen footer={<Button label="Back to the report" onPress={close} />}>
+      <Text style={styles.title}>Daily care summary</Text>
+      <Text style={styles.subtitle}>
+        {longLabel(checkIn.careDate)} · {resident.displayName}
       </Text>
 
-      <Card title="What changed today">
-        {changes.length === 0 ? (
-          <Text style={styles.quiet}>A day like their usual. Nothing stood out.</Text>
-        ) : (
-          changes.map((change) => <ChangeRow key={`${change.kind}-${change.value}`} change={change} />)
-        )}
-      </Card>
+      <Text style={styles.sectionLabel}>What changed today</Text>
+      {changes.length === 0 ? (
+        <View style={styles.steady}>
+          <Text style={styles.steadyText}>A steady day — everything as usual.</Text>
+        </View>
+      ) : (
+        changes.map((change) => (
+          <ChangeRow key={`${change.kind}-${change.value}`} change={change} />
+        ))
+      )}
 
-      <Card title="Care checklist">
-        {checklist.map((group) => (
-          <ChecklistRow key={group.label} group={group} />
-        ))}
-      </Card>
+      <Text style={styles.sectionLabel}>Care checklist</Text>
+      {checklist.map((group) => (
+        <ChecklistCard key={group.label} group={group} />
+      ))}
 
       {checkIn.note ? (
-        <Card title={`Note from ${caregiver.displayName}`}>
-          <Text style={styles.note}>{checkIn.note}</Text>
-        </Card>
+        <>
+          <Text style={styles.sectionLabel}>Note</Text>
+          <View style={styles.card}>
+            <Text style={styles.note}>{checkIn.note}</Text>
+          </View>
+        </>
       ) : null}
 
       {checkIn.photoUri ? (
-        <Card title="Photo from today">
-          <Image source={{ uri: checkIn.photoUri }} style={styles.photo} contentFit="cover" />
-        </Card>
-      ) : null}
+        <View style={styles.photoRow}>
+          <Image source={{ uri: checkIn.photoUri }} style={styles.thumb} contentFit="cover" />
+          <View style={styles.photoPill}>
+            <Text style={styles.photoPillText}>Photo attached</Text>
+          </View>
+        </View>
+      ) : (
+        <Text style={styles.noPhoto}>No photo attached</Text>
+      )}
 
       <Text style={styles.footnote}>
         Preview only. Nothing is sent, and every resident here is made up.
@@ -115,28 +120,40 @@ export default function SummaryScreen() {
 }
 
 function ChangeRow({ change }: { change: Change }) {
+  const tone = change.alert ? color.flag : color.warn;
   return (
-    <View style={[styles.changeRow, change.alert && styles.changeRowAlert]}>
-      <View style={[styles.dot, change.alert ? styles.dotAlert : styles.dotNotice]} />
+    <View style={[styles.changeRow, { borderColor: tone }]}>
+      <View style={[styles.dot, { backgroundColor: tone }]} />
       <Text style={styles.changeText}>
         <Text style={styles.changeKind}>{change.kind}: </Text>
         {change.value}
-        {change.baselineNote ? <Text style={styles.changeNote}> · {change.baselineNote}</Text> : null}
+        {change.baselineNote ? (
+          <Text style={styles.changeNote}> · {change.baselineNote}</Text>
+        ) : null}
       </Text>
     </View>
   );
 }
 
-function ChecklistRow({ group }: { group: ChecklistGroup }) {
-  const summary = group.items.length > 0 ? group.items.join(', ') : 'Nothing recorded';
+function ChecklistCard({ group }: { group: ChecklistGroup }) {
+  const missed = group.missedItems.length > 0;
   return (
-    <View style={styles.checklistRow}>
+    <View style={styles.card}>
       <View style={styles.checklistHead}>
         <Text style={styles.checklistLabel}>{group.label}</Text>
-        <Text style={styles.checklistCount}>{`${group.done}/${group.total} done`}</Text>
+        <Text style={[styles.checklistCount, { color: missed ? color.flag : color.sage }]}>
+          {group.done}/{group.total} done
+        </Text>
       </View>
-      <Text style={styles.checklistItems}>{summary}</Text>
-      {group.extra ? <Text style={styles.checklistExtra}>{`Also: ${group.extra}`}</Text> : null}
+      {group.doneItems.length > 0 ? (
+        <Text style={styles.checklistLine}>Done: {group.doneItems.join(', ')}</Text>
+      ) : null}
+      {missed ? (
+        <Text style={[styles.checklistLine, styles.missedLine]}>
+          Not done: {group.missedItems.join(', ')}
+        </Text>
+      ) : null}
+      {group.extra ? <Text style={styles.checklistLine}>Supplemental: {group.extra}</Text> : null}
     </View>
   );
 }
@@ -146,40 +163,68 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.paperDeep,
+    backgroundColor: color.paper,
   },
-  eyebrow: { ...type.marker, color: color.purple, letterSpacing: 1 },
-  title: { ...type.display, color: color.ink, marginTop: -space.sm },
-  lede: { ...type.bodySmall, color: color.inkSoft, marginTop: -space.sm },
-  quiet: { ...type.body, color: color.inkSoft },
+
+  title: { ...type.sheetTitle, color: color.ink },
+  subtitle: { ...type.meta, marginBottom: 6 },
+  sectionLabel: { ...type.sectionLabel, marginTop: 16, marginBottom: 2 },
+
+  steady: {
+    backgroundColor: color.sageSoft,
+    borderRadius: radii.innerCard,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  steadyText: { ...type.chip, color: color.ink2 },
 
   changeRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: space.sm,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: color.warnSoft,
-    backgroundColor: color.warnSoft,
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: radii.innerCard,
+    borderWidth: 1.5,
+    backgroundColor: color.white,
   },
-  changeRowAlert: { borderColor: color.alert, backgroundColor: color.alertSoft },
-  dot: { width: 7, height: 7, borderRadius: radius.pill, marginTop: 7 },
-  dotNotice: { backgroundColor: color.warn },
-  dotAlert: { backgroundColor: color.alert },
-  changeText: { ...type.bodySmall, color: color.ink, flexShrink: 1 },
-  changeKind: { fontWeight: '700' },
-  changeNote: { color: color.inkSoft },
+  dot: { width: 9, height: 9, borderRadius: radii.chip, marginTop: 6 },
+  changeText: { ...type.body, color: color.ink, flexShrink: 1 },
+  changeKind: { fontFamily: type.chip.fontFamily },
+  changeNote: { color: color.ink3 },
 
-  checklistRow: { gap: space.xs },
+  card: {
+    backgroundColor: color.white,
+    borderRadius: radii.innerCard,
+    borderWidth: 1.5,
+    borderColor: color.line,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 3,
+  },
   checklistHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  checklistLabel: { ...type.body, fontFamily: type.fieldLabel.fontFamily, color: color.ink },
-  checklistCount: { ...type.caption, color: color.inkFaint },
-  checklistItems: { ...type.bodySmall, color: color.inkMuted },
-  checklistExtra: { ...type.caption, color: color.inkSoft },
+  checklistLabel: { ...type.chip, color: color.ink },
+  checklistCount: { ...type.meta },
+  checklistLine: { ...type.meta, color: color.ink2 },
+  missedLine: { color: color.flag },
 
-  note: { ...type.body, color: color.inkMuted },
-  photo: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, backgroundColor: color.paperDeep },
-  footnote: { ...type.caption, color: color.inkFaint },
+  note: { fontFamily: type.meta.fontFamily, fontSize: 14, color: color.ink2 },
+
+  photoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  thumb: {
+    width: sizes.photoButtonHeightAttached,
+    height: sizes.photoButtonHeightAttached,
+    borderRadius: radii.photoThumb,
+    backgroundColor: color.paper2,
+  },
+  photoPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.chip,
+    backgroundColor: color.sageSoft,
+  },
+  photoPillText: { ...type.meta, color: color.ink2 },
+  noPhoto: { ...type.meta, marginTop: 4 },
+
+  footnote: { ...type.meta, color: color.ink4, marginTop: 12 },
 });

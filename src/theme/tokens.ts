@@ -1,131 +1,170 @@
 /**
- * Design tokens for DailyCare+.
+ * DailyCare design tokens.
  *
- * These are InkTree's real tokens, taken from the Daily Care package stylesheet — purple
- * primary on white surfaces with near-black text, not the cream and terracotta the older
- * caregiver web page used.
+ * These are the values from the handoff package's tokens.ts, which were extracted from
+ * the live caregiver web app. Warm paper and ink, not the purple-on-white the earlier
+ * handoff described — that design no longer exists.
  *
- * Everything visual reads from this file. Changing the look later is editing values here,
- * not touching screens.
+ * Everything visual reads from this file, so the polish pass against design-system.md is
+ * an adjustment of values rather than a rewrite of screens.
  */
+
+import {
+  NanumMyeongjo_400Regular,
+  NanumMyeongjo_700Bold,
+  NanumMyeongjo_800ExtraBold,
+} from '@expo-google-fonts/nanum-myeongjo';
+import {
+  RethinkSans_400Regular,
+  RethinkSans_500Medium,
+  RethinkSans_600SemiBold,
+  RethinkSans_700Bold,
+  RethinkSans_800ExtraBold,
+} from '@expo-google-fonts/rethink-sans';
 
 export const color = {
-  // Grounds
-  paper: '#FFFFFF',
-  paperDeep: '#F5F5F7',
-  surface: '#FFFFFF',
+  ink: '#1A1410',
+  ink2: '#3A3128',
+  ink3: '#6B5F52',
+  ink4: '#9A8E7F',
+  paper: '#FBF7F0',
+  paper2: '#F1E8DA',
+  frame: '#E7DBC9',
+  white: '#FFFFFF',
 
-  // Text, darkest to lightest
-  ink: '#0C0C0C',
-  inkMuted: '#333333',
-  inkSoft: '#6E6E6E',
-  inkFaint: '#9A9AA2',
+  /** Exactly one use: the "Add contact" link in the review sheet. */
+  purple: '#8B47E8',
+  clay: '#C8784F',
+  claySoft: '#F2DBCB',
+  flag: '#E02718',
+  flagSoft: '#FBDAD5',
+  warn: '#E0A100',
+  warnSoft: '#F8E9BE',
+  sage: '#87A07C',
+  sageSoft: '#E0E9D9',
+  honeySoft: '#F6E6C4',
+  roseSoft: '#F2DCDE',
 
-  // Hairlines
-  line: 'rgba(12, 12, 14, 0.09)',
-  lineStrong: 'rgba(12, 12, 14, 0.16)',
-
-  // Brand
-  purple: '#923CF6',
-  purpleDeep: '#7A2FF0',
-  purpleSoft: '#F1E9FE',
-  peach: '#F3ECFD',
-  peachDeep: '#E7D8FA',
-
-  // Accents
-  clay: '#FF9933',
-  claySoft: '#FFE7CC',
-  honey: '#FFB84D',
-  honeySoft: '#FFEBCC',
-  rose: '#EC407A',
-  roseSoft: '#FBDCE8',
-  sky: '#5368EE',
-  skySoft: '#E1E5FB',
-
-  // Status. Separate from the brand on purpose.
-  sage: '#4FB85E',
-  sageSoft: '#E2F5E4',
-  warn: '#E8952B',
-  warnSoft: '#FFEBCF',
-  alert: '#F0483F',
-  alertSoft: '#FFE0DE',
+  line: 'rgba(26,20,16,0.09)',
+  line2: 'rgba(26,20,16,0.16)',
+  scrim: 'rgba(26,20,16,0.4)',
 } as const;
 
-/**
- * Headings are set in the serif, everything else in the sans, matching the reference.
- * The serif is subset to Latin — the full face carries a Korean glyph set this app has
- * no use for, and it costs nine megabytes.
- */
 export const fontFamily = {
-  serif: 'NanumMyeongjo-Bold',
-  sans: 'RethinkSans-Regular',
-  sansMedium: 'RethinkSans-Medium',
-  sansBold: 'RethinkSans-ExtraBold',
+  serif: {
+    regular: 'NanumMyeongjo_400Regular',
+    bold: 'NanumMyeongjo_700Bold',
+    extraBold: 'NanumMyeongjo_800ExtraBold',
+  },
+  sans: {
+    regular: 'RethinkSans_400Regular',
+    medium: 'RethinkSans_500Medium',
+    semiBold: 'RethinkSans_600SemiBold',
+    bold: 'RethinkSans_700Bold',
+    extraBold: 'RethinkSans_800ExtraBold',
+  },
 } as const;
 
-/** Loaded once at startup. Keys must match the names above. */
+/** Bundled into the binary, so nothing is fetched at runtime. */
 export const fontAssets = {
-  'NanumMyeongjo-Bold': require('../../assets/fonts/NanumMyeongjo-Bold.ttf'),
-  'RethinkSans-Regular': require('../../assets/fonts/RethinkSans-Regular.ttf'),
-  'RethinkSans-Medium': require('../../assets/fonts/RethinkSans-Medium.ttf'),
-  'RethinkSans-ExtraBold': require('../../assets/fonts/RethinkSans-ExtraBold.ttf'),
+  NanumMyeongjo_400Regular,
+  NanumMyeongjo_700Bold,
+  NanumMyeongjo_800ExtraBold,
+  RethinkSans_400Regular,
+  RethinkSans_500Medium,
+  RethinkSans_600SemiBold,
+  RethinkSans_700Bold,
+  RethinkSans_800ExtraBold,
 } as const;
 
 export const type = {
-  /** Screen title. "Daily Care Information" in the reference. */
-  display: { fontFamily: fontFamily.serif, fontSize: 30, lineHeight: 33, letterSpacing: -0.6 },
-  /** Section heading above a card. "Anything different today?" */
-  section: { fontFamily: fontFamily.serif, fontSize: 22, lineHeight: 27, letterSpacing: -0.2 },
-  /** Card heading. "Meals", "Medication", "Note for Admin". */
-  cardTitle: { fontFamily: fontFamily.serif, fontSize: 20, lineHeight: 25 },
-
-  body: { fontFamily: fontFamily.sans, fontSize: 15, lineHeight: 21 },
-  /** Checklist rows sit larger than body — they are the thing being tapped. */
-  bodyLarge: { fontFamily: fontFamily.sans, fontSize: 18, lineHeight: 24 },
-  bodySmall: { fontFamily: fontFamily.sans, fontSize: 14, lineHeight: 20 },
-  caption: { fontFamily: fontFamily.sans, fontSize: 13, lineHeight: 18 },
-  /** Field labels beside an observation row. */
-  fieldLabel: { fontFamily: fontFamily.sansMedium, fontSize: 13, lineHeight: 17 },
-  /** The "CHANGED" marker and the caregiver badge. */
-  marker: {
-    fontFamily: fontFamily.sansBold,
+  screenTitle: { fontFamily: fontFamily.serif.bold, fontSize: 30, lineHeight: 32, letterSpacing: -0.6 },
+  sectionHeading: { fontFamily: fontFamily.serif.bold, fontSize: 22, letterSpacing: -0.22 },
+  cardTitle: { fontFamily: fontFamily.serif.bold, fontSize: 20 },
+  sheetTitle: { fontFamily: fontFamily.serif.bold, fontSize: 22 },
+  checklistItem: { fontFamily: fontFamily.sans.regular, fontSize: 18 },
+  body: { fontFamily: fontFamily.sans.regular, fontSize: 15 },
+  input: { fontFamily: fontFamily.sans.regular, fontSize: 16 },
+  buttonPrimary: { fontFamily: fontFamily.sans.bold, fontSize: 16 },
+  chip: { fontFamily: fontFamily.sans.semiBold, fontSize: 14 },
+  fieldLabel: { fontFamily: fontFamily.sans.semiBold, fontSize: 13, color: color.ink2 },
+  meta: { fontFamily: fontFamily.sans.regular, fontSize: 13, color: color.ink3 },
+  sectionLabel: {
+    fontFamily: fontFamily.sans.bold,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase' as const,
+    color: color.ink3,
+  },
+  changedTag: {
+    fontFamily: fontFamily.sans.bold,
     fontSize: 10,
-    lineHeight: 13,
     letterSpacing: 0.5,
     textTransform: 'uppercase' as const,
+    color: color.warn,
   },
-  chip: { fontFamily: fontFamily.sansMedium, fontSize: 14, lineHeight: 18 },
-  button: { fontFamily: fontFamily.sansBold, fontSize: 16, lineHeight: 20 },
+  badge: {
+    fontFamily: fontFamily.sans.bold,
+    fontSize: 11,
+    letterSpacing: 1,
+    textTransform: 'uppercase' as const,
+  },
 } as const;
 
-/** 4pt scale. Use these rather than raw numbers. */
-export const space = {
-  xs: 4,
-  sm: 8,
-  md: 12,
-  lg: 16,
-  xl: 22,
-  xxl: 32,
-  xxxl: 48,
-} as const;
-
-/** Cards in the reference are generously rounded — 22, and 999 for chips. */
-export const radius = {
-  sm: 9,
-  md: 12,
-  lg: 16,
+export const radii = {
   card: 22,
-  pill: 999,
+  innerCard: 14,
+  contactRow: 16,
+  pillButton: 28,
+  smallButton: 22,
+  chip: 999,
+  checkbox: 9,
+  selectionCircle: 12,
+  sheetInput: 14,
+  inlineInput: 12,
+  sheetTop: 30,
+  photoButton: 16,
+  photoThumb: 10,
 } as const;
 
-/** Minimum 44pt for anything a thumb has to hit. */
-export const control = {
-  height: 48,
+export const sizes = {
+  screenPaddingH: 22,
+  cardGap: 8,
+  sectionGap: 22,
+  scrollBottomPadding: 130,
+  pillButtonHeight: 56,
+  smallButtonHeight: 44,
   chipHeight: 40,
   checkbox: 28,
-  saveHeight: 56,
-  hitSlop: { top: 8, bottom: 8, left: 8, right: 8 },
+  selectionCircle: 24,
+  sheetInputHeight: 52,
+  inlineInputHeight: 46,
+  avatarLarge: 44,
+  avatarMedium: 40,
+  avatarSmall: 30,
+  grabHandle: { width: 40, height: 4 },
+  photoButtonHeight: 52,
+  photoButtonHeightAttached: 64,
+  minTouchTarget: 44,
 } as const;
 
-export const theme = { color, fontFamily, fontAssets, type, space, radius, control } as const;
+export const motion = {
+  sheet: { durationMs: 340, easing: [0.32, 0.72, 0, 1] as const },
+  spinner: { durationMs: 700 },
+} as const;
+
+export const opacity = { disabled: 0.4 } as const;
+
+export const app = {
+  displayName: 'DailyCare',
+  /** Same keys as the web app, so the shapes stay recognisable across the two. */
+  storeKey: 'inktree_caregiver_v1',
+  draftKey: 'inktree_caregiver_draft_v1',
+  backdateLimitDays: 14,
+  /** For the send milestone. Milestone 1 keeps photos at full resolution. */
+  photoMaxEdgePx: 1280,
+  photoJpegQuality: 0.82,
+} as const;
+
+export const theme = { color, fontFamily, fontAssets, type, radii, sizes, motion, opacity, app } as const;
 export default theme;

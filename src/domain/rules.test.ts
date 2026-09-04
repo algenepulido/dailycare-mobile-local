@@ -65,10 +65,11 @@ describe('what the family is told', () => {
 });
 
 describe('the care checklist', () => {
-  it('counts a partial meal as eaten and says which one it was', () => {
+  it('counts a partial meal as eaten and says how much of each was', () => {
     expect(mealCounts({ breakfast: 'full', lunch: 'partial', dinner: 'none' })).toEqual({
       done: 2,
-      items: ['Breakfast', 'Lunch (partial)'],
+      items: ['Breakfast (full)', 'Lunch (partial)'],
+      missed: ['Dinner'],
     });
   });
 
@@ -77,6 +78,15 @@ describe('the care checklist', () => {
       ['Meals', 2, 3],
       ['Medication', 1, 2],
       ['Hygiene', 1, 2],
+    ]);
+  });
+
+  it('lists what was not done alongside what was', () => {
+    const groups = buildChecklist(entry());
+    expect(groups.map((group) => [group.label, group.doneItems, group.missedItems])).toEqual([
+      ['Meals', ['Breakfast (full)', 'Lunch (partial)'], ['Dinner']],
+      ['Medication', ['A.M'], ['P.M']],
+      ['Hygiene', ['Shower'], ['Grooming']],
     ]);
   });
 

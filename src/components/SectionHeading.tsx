@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { color, space, type } from '@/theme/tokens';
+import { color, type } from "@/theme/tokens";
 
 interface SectionHeadingProps {
   title: string;
@@ -21,7 +21,7 @@ export function SectionHeading({ title, hint }: SectionHeadingProps) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: space.xs },
-  title: { ...type.section, color: color.ink },
-  hint: { ...type.caption, color: color.inkSoft },
+  wrap: { gap: 4 },
+  title: { ...type.sectionHeading, color: color.ink },
+  hint: { ...type.meta },
 });

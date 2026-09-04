@@ -6,7 +6,7 @@ import { Button, Card, ObservationRow, Field, Screen } from '@/components';
 import { useSession } from '@/state/session';
 import type { Appetite, Mood, Sleep } from '@/domain/types';
 import { APPETITES, DEFAULT_BASELINE, MOODS, SLEEPS } from '@/domain/types';
-import { color, space, type } from '@/theme/tokens';
+import { color, type } from '@/theme/tokens';
 
 /**
  * First run. Creates the caregiver and the resident being logged, and records what that
@@ -49,12 +49,12 @@ export default function SetupScreen() {
         <Button label="Start logging" onPress={handleStart} disabled={!complete} busy={saving} />
       }
     >
-      <Text style={styles.title}>Set up DailyCare</Text>
+      <Text style={styles.title}>Who is this for?</Text>
       <Text style={styles.lede}>
         Everything here stays on this device. Use made-up names while we build.
       </Text>
 
-      <Card title="Who is logging">
+      <Card title="Your name (caregiver)">
         <Field
           value={caregiverName}
           onChangeText={setCaregiverName}
@@ -64,7 +64,7 @@ export default function SetupScreen() {
         />
       </Card>
 
-      <Card title="Who they are logging for">
+      <Card title="Person you care for">
         <Field
           value={residentName}
           onChangeText={setResidentName}
@@ -93,7 +93,7 @@ export default function SetupScreen() {
 }
 
 const styles = StyleSheet.create({
-  title: { ...type.display, color: color.ink },
-  lede: { ...type.body, color: color.inkSoft, marginTop: -space.sm },
-  help: { ...type.caption, color: color.inkSoft, marginBottom: space.sm },
+  title: { ...type.screenTitle, color: color.ink },
+  lede: { ...type.body, color: color.ink3, marginTop: 0 },
+  help: { ...type.meta, marginBottom: 8 },
 });
