@@ -81,6 +81,8 @@ export const type = {
   sectionHeading: { fontFamily: fontFamily.serif.bold, fontSize: 22, letterSpacing: -0.22 },
   cardTitle: { fontFamily: fontFamily.serif.bold, fontSize: 20 },
   sheetTitle: { fontFamily: fontFamily.serif.bold, fontSize: 22 },
+  /** The setup drawer opens larger than a plain sheet, closer to a screen title. */
+  setupTitle: { fontFamily: fontFamily.serif.bold, fontSize: 26, lineHeight: 28.6, letterSpacing: -0.02 },
   checklistItem: { fontFamily: fontFamily.sans.regular, fontSize: 18 },
   body: { fontFamily: fontFamily.sans.regular, fontSize: 15 },
   input: { fontFamily: fontFamily.sans.regular, fontSize: 16 },
@@ -88,6 +90,9 @@ export const type = {
   chip: { fontFamily: fontFamily.sans.semiBold, fontSize: 14 },
   fieldLabel: { fontFamily: fontFamily.sans.semiBold, fontSize: 13, color: color.ink2 },
   meta: { fontFamily: fontFamily.sans.regular, fontSize: 13, color: color.ink3 },
+  /** Sits under a sheet title or a section label to say why the section exists. */
+  blurb: { fontFamily: fontFamily.sans.regular, fontSize: 14, lineHeight: 20.3, color: color.ink3 },
+  hint: { fontFamily: fontFamily.sans.regular, fontSize: 13, lineHeight: 18.85, color: color.ink3 },
   sectionLabel: {
     fontFamily: fontFamily.sans.bold,
     fontSize: 11,
@@ -120,6 +125,8 @@ export const radii = {
   checkbox: 9,
   selectionCircle: 12,
   sheetInput: 14,
+  /** The setup drawer's baseline card. Between a card (22) and a review inner card (14). */
+  setupCard: 18,
   inlineInput: 12,
   sheetTop: 30,
   photoButton: 16,

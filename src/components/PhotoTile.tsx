@@ -7,8 +7,8 @@ import { Icon } from './Icon';
 
 interface PhotoTileProps {
   uri: string | null;
-  onCapture: () => void;
-  onChoose: () => void;
+  /** Opens the source choice. Where the photo comes from is asked after this, not before. */
+  onAttach: () => void;
   onRemove: () => void;
   /** True while a picked file is being read and copied. */
   busy?: boolean;
@@ -20,7 +20,7 @@ interface PhotoTileProps {
  * Presentational only. Picking and storing a photo lives in the data layer, so this can
  * be rendered anywhere without pulling the camera in behind it.
  */
-export function PhotoTile({ uri, onCapture, onChoose, onRemove, busy = false, error }: PhotoTileProps) {
+export function PhotoTile({ uri, onAttach, onRemove, busy = false, error }: PhotoTileProps) {
   if (busy) {
     return (
       <View>
@@ -38,7 +38,7 @@ export function PhotoTile({ uri, onCapture, onChoose, onRemove, busy = false, er
       <View>
         <View style={styles.row}>
           <Pressable
-            onPress={onChoose}
+            onPress={onAttach}
             accessibilityRole="button"
             accessibilityLabel="Photo attached, tap to replace"
             style={({ pressed }) => [styles.attached, pressed && styles.pressed]}
@@ -62,32 +62,22 @@ export function PhotoTile({ uri, onCapture, onChoose, onRemove, busy = false, er
 
   return (
     <View>
-      <View style={styles.row}>
-        <Action label="Attach photo" onPress={onCapture} />
-        <Action label="Choose one" onPress={onChoose} />
-      </View>
+      <Pressable
+        onPress={onAttach}
+        accessibilityRole="button"
+        accessibilityLabel="Attach photo"
+        style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+      >
+        <Icon name="camera" size={18} color={color.ink2} />
+        <Text style={styles.actionText}>Attach photo</Text>
+      </Pressable>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
 
-function Action({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [styles.action, styles.flex, pressed && styles.pressed]}
-    >
-      <Icon name="camera" size={18} color={color.ink2} />
-      <Text style={styles.actionText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 8 },
-  flex: { flex: 1 },
   action: {
     height: sizes.photoButtonHeight,
     flexDirection: 'row',

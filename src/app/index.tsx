@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   Button,
@@ -8,10 +8,11 @@ import {
   CareDateButton,
   ChipGroup,
   MealRow,
-  NamesSheet,
+  SetupSheet,
   ReviewSheet,
   Field,
   ObservationRow,
+  PhotoSourceSheet,
   PhotoTile,
   Screen,
   SectionHeading,
@@ -50,14 +51,15 @@ export default function CareReportScreen() {
   if (!caregiver || !resident) {
     return (
       <View style={styles.centered}>
-        <NamesSheet
+        <SetupSheet
           open
+          firstRun
           caregiverName=""
           residentName=""
-          dismissible={false}
+          baseline={DEFAULT_BASELINE}
           onClose={() => {}}
-          onSave={(caregiverName, residentName) =>
-            void startSession({ caregiverName, residentName, baseline: DEFAULT_BASELINE })
+          onSave={(caregiverName, residentName, baseline) =>
+            void startSession({ caregiverName, residentName, baseline })
           }
         />
       </View>
@@ -78,10 +80,11 @@ function CareReport({
   namesOpen: boolean;
   setNamesOpen: (open: boolean) => void;
 }) {
-  const { caregiver, resident, renameSession } = useSession();
+  const { caregiver, resident, updateSetup } = useSession();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [sourceOpen, setSourceOpen] = useState(false);
 
   // Guarded by the caller, but narrowing has to happen for the compiler too.
   if (!caregiver || !resident) return null;
@@ -103,6 +106,28 @@ function CareReport({
     } finally {
       setPhotoBusy(false);
     }
+  }
+
+  /**
+   * Asks where the photo should come from.
+   *
+   * product-spec § 3.6 gives the form one wide button, and milestone 1 needs both the
+   * camera and the library behind it, so the choice moves off the screen and into the
+   * platform's own sheet: ActionSheetIOS where there is one, and the app's bottom sheet
+   * on Android, which has no system equivalent.
+   */
+  function askPhotoSource() {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ['Cancel', 'Camera', 'Photo Library'], cancelButtonIndex: 0 },
+        (index) => {
+          if (index === 1) void handlePickPhoto('camera');
+          if (index === 2) void handlePickPhoto('library');
+        },
+      );
+      return;
+    }
+    setSourceOpen(true);
   }
 
   function handleRemovePhoto() {
@@ -250,8 +275,7 @@ function CareReport({
 
       <PhotoTile
         uri={draft.photoUri}
-        onCapture={() => handlePickPhoto('camera')}
-        onChoose={() => handlePickPhoto('library')}
+        onAttach={askPhotoSource}
         onRemove={handleRemovePhoto}
         busy={photoBusy}
         error={photoError}
@@ -267,13 +291,23 @@ function CareReport({
           bare
         />
       </Card>
-      <NamesSheet
+      <PhotoSourceSheet
+        open={sourceOpen}
+        onClose={() => setSourceOpen(false)}
+        onPick={(source) => {
+          setSourceOpen(false);
+          void handlePickPhoto(source);
+        }}
+      />
+
+      <SetupSheet
         open={namesOpen}
         caregiverName={caregiver.displayName}
         residentName={resident.displayName}
+        baseline={resident.baseline}
         onClose={() => setNamesOpen(false)}
-        onSave={(caregiverName, residentName) => {
-          void renameSession(caregiverName, residentName);
+        onSave={(caregiverName, residentName, baseline) => {
+          void updateSetup(caregiverName, residentName, baseline);
           setNamesOpen(false);
         }}
       />
