@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { color, sizes } from "@/theme/tokens";
 
 interface ScreenProps {
@@ -13,9 +14,11 @@ interface ScreenProps {
 
 /** Paper surface, 22pt gutters, and enough bottom padding to clear the fixed action. */
 export function Screen({ children, scroll = true, footer }: ScreenProps) {
+  const keyboard = useKeyboardHeight();
+
   const body = scroll ? (
     <ScrollView
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard }]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
@@ -28,7 +31,11 @@ export function Screen({ children, scroll = true, footer }: ScreenProps) {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       {body}
-      {footer ? <View style={styles.footer}>{footer}</View> : null}
+      {footer ? (
+        <View style={[styles.footer, keyboard > 0 && { paddingBottom: keyboard + 14 }]}>
+          {footer}
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }

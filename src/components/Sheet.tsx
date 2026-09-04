@@ -3,9 +3,7 @@ import { useEffect, useRef } from 'react';
 import {
   Animated,
   Easing,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -13,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { color, motion, radii, sizes } from '@/theme/tokens';
 
 interface SheetProps {
@@ -36,6 +35,7 @@ export function Sheet({ open, onClose, children, maxHeightRatio = 0.9, footer }:
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const translate = useRef(new Animated.Value(height)).current;
+  const keyboard = useKeyboardHeight();
 
   useEffect(() => {
     if (!open) return;
@@ -57,28 +57,31 @@ export function Sheet({ open, onClose, children, maxHeightRatio = 0.9, footer }:
           accessibilityRole="button"
           accessibilityLabel="Close"
         />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboard}
-          pointerEvents="box-none"
+        <Animated.View
+          style={[
+            styles.sheet,
+            {
+              maxHeight: height * maxHeightRatio - keyboard,
+              marginBottom: keyboard,
+              transform: [{ translateY: translate }],
+            },
+          ]}
         >
-          <Animated.View
-            style={[
-              styles.sheet,
-              { maxHeight: height * maxHeightRatio, transform: [{ translateY: translate }] },
-            ]}
-          >
-            <View style={styles.handle} />
-            <View style={styles.body}>{children}</View>
-            {footer ? (
-              <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 22) }]}>
-                {footer}
-              </View>
-            ) : (
-              <View style={{ height: Math.max(insets.bottom, 12) }} />
-            )}
-          </Animated.View>
-        </KeyboardAvoidingView>
+          <View style={styles.handle} />
+          <View style={styles.body}>{children}</View>
+          {footer ? (
+            <View
+              style={[
+                styles.footer,
+                { paddingBottom: keyboard > 0 ? 14 : Math.max(insets.bottom, 22) },
+              ]}
+            >
+              {footer}
+            </View>
+          ) : (
+            <View style={{ height: keyboard > 0 ? 8 : Math.max(insets.bottom, 12) }} />
+          )}
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -94,7 +97,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: color.scrim,
   },
-  keyboard: { justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: color.paper,
     borderTopLeftRadius: radii.sheetTop,
