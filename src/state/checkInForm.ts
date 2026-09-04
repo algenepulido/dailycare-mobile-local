@@ -21,7 +21,8 @@ import type {
   HygieneTask,
   ID,
   Meal,
-  MealState,
+  MealEntry,
+  MealAmount,
   MedicationSlot,
   Mood,
   Sleep,
@@ -30,7 +31,7 @@ import { EMPTY_HYGIENE, EMPTY_MEALS, EMPTY_MEDICATION } from '@/domain/types';
 
 export interface CheckInDraft {
   careDate: string;
-  meals: Record<Meal, MealState>;
+  meals: Record<Meal, MealEntry>;
   medication: Record<MedicationSlot, boolean>;
   hygiene: Record<HygieneTask, boolean>;
   mood: Mood;
@@ -82,7 +83,8 @@ function draftFrom(checkIn: CheckIn): CheckInDraft {
 
 type Action =
   | { type: 'replace'; draft: CheckInDraft }
-  | { type: 'setMeal'; meal: Meal; state: MealState }
+  | { type: 'toggleMeal'; meal: Meal; done: boolean }
+  | { type: 'setMealAmount'; meal: Meal; amount: MealAmount }
   | { type: 'toggleMedication'; slot: MedicationSlot }
   | { type: 'toggleHygiene'; task: HygieneTask }
   | { type: 'setMood'; value: Mood }
@@ -97,8 +99,22 @@ function reducer(state: CheckInDraft, action: Action): CheckInDraft {
   switch (action.type) {
     case 'replace':
       return action.draft;
-    case 'setMeal':
-      return { ...state, meals: { ...state.meals, [action.meal]: action.state } };
+    case 'toggleMeal':
+      return {
+        ...state,
+        meals: {
+          ...state.meals,
+          // Unticking clears the amount: a meal that did not happen cannot have one.
+          [action.meal]: action.done
+            ? { done: true, amount: state.meals[action.meal].amount }
+            : { done: false, amount: null },
+        },
+      };
+    case 'setMealAmount':
+      return {
+        ...state,
+        meals: { ...state.meals, [action.meal]: { done: true, amount: action.amount } },
+      };
     case 'toggleMedication':
       return {
         ...state,

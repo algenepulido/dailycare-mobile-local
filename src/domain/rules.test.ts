@@ -10,7 +10,11 @@ function entry(overrides: Partial<CheckIn> = {}): CheckIn {
     residentId: 'resident',
     caregiverId: 'caregiver',
     careDate: '2026-09-03',
-    meals: { breakfast: 'full', lunch: 'partial', dinner: 'none' },
+    meals: {
+      breakfast: { done: true, amount: 'all' },
+      lunch: { done: true, amount: 'half' },
+      dinner: { done: false, amount: null },
+    },
     medication: { am: true, pm: false },
     hygiene: { shower: true, grooming: false },
     mood: baseline.mood,
@@ -65,10 +69,30 @@ describe('what the family is told', () => {
 });
 
 describe('the care checklist', () => {
-  it('counts a partial meal as eaten and says how much of each was', () => {
-    expect(mealCounts({ breakfast: 'full', lunch: 'partial', dinner: 'none' })).toEqual({
+  it('says how much was eaten when the caregiver answered', () => {
+    expect(
+      mealCounts({
+        breakfast: { done: true, amount: 'all' },
+        lunch: { done: true, amount: 'half' },
+        dinner: { done: false, amount: null },
+      }),
+    ).toEqual({
       done: 2,
-      items: ['Breakfast (full)', 'Lunch (partial)'],
+      items: ['Breakfast (all)', 'Lunch (half)'],
+      missed: ['Dinner'],
+    });
+  });
+
+  it('still counts a meal that was ticked without an amount, and does not guess one', () => {
+    expect(
+      mealCounts({
+        breakfast: { done: true, amount: null },
+        lunch: { done: true, amount: 'a-bit' },
+        dinner: { done: false, amount: null },
+      }),
+    ).toEqual({
+      done: 2,
+      items: ['Breakfast', 'Lunch (a bit)'],
       missed: ['Dinner'],
     });
   });
@@ -84,7 +108,7 @@ describe('the care checklist', () => {
   it('lists what was not done alongside what was', () => {
     const groups = buildChecklist(entry());
     expect(groups.map((group) => [group.label, group.doneItems, group.missedItems])).toEqual([
-      ['Meals', ['Breakfast (full)', 'Lunch (partial)'], ['Dinner']],
+      ['Meals', ['Breakfast (all)', 'Lunch (half)'], ['Dinner']],
       ['Medication', ['A.M'], ['P.M']],
       ['Hygiene', ['Shower'], ['Grooming']],
     ]);

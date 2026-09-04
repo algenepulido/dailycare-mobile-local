@@ -4,6 +4,7 @@ export { CareCheck } from './CareCheck';
 export { Chip } from './Chip';
 export { ChipGroup } from './ChipGroup';
 export { Field } from './Field';
+export { MealRow } from './MealRow';
 export { ObservationRow } from './ObservationRow';
 export { PhotoTile } from './PhotoTile';
 export { Screen } from './Screen';

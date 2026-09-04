@@ -14,9 +14,29 @@ export type ID = string;
 export const MEALS = ['breakfast', 'lunch', 'dinner'] as const;
 export type Meal = (typeof MEALS)[number];
 
-/** Trevor's addition. The prototype only recorded done or not done. */
-export const MEAL_STATES = ['none', 'partial', 'full'] as const;
-export type MealState = (typeof MEAL_STATES)[number];
+/**
+ * How much of a meal was eaten.
+ *
+ * The web prototype recorded only whether a meal happened. The amount is Trevor's
+ * addition, revealed after the meal is ticked rather than asked up front — and it stays
+ * optional, so a caregiver who ticks and moves on has still recorded a complete answer.
+ */
+export const MEAL_AMOUNTS = ['a-bit', 'half', 'most', 'all'] as const;
+export type MealAmount = (typeof MEAL_AMOUNTS)[number];
+
+/** What the caregiver reads, and what the summary prints in brackets. */
+export const MEAL_AMOUNT_LABEL: Record<MealAmount, string> = {
+  'a-bit': 'A bit',
+  half: 'Half',
+  most: 'Most',
+  all: 'All',
+};
+
+export interface MealEntry {
+  done: boolean;
+  /** Null when the meal happened but nobody said how much. */
+  amount: MealAmount | null;
+}
 
 export const MEDICATION_SLOTS = ['am', 'pm'] as const;
 export type MedicationSlot = (typeof MEDICATION_SLOTS)[number];
@@ -84,7 +104,7 @@ export interface CheckIn {
   /** ISO date, no time. The day being described, which is not always today. */
   careDate: string;
 
-  meals: Record<Meal, MealState>;
+  meals: Record<Meal, MealEntry>;
   medication: Record<MedicationSlot, boolean>;
   hygiene: Record<HygieneTask, boolean>;
 
@@ -107,10 +127,10 @@ export interface CheckIn {
 
 /* ------------------------------------------------------------------ defaults */
 
-export const EMPTY_MEALS: Record<Meal, MealState> = {
-  breakfast: 'none',
-  lunch: 'none',
-  dinner: 'none',
+export const EMPTY_MEALS: Record<Meal, MealEntry> = {
+  breakfast: { done: false, amount: null },
+  lunch: { done: false, amount: null },
+  dinner: { done: false, amount: null },
 };
 
 export const EMPTY_MEDICATION: Record<MedicationSlot, boolean> = { am: false, pm: false };

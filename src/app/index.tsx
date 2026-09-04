@@ -7,8 +7,8 @@ import {
   Card,
   CareCheck,
   CareDateButton,
-  Chip,
   ChipGroup,
+  MealRow,
   Field,
   ObservationRow,
   PhotoTile,
@@ -141,35 +141,16 @@ function CareReport() {
       </View>
 
       <Card title="Meals">
-        {MEALS.map((meal) => {
-          const state = draft.meals[meal];
-          return (
-            <CareCheck
-              key={meal}
-              label={MEAL_LABEL[meal]}
-              checked={state !== 'none'}
-              onChange={(checked) =>
-                dispatch({ type: 'setMeal', meal, state: checked ? 'full' : 'none' })
-              }
-              // Asked only once the meal happened, so a normal day is three taps and no
-              // decisions. How much they ate is a follow-up, not a front-loaded choice.
-              detail={
-                <>
-                  <Chip
-                    label="Full"
-                    selected={state === 'full'}
-                    onPress={() => dispatch({ type: 'setMeal', meal, state: 'full' })}
-                  />
-                  <Chip
-                    label="Partial"
-                    selected={state === 'partial'}
-                    onPress={() => dispatch({ type: 'setMeal', meal, state: 'partial' })}
-                  />
-                </>
-              }
-            />
-          );
-        })}
+        {MEALS.map((meal) => (
+          <MealRow
+            key={meal}
+            label={MEAL_LABEL[meal]}
+            done={draft.meals[meal].done}
+            amount={draft.meals[meal].amount}
+            onToggle={(done) => dispatch({ type: 'toggleMeal', meal, done })}
+            onAmount={(amount) => dispatch({ type: 'setMealAmount', meal, amount })}
+          />
+        ))}
       </Card>
 
       <Card title="Medication">

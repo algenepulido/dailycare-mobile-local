@@ -5,8 +5,8 @@
  * collect the data and apart from the ones that display it.
  */
 
-import type { Appetite, Baseline, CheckIn, Meal, MealState, Mood, Sleep } from './types';
-import { MEALS } from './types';
+import type { Appetite, Baseline, CheckIn, Meal, MealEntry, Mood, Sleep } from './types';
+import { MEALS, MEAL_AMOUNT_LABEL } from './types';
 
 /* ------------------------------------------------------------------ alert values */
 
@@ -104,10 +104,12 @@ const MEAL_LABELS: Record<Meal, string> = {
 };
 
 /**
- * Anything other than 'none' counts as a meal that happened; how much was eaten rides
- * along in brackets so the family reads "Lunch (partial)" rather than a bare count.
+ * A ticked meal counts as done whether or not anyone said how much was eaten.
+ *
+ * The amount is optional by design, so it rides along in brackets when it is there and
+ * is simply absent when it is not — "Lunch (half)" or plain "Lunch", never a guess.
  */
-export function mealCounts(meals: Record<Meal, MealState>): {
+export function mealCounts(meals: Record<Meal, MealEntry>): {
   done: number;
   items: string[];
   missed: string[];
@@ -115,12 +117,16 @@ export function mealCounts(meals: Record<Meal, MealState>): {
   const items: string[] = [];
   const missed: string[] = [];
   for (const meal of MEALS) {
-    const state = meals[meal];
-    if (state === 'none') {
+    const entry = meals[meal];
+    if (!entry.done) {
       missed.push(MEAL_LABELS[meal]);
       continue;
     }
-    items.push(`${MEAL_LABELS[meal]} (${state === 'partial' ? 'partial' : 'full'})`);
+    items.push(
+      entry.amount
+        ? `${MEAL_LABELS[meal]} (${MEAL_AMOUNT_LABEL[entry.amount].toLowerCase()})`
+        : MEAL_LABELS[meal],
+    );
   }
   return { done: items.length, items, missed };
 }
