@@ -17,16 +17,17 @@ export const ALERT_MOODS: readonly Mood[] = ['Agitated', 'Confused'];
 export const ALERT_APPETITES: readonly Appetite[] = ['Poor', 'Refused'];
 
 /**
- * Sleep values treated as an alert.
+ * Sleep values treated as an alert *in the chip*, and only there.
  *
- * Worth knowing: the prototype marks "Didn't sleep" as an alert value in the input, but
- * the code that assembles the summary never carries an alert flag for sleep the way it
- * does for mood and appetite. A sleepless night therefore never surfaces as an alert in
- * the daily email. That looks unintentional, so it is treated consistently here.
- * Flip SLEEP_CAN_ALERT to false to reproduce the prototype's behaviour exactly.
+ * The web app renders "Didn't sleep" red among the sleep chips, then pushes the sleep
+ * change onto the summary with no alert flag at all, so a sleepless night reaches the
+ * family as an ordinary change rather than an alert. product-spec § 5.1 states the same
+ * split in as many words. Two documents agreeing is not an oversight, so the split is
+ * reproduced rather than smoothed over: the chip warns the caregiver at the moment of
+ * entry, the summary does not escalate it.
  */
 export const ALERT_SLEEPS: readonly Sleep[] = ["Didn't sleep"];
-export const SLEEP_CAN_ALERT = true;
+export const SLEEP_CAN_ALERT = false;
 
 /* ------------------------------------------------------------------ what changed */
 

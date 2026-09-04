@@ -19,7 +19,7 @@ import {
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
 import { buildChanges, buildChecklist } from '@/domain/rules';
-import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS, SLEEP_CAN_ALERT } from '@/domain/rules';
+import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS } from '@/domain/rules';
 import type { CheckIn, Meal } from '@/domain/types';
 import { APPETITES, CONCERNS, DEFAULT_BASELINE, MEALS, MOODS, SLEEPS } from '@/domain/types';
 import type { CheckInDraft } from '@/state/checkInForm';
@@ -237,7 +237,7 @@ function CareReport({
           value={draft.sleep}
           baseline={resident.baseline.sleep}
           onChange={(value) => dispatch({ type: 'setSleep', value })}
-          alertValues={SLEEP_CAN_ALERT ? ALERT_SLEEPS : []}
+          alertValues={ALERT_SLEEPS}
         />
         <Text style={styles.flagLabel}>Flag a concern</Text>
         <ChipGroup

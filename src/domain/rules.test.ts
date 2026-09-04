@@ -1,4 +1,4 @@
-import { buildChanges, buildChecklist, mealCounts } from './rules';
+import { ALERT_SLEEPS, buildChanges, buildChecklist, mealCounts } from './rules';
 import type { CheckIn } from './types';
 import { DEFAULT_BASELINE } from './types';
 
@@ -50,9 +50,20 @@ describe('what the family is told', () => {
     expect(buildChanges(entry({ appetite: 'Refused' }), baseline)[0].alert).toBe(true);
   });
 
-  it('raises an alert for a sleepless night', () => {
-    // The prototype flagged this in the input but never carried it into the summary.
-    expect(buildChanges(entry({ sleep: "Didn't sleep" }), baseline)[0].alert).toBe(true);
+  it('reports a sleepless night without escalating it to an alert', () => {
+    // The web app renders the chip red, then pushes the change with no alert flag, and
+    // product-spec § 5.1 says the same. The split is deliberate on both surfaces.
+    const [change] = buildChanges(entry({ sleep: "Didn't sleep" }), baseline);
+    expect(change).toEqual({
+      kind: 'Sleep',
+      value: "Didn't sleep",
+      baselineNote: 'usually Restless',
+      alert: false,
+    });
+  });
+
+  it('still marks a sleepless night as an alert value for the chip', () => {
+    expect(ALERT_SLEEPS).toContain("Didn't sleep");
   });
 
   it('stays quiet about a restless night for a resident who is usually restless', () => {

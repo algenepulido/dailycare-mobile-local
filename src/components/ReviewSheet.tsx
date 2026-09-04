@@ -22,8 +22,10 @@ interface ReviewSheetProps {
 /**
  * What the family would receive, read back before anything leaves.
  *
- * Sections and their order follow the summary email — what changed, the care checklist,
- * the note, the photo. Nothing is sent in this milestone, so the footer only closes.
+ * Sections, order and copy follow the web app's sheet — what changed, the care checklist,
+ * the note, the photo. Milestone 1 removes sending, not the heading the caregiver already
+ * knows this surface by, so the title stays and the footer is the only thing that differs;
+ * the footnote below says plainly that nothing leaves the device.
  */
 export function ReviewSheet({
   open,
@@ -43,7 +45,7 @@ export function ReviewSheet({
             <Icon name="send" size={22} color={color.clay} />
           </View>
           <View style={styles.headerText}>
-            <Text style={styles.title}>Daily care summary</Text>
+            <Text style={styles.title}>{'Review & send'}</Text>
             <Text style={styles.subtitle}>
               {dateLabel} · {clientName}
             </Text>
