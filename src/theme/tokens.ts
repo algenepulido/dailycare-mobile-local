@@ -9,14 +9,20 @@
  * an adjustment of values rather than a rewrite of screens.
  */
 
-import { NanumMyeongjo_700Bold } from '@expo-google-fonts/nanum-myeongjo';
-import {
-  RethinkSans_400Regular,
-  RethinkSans_500Medium,
-  RethinkSans_600SemiBold,
-  RethinkSans_700Bold,
-  RethinkSans_800ExtraBold,
-} from '@expo-google-fonts/rethink-sans';
+/*
+ * Imported one weight per entry point, not from the package root.
+ *
+ * Each package's index re-exports every face it ships as a top-level `require` of a .ttf.
+ * Metro registers an asset require as a side effect, so importing a single name from the
+ * root still bundles the whole family — three Nanum Myeongjo faces and ten Rethink Sans,
+ * italics included, when the type scale asks for one and five.
+ */
+import { NanumMyeongjo_700Bold } from '@expo-google-fonts/nanum-myeongjo/700Bold';
+import { RethinkSans_400Regular } from '@expo-google-fonts/rethink-sans/400Regular';
+import { RethinkSans_500Medium } from '@expo-google-fonts/rethink-sans/500Medium';
+import { RethinkSans_600SemiBold } from '@expo-google-fonts/rethink-sans/600SemiBold';
+import { RethinkSans_700Bold } from '@expo-google-fonts/rethink-sans/700Bold';
+import { RethinkSans_800ExtraBold } from '@expo-google-fonts/rethink-sans/800ExtraBold';
 
 export const color = {
   ink: '#1A1410',
@@ -47,11 +53,7 @@ export const color = {
 } as const;
 
 export const fontFamily = {
-  /**
-   * Headings only, and only at bold — the type scale never asks for another weight.
-   * Each Nanum Myeongjo face carries a full Korean glyph set and weighs three megabytes
-   * bundled, so loading the ones nothing renders costs six megabytes for nothing.
-   */
+  /** Headings only, and only at bold — every serif line in the type scale asks for 700. */
   serif: {
     bold: 'NanumMyeongjo_700Bold',
   },
