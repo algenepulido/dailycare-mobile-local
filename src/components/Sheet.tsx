@@ -35,7 +35,14 @@ export function Sheet({ open, onClose, children, maxHeightRatio = 0.9, footer }:
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const translate = useRef(new Animated.Value(height)).current;
-  const keyboard = useKeyboardHeight();
+  /**
+   * The IME reports its height against the content area, which stops above the system
+   * navigation bar — but this sheet is laid out edge to edge, from the bottom of the
+   * screen. Lifting by the reported height alone leaves the footer short by exactly the
+   * navigation inset, which is enough to clip the bottom of the primary action.
+   */
+  const keyboardInset = useKeyboardHeight();
+  const keyboard = keyboardInset > 0 ? keyboardInset + insets.bottom : 0;
 
   useEffect(() => {
     if (!open) return;

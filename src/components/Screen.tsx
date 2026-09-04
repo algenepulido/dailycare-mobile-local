@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { color, sizes } from "@/theme/tokens";
@@ -14,7 +14,10 @@ interface ScreenProps {
 
 /** Paper surface, 22pt gutters, and enough bottom padding to clear the fixed action. */
 export function Screen({ children, scroll = true, footer }: ScreenProps) {
-  const keyboard = useKeyboardHeight();
+  const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardHeight();
+  // Same edge-to-edge correction the sheet makes: the IME height excludes the nav inset.
+  const keyboard = keyboardInset > 0 ? keyboardInset + insets.bottom : 0;
 
   const body = scroll ? (
     <ScrollView
