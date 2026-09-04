@@ -9,11 +9,7 @@
  * an adjustment of values rather than a rewrite of screens.
  */
 
-import {
-  NanumMyeongjo_400Regular,
-  NanumMyeongjo_700Bold,
-  NanumMyeongjo_800ExtraBold,
-} from '@expo-google-fonts/nanum-myeongjo';
+import { NanumMyeongjo_700Bold } from '@expo-google-fonts/nanum-myeongjo';
 import {
   RethinkSans_400Regular,
   RethinkSans_500Medium,
@@ -51,10 +47,13 @@ export const color = {
 } as const;
 
 export const fontFamily = {
+  /**
+   * Headings only, and only at bold — the type scale never asks for another weight.
+   * Each Nanum Myeongjo face carries a full Korean glyph set and weighs three megabytes
+   * bundled, so loading the ones nothing renders costs six megabytes for nothing.
+   */
   serif: {
-    regular: 'NanumMyeongjo_400Regular',
     bold: 'NanumMyeongjo_700Bold',
-    extraBold: 'NanumMyeongjo_800ExtraBold',
   },
   sans: {
     regular: 'RethinkSans_400Regular',
@@ -67,9 +66,7 @@ export const fontFamily = {
 
 /** Bundled into the binary, so nothing is fetched at runtime. */
 export const fontAssets = {
-  NanumMyeongjo_400Regular,
   NanumMyeongjo_700Bold,
-  NanumMyeongjo_800ExtraBold,
   RethinkSans_400Regular,
   RethinkSans_500Medium,
   RethinkSans_600SemiBold,
