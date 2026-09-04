@@ -156,7 +156,7 @@ function CareReport() {
               detail={
                 <>
                   <Chip
-                    label="All"
+                    label="Full"
                     selected={state === 'full'}
                     onPress={() => dispatch({ type: 'setMeal', meal, state: 'full' })}
                   />
