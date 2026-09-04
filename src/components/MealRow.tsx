@@ -9,7 +9,8 @@ interface MealRowProps {
   done: boolean;
   amount: MealAmount | null;
   onToggle: (done: boolean) => void;
-  onAmount: (amount: MealAmount) => void;
+  /** Null clears the answer: tapping the chosen amount again takes it back. */
+  onAmount: (amount: MealAmount | null) => void;
 }
 
 /**
@@ -42,14 +43,17 @@ export function MealRow({ label, done, amount, onToggle, onAmount }: MealRowProp
 
       {done ? (
         <View style={styles.detail}>
-          <Text style={styles.prompt}>How much did they eat?</Text>
+          <View style={styles.promptRow}>
+            <Text style={styles.prompt}>How much did they eat?</Text>
+            {amount ? null : <Text style={styles.unanswered}>not observed</Text>}
+          </View>
           <View style={styles.amounts}>
             {MEAL_AMOUNTS.map((option) => {
               const selected = amount === option;
               return (
                 <Pressable
                   key={option}
-                  onPress={() => onAmount(option)}
+                  onPress={() => onAmount(selected ? null : option)}
                   accessibilityRole="button"
                   accessibilityState={{ selected }}
                   accessibilityLabel={`${label}, ${MEAL_AMOUNT_LABEL[option]}`}
@@ -101,6 +105,8 @@ const styles = StyleSheet.create({
   badgeText: { fontFamily: type.chip.fontFamily, fontSize: 13, color: color.ink },
 
   /** Indented past the checkbox with a hairline rule, so it reads as belonging to the row. */
+  promptRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  unanswered: { fontFamily: type.meta.fontFamily, fontSize: 11, color: color.ink4 },
   detail: {
     marginLeft: sizes.checkbox + 14,
     paddingLeft: 14,

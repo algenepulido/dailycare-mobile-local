@@ -84,7 +84,7 @@ function draftFrom(checkIn: CheckIn): CheckInDraft {
 type Action =
   | { type: 'replace'; draft: CheckInDraft }
   | { type: 'toggleMeal'; meal: Meal; done: boolean }
-  | { type: 'setMealAmount'; meal: Meal; amount: MealAmount }
+  | { type: 'setMealAmount'; meal: Meal; amount: MealAmount | null }
   | { type: 'toggleMedication'; slot: MedicationSlot }
   | { type: 'toggleHygiene'; task: HygieneTask }
   | { type: 'setMood'; value: Mood }
