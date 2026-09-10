@@ -37,7 +37,8 @@
         "expo-image-picker",
         {
           "photosPermission": "DailyCare attaches a photo from today to the care summary.",
-          "cameraPermission": "DailyCare attaches a photo from today to the care summary."
+          "cameraPermission": "DailyCare attaches a photo from today to the care summary.",
+          "microphonePermission": false
         }
       ],
       [
