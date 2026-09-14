@@ -13,6 +13,8 @@ constraint and a constraint are different things, and only one of them stops a m
 | `access-policies.sql` | The three roles as row-level security. Applied after the schema. |
 | `access-invariants.sql` | Attempts to reach things that should be unreachable. Runs as a non-superuser, because a superuser bypasses row-level security and would report that everything works. |
 | `data-classification.sql` | Which columns hold PHI, and the views that generate the inventory from it. |
+| `audit-logging.sql` | Triggers that record every write to a PHI table, and the coverage views that find a table without one. |
+| `audit-invariants.sql` | Including the canary: a care note written with a unique string, then every column of every audit row searched for it. |
 
 ## Verifying it
 
@@ -25,9 +27,11 @@ createdb dc_check
 psql -v ON_ERROR_STOP=1 -d dc_check -f schema.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f access-policies.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f data-classification.sql
+psql -v ON_ERROR_STOP=1 -d dc_check -f audit-logging.sql
 
 psql -d dc_check -f schema-invariants.sql     # 14 checks
 psql -d dc_check -f access-invariants.sql     # 24 checks
+psql -d dc_check -f audit-invariants.sql      # 13 checks
 
 dropdb dc_check
 ```
@@ -73,6 +77,13 @@ claim to have come from a clinical system.
 superseded. There is no path that rewrites what a day said, and no `DELETE` policy
 anywhere in the access model.
 
+**A write is audited by the database, not by the handler.** Every insert or update of a
+PHI table fires a trigger, so there is no code path that changes a care record without
+producing a row. The application cannot write an audit row by hand either — insert,
+update and delete on `audit_events` are revoked from it, so a compromised session cannot
+append a plausible history or remove an inconvenient one. What is recorded is which
+columns changed, never what they changed to.
+
 **An unidentified request sees nothing.** Access resolves from a session variable the
 application sets per request. Unset compares false everywhere, so the failure mode of
 forgetting to set it is an empty result rather than an open door.
@@ -90,3 +101,8 @@ These are judgements rather than facts, and worth confirming rather than assumin
   scale has not been measured yet.
 - Retention is per facility and enforced by a scheduled job running as its own role. The
   job is not built yet; the policy table it will read is.
+- Reads are the weak half of the audit design and deliberately flagged as such.
+  PostgreSQL cannot trigger on `SELECT`, so a read is recorded by the application calling
+  `audit_read()` on the single path that serves resident data. That is a convention the
+  code has to keep rather than a guarantee the database enforces, and it is the one place
+  where a forgetful handler still produces a gap.
