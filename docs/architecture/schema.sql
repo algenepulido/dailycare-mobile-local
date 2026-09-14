@@ -1,0 +1,475 @@
+-- DailyCare production schema
+--
+-- PostgreSQL. Written for Milestone 2, and written once: every later milestone adds to
+-- this rather than reshaping it. The decisions worth arguing with are commented where
+-- they are made rather than collected at the end.
+--
+-- Three rules run through the whole file.
+--
+--   Every row belongs to a facility. Multi-tenancy is here from the first migration
+--   because adding a tenant column to a populated table is a different kind of job.
+--
+--   Identity is never a name. Every key is a generated UUID, so a resident keeps their
+--   identity through a name correction, a transfer, or a readmission.
+--
+--   A relationship is a row with a type, never a boolean on a person. InkTree learned
+--   this the expensive way — `relation = 'self'` rather than `is_user` — and DailyCare
+--   uses the same shape so the two models can be reconciled later instead of translated.
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";   -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "citext";     -- case-insensitive email
+
+
+-- ════════════════════════════════════════════════════════════════════ enums
+--
+-- Enumerated in the database rather than left as free text, because every one of these
+-- is a closed set the product depends on. A typo in a status column is a silent bug in
+-- a care record.
+
+CREATE TYPE facility_role AS ENUM (
+  'caregiver',        -- files care days for the residents assigned to them
+  'care_manager'      -- sees every resident in the facility, manages people and access
+);
+
+-- How a person is related to a resident. Deliberately an enum rather than a set of
+-- booleans: 'self' is a relationship like any other, and the moment it becomes a flag
+-- somebody writes `WHERE is_self = false` and silently drops a row that mattered.
+CREATE TYPE resident_relation AS ENUM (
+  'self',             -- the resident's own account, if they ever hold one
+  'spouse',
+  'child',
+  'sibling',
+  'other_family',
+  'friend',
+  'power_of_attorney'
+);
+
+CREATE TYPE access_state AS ENUM (
+  'invited',          -- invitation sent, not yet accepted
+  'active',
+  'revoked'
+);
+
+CREATE TYPE meal_slot AS ENUM ('breakfast', 'lunch', 'dinner');
+
+-- Optional by design. A caregiver who ticks the meal and moves on has filed a complete
+-- record; the amount is extra information, not a required field.
+CREATE TYPE meal_amount AS ENUM ('a_bit', 'half', 'most', 'all');
+
+CREATE TYPE medication_slot AS ENUM ('am', 'pm', 'supplemental');
+
+-- Not a boolean. "Not given" and "refused" are different clinical facts, and a system
+-- that records both as `false` cannot tell a family which one happened.
+CREATE TYPE medication_status AS ENUM (
+  'given',
+  'held',             -- withheld deliberately, usually on instruction
+  'refused',          -- the resident declined
+  'not_recorded'      -- nobody has said either way yet
+);
+
+-- Where a medication fact came from. The whole point of the event model: a caregiver's
+-- tick and a MedTech's PointClickCare entry are both valid, and the family should be
+-- able to see which one they are reading.
+CREATE TYPE medication_source AS ENUM (
+  'caregiver',
+  'pointclickcare'
+);
+
+CREATE TYPE mood AS ENUM ('calm', 'anxious', 'confused', 'withdrawn', 'agitated');
+CREATE TYPE appetite AS ENUM ('good', 'fair', 'poor', 'refused');
+CREATE TYPE sleep_quality AS ENUM ('slept_well', 'restless', 'up_a_lot', 'didnt_sleep');
+
+CREATE TYPE concern AS ENUM (
+  'wandering',
+  'sundowning',
+  'fall_or_near_fall',
+  'pain',
+  'skin_concern'
+);
+
+
+-- ════════════════════════════════════════════════════════════════════ tenancy
+
+CREATE TABLE facilities (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         text NOT NULL,
+  timezone     text NOT NULL,   -- IANA name. A care day is a local calendar day, and a
+                                -- facility in Texas rolls over at a different instant
+                                -- from one in California.
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  archived_at  timestamptz     -- a closed facility is retained, not deleted
+);
+
+COMMENT ON COLUMN facilities.timezone IS
+  'Care days are local calendar days. Every date boundary in the product resolves here.';
+
+
+-- ════════════════════════════════════════════════════════════════════ identity
+--
+-- A user is an authentication identity and nothing else. What they may do comes from
+-- the membership rows below, never from a column here — the same person can be a
+-- caregiver at one facility and a daughter at another.
+
+CREATE TABLE users (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email              citext NOT NULL UNIQUE,
+  password_hash      text,          -- null while an invitation is outstanding
+  display_name       text NOT NULL,
+  email_verified_at  timestamptz,
+  last_seen_at       timestamptz,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  deactivated_at     timestamptz    -- sign-in refused, records they filed are untouched
+);
+
+-- Password reset and invitation acceptance both land here. Single-use, short-lived, and
+-- the token itself is never stored — only its hash, so a database read cannot be
+-- replayed as a password reset.
+CREATE TABLE user_tokens (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose     text NOT NULL CHECK (purpose IN ('password_reset', 'invitation', 'email_verification')),
+  token_hash  text NOT NULL,
+  expires_at  timestamptz NOT NULL,
+  consumed_at timestamptz,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ON user_tokens (user_id, purpose) WHERE consumed_at IS NULL;
+CREATE INDEX ON user_tokens (token_hash);
+
+CREATE TABLE sessions (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  refresh_hash    text NOT NULL,
+  device_label    text,          -- "iPhone 15", for a user reviewing their own sessions
+  issued_at       timestamptz NOT NULL DEFAULT now(),
+  last_used_at    timestamptz NOT NULL DEFAULT now(),
+  expires_at      timestamptz NOT NULL,
+  revoked_at      timestamptz
+);
+
+CREATE INDEX ON sessions (user_id) WHERE revoked_at IS NULL;
+
+COMMENT ON TABLE sessions IS
+  'Multi-device persistence lives here. Signing in on a second phone adds a row; it does
+   not move anything. Reinstalling and signing back in recovers the account rather than
+   the device.';
+
+
+-- ════════════════════════════════════════════════════════════════════ staff roles
+
+CREATE TABLE facility_members (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+  user_id       uuid NOT NULL REFERENCES users(id)      ON DELETE RESTRICT,
+  role          facility_role NOT NULL,
+  state         access_state  NOT NULL DEFAULT 'invited',
+  invited_by    uuid REFERENCES users(id),
+  started_at    timestamptz NOT NULL DEFAULT now(),
+  ended_at      timestamptz,   -- a caregiver who leaves. The rows they filed stay.
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (facility_id, user_id, role)
+);
+
+CREATE INDEX ON facility_members (facility_id) WHERE ended_at IS NULL;
+CREATE INDEX ON facility_members (user_id)     WHERE ended_at IS NULL;
+
+COMMENT ON TABLE facility_members IS
+  'Deactivating a caregiver ends the membership. It never deletes the user and never
+   touches the care days they filed — those are the facility''s record, not theirs.';
+
+
+-- ════════════════════════════════════════════════════════════════════ residents
+
+CREATE TABLE residents (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+
+  -- PHI. Given name only in the product today; the column is wide enough for a full
+  -- legal name because PointClickCare matching will need one.
+  display_name  text NOT NULL,
+
+  -- The resident's identity in the facility's clinical system, when there is one.
+  -- Kept alongside rather than used as the key: DailyCare must work for a facility with
+  -- no EHR, and a resident must survive being rematched.
+  external_source     medication_source,
+  external_patient_id text,
+
+  -- What a normal day looks like for this person. The daily summary reports mood,
+  -- appetite and sleep only when they differ from these.
+  baseline_mood      mood          NOT NULL DEFAULT 'calm',
+  baseline_appetite  appetite      NOT NULL DEFAULT 'fair',
+  baseline_sleep     sleep_quality NOT NULL DEFAULT 'restless',
+
+  admitted_on   date,
+  departed_on   date,          -- moved out. Records are retained under the policy below.
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (external_source, external_patient_id)
+);
+
+CREATE INDEX ON residents (facility_id) WHERE departed_on IS NULL;
+
+COMMENT ON COLUMN residents.display_name IS 'PHI.';
+COMMENT ON COLUMN residents.external_patient_id IS
+  'PHI. The clinical system''s own identifier, stored so medication events can be matched
+   without DailyCare guessing from names.';
+
+
+-- Which caregiver is responsible for which resident. Changes as shifts change, so it is
+-- a row with a life rather than a column.
+CREATE TABLE assignments (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id         uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+  resident_id         uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  facility_member_id  uuid NOT NULL REFERENCES facility_members(id) ON DELETE RESTRICT,
+  started_at          timestamptz NOT NULL DEFAULT now(),
+  ended_at            timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ON assignments (resident_id)        WHERE ended_at IS NULL;
+CREATE INDEX ON assignments (facility_member_id) WHERE ended_at IS NULL;
+
+
+-- ════════════════════════════════════════════════════════════════════ family access
+--
+-- The foundation Milestone 4 builds the family app on. Access is granted to a person
+-- against a resident and can be withdrawn. Possession of a link grants nothing — the
+-- link is a route, the row below is the permission.
+
+CREATE TABLE resident_contacts (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+  resident_id   uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  user_id       uuid NOT NULL REFERENCES users(id)      ON DELETE RESTRICT,
+
+  relation      resident_relation NOT NULL,
+  state         access_state      NOT NULL DEFAULT 'invited',
+
+  -- Who let them in, and when it was taken away. Both are answers a reviewer will ask
+  -- for, and neither can be reconstructed afterwards if they are not written down.
+  granted_by    uuid REFERENCES users(id),
+  granted_at    timestamptz,
+  revoked_by    uuid REFERENCES users(id),
+  revoked_at    timestamptz,
+
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (resident_id, user_id)
+);
+
+CREATE INDEX ON resident_contacts (user_id)     WHERE state = 'active';
+CREATE INDEX ON resident_contacts (resident_id) WHERE state = 'active';
+
+COMMENT ON TABLE resident_contacts IS
+  'A family member may hold rows for several residents — two parents in the same building
+   is the ordinary case. Authorisation is per resident, never per family.';
+
+
+-- ════════════════════════════════════════════════════════════════════ care record
+--
+-- One row per resident per local calendar day. Amendable, and an amendment never
+-- overwrites: a care record is corrected the way a clinical note is, by adding.
+
+CREATE TABLE care_days (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id    uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+  resident_id    uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+
+  -- The day being described, in the facility's timezone. Not the day it was filed:
+  -- backdating up to two weeks is normal, and the difference is visible in the product.
+  care_date      date NOT NULL,
+
+  -- PHI, all of it.
+  mood           mood          NOT NULL,
+  appetite       appetite      NOT NULL,
+  sleep          sleep_quality NOT NULL,
+  note           text NOT NULL DEFAULT '',
+
+  hygiene_shower   boolean NOT NULL DEFAULT false,
+  hygiene_grooming boolean NOT NULL DEFAULT false,
+
+  filed_by       uuid NOT NULL REFERENCES users(id),
+  filed_at       timestamptz NOT NULL DEFAULT now(),
+
+  -- Set when this row has been superseded by a correction. The superseding row points
+  -- back through amends_id below, so the whole chain is readable in either direction.
+  superseded_at  timestamptz,
+  amends_id      uuid REFERENCES care_days(id),
+
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+
+-- One current row per resident per day. Superseded rows are exempt, which is what makes
+-- the amendment chain possible without a second table.
+CREATE UNIQUE INDEX care_days_current_per_day
+  ON care_days (resident_id, care_date)
+  WHERE superseded_at IS NULL;
+
+CREATE INDEX ON care_days (resident_id, care_date DESC);
+CREATE INDEX ON care_days (facility_id, care_date DESC);
+
+COMMENT ON TABLE care_days IS
+  'Correcting a filed day inserts a new row with amends_id set and stamps the old one
+   superseded. Nothing is updated in place, so the original is always recoverable and the
+   family can be shown that a correction happened rather than a different past.';
+
+
+CREATE TABLE care_day_meals (
+  care_day_id  uuid NOT NULL REFERENCES care_days(id) ON DELETE CASCADE,
+  slot         meal_slot NOT NULL,
+  happened     boolean NOT NULL DEFAULT false,
+  amount       meal_amount,   -- null is "not observed", which is a real answer
+  PRIMARY KEY (care_day_id, slot),
+  CHECK (amount IS NULL OR happened)   -- an amount without the meal is nonsense
+);
+
+CREATE TABLE care_day_concerns (
+  care_day_id  uuid NOT NULL REFERENCES care_days(id) ON DELETE CASCADE,
+  concern      concern NOT NULL,
+  PRIMARY KEY (care_day_id, concern)
+);
+
+
+-- ════════════════════════════════════════════════════════════════════ medication
+--
+-- Not a column on the care day. Medication is the one fact in this product that may
+-- arrive from somewhere else — the MedTech records it in PointClickCare on a different
+-- round, on a different schedule, and the care manager currently reconciles the two by
+-- hand. Modelling it as an event with a source is what removes that step later.
+
+CREATE TABLE medication_events (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+  resident_id   uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+
+  care_date     date NOT NULL,            -- the local day this belongs to
+  slot          medication_slot NOT NULL,
+  status        medication_status NOT NULL,
+
+  -- Two timestamps, deliberately. An audit trail has to distinguish when a dose was
+  -- given from when the system was told about it, and a medication round is documented
+  -- on a different rhythm from a caregiver's shift.
+  occurred_at   timestamptz,
+  recorded_at   timestamptz NOT NULL DEFAULT now(),
+
+  source        medication_source NOT NULL,
+  source_ref    text,          -- the external system's own resource id
+  recorded_by   uuid REFERENCES users(id),   -- null when the source is not a DailyCare user
+
+  -- Free text for a supplemental dose. Only meaningful for slot = 'supplemental'.
+  detail        text,
+
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  CHECK (source = 'caregiver' OR source_ref IS NOT NULL),
+  CHECK (slot <> 'supplemental' OR detail IS NOT NULL)
+);
+
+-- The scheduled slots are one per resident per day. Supplemental doses are not, so they
+-- are excluded from the constraint rather than forced into it.
+CREATE UNIQUE INDEX medication_events_one_per_slot
+  ON medication_events (resident_id, care_date, slot)
+  WHERE slot <> 'supplemental';
+
+CREATE INDEX ON medication_events (resident_id, care_date DESC);
+CREATE INDEX ON medication_events (source, source_ref);
+
+COMMENT ON COLUMN medication_events.source IS
+  'When this is pointclickcare the row is read-only in DailyCare and shown with an
+   attribution line. The caregiver is never asked to re-enter what the MedTech filed.';
+
+
+-- ════════════════════════════════════════════════════════════════════ media
+--
+-- The object itself lives in a private GCS bucket. This table holds the reference and
+-- the authorisation context; a signed URL is minted per request, after the caller's
+-- access to the resident has been checked, and never stored.
+
+CREATE TABLE media_objects (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  facility_id    uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
+  resident_id    uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  care_day_id    uuid REFERENCES care_days(id) ON DELETE SET NULL,
+
+  bucket         text NOT NULL,
+  object_path    text NOT NULL,
+  content_type   text NOT NULL,
+  byte_size      bigint NOT NULL,
+  checksum       text,
+
+  uploaded_by    uuid NOT NULL REFERENCES users(id),
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  deleted_at     timestamptz,   -- set when the object has actually been removed from GCS
+  UNIQUE (bucket, object_path)
+);
+
+CREATE INDEX ON media_objects (resident_id) WHERE deleted_at IS NULL;
+CREATE INDEX ON media_objects (care_day_id);
+
+COMMENT ON TABLE media_objects IS
+  'Photos are kept at the resolution they were taken. Downscaling is cheap now and
+   impossible to undo later, when a family is offered a real download.';
+
+
+-- ════════════════════════════════════════════════════════════════════ audit
+--
+-- Who touched which resident''s record, and when. Written for every read as well as every
+-- write: a reviewer asks who has seen a record at least as often as who changed one.
+-- Append-only by intent; no update or delete path exists in the application.
+
+CREATE TABLE audit_events (
+  id            bigserial PRIMARY KEY,
+  occurred_at   timestamptz NOT NULL DEFAULT now(),
+
+  actor_user_id uuid REFERENCES users(id),   -- null for scheduled jobs
+  actor_role    text,                        -- role in force at the time, not now
+  facility_id   uuid REFERENCES facilities(id),
+
+  action        text NOT NULL,               -- 'care_day.read', 'resident.update', ...
+  subject_type  text NOT NULL,               -- 'resident', 'care_day', 'media_object'
+  subject_id    uuid,
+  resident_id   uuid REFERENCES residents(id),  -- denormalised: the question is always
+                                                -- "who saw this resident's record"
+
+  request_id    text,        -- ties a row to one HTTP request across services
+  ip_hash       text,        -- hashed, not stored raw
+  user_agent    text,
+
+  -- Never the record itself. What changed, not what it said.
+  detail        jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX ON audit_events (resident_id, occurred_at DESC);
+CREATE INDEX ON audit_events (actor_user_id, occurred_at DESC);
+CREATE INDEX ON audit_events (facility_id, occurred_at DESC);
+
+COMMENT ON COLUMN audit_events.detail IS
+  'Field names and identifiers only. No PHI: an audit log that quotes the record it is
+   protecting has become a second copy of it.';
+
+
+-- ════════════════════════════════════════════════════════════════════ retention
+--
+-- The rule is facility policy, not a developer decision, so it is data. Enforcement is a
+-- scheduled job that reads this table; the job removes the GCS object and stamps
+-- media_objects.deleted_at rather than hiding the row.
+
+CREATE TABLE retention_policies (
+  facility_id            uuid PRIMARY KEY REFERENCES facilities(id) ON DELETE CASCADE,
+  care_record_days       integer NOT NULL,   -- after a resident departs
+  media_days             integer NOT NULL,
+  audit_days             integer NOT NULL,
+  updated_by             uuid REFERENCES users(id),
+  updated_at             timestamptz NOT NULL DEFAULT now(),
+  CHECK (care_record_days > 0 AND media_days > 0 AND audit_days > 0)
+);
+
+COMMENT ON TABLE retention_policies IS
+  'Deliberately per facility. Two buildings under different operators can be subject to
+   different rules, and the code should follow whatever the facility says rather than
+   carry a default nobody agreed to.';
