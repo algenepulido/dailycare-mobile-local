@@ -52,7 +52,8 @@ CREATE TYPE scrub_strategy AS ENUM (
   'synthetic_email',   -- user<digest>@example.invalid, unique because the original was
   'redact_text',       -- replaced with filler of the same length, so layouts still break
   'hash_token',        -- an opaque digest; keeps uniqueness, keeps nothing else
-  'discard_secret',    -- replaced with a value that cannot authenticate
+  'scramble_password', -- a well-formed Argon2id digest of nothing anyone knows
+  'scramble_digest',   -- a well-formed SHA-256 digest, likewise
   'shift_days',        -- moved by one offset for the whole database, so intervals survive
   'null_out',
   'keep'               -- deliberately, with a reason
@@ -129,10 +130,10 @@ INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
 INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
  ('users','email','synthetic_email',NULL),
  ('users','display_name','synthetic_name',NULL),
- ('users','password_hash','discard_secret',NULL),
+ ('users','password_hash','scramble_password',NULL),
  ('sessions','device_label','redact_text',NULL),
- ('sessions','refresh_hash','discard_secret',NULL),
- ('user_tokens','token_hash','discard_secret',NULL),
+ ('sessions','refresh_hash','scramble_digest',NULL),
+ ('user_tokens','token_hash','scramble_digest',NULL),
  ('resident_contacts','relation','keep','A relationship type with both parties anonymised. The access model is built on it and cannot be tested without it.');
 
 -- ── the trail ──────────────────────────────────────────────────────────────────
@@ -289,7 +290,9 @@ BEGIN
 
   -- The application is not the one running this, and the policies that stop the
   -- application also stop the owner. Lifted for the transaction and put back below; a
-  -- failure anywhere rolls the whole thing back, DDL included.
+  -- failure anywhere rolls the whole thing back, DDL included. The credential triggers on
+  -- users, sessions and user_tokens are deliberately not lifted: what the scrub writes
+  -- there has to survive the same check a real credential does.
   FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
            WHERE ns.nspname = 'public' AND c.relrowsecurity AND c.relforcerowsecurity
   LOOP
@@ -331,7 +334,12 @@ BEGIN
       WHEN 'synthetic_email' THEN format($e$CASE WHEN %s IS NULL THEN NULL ELSE 'user' || substr(md5(%L || %s), 1, 12) || '@example.invalid' END$e$, col, salt, col)
       WHEN 'redact_text'     THEN format('scrub_redact(%s)', col)
       WHEN 'hash_token'      THEN format('CASE WHEN %s IS NULL THEN NULL ELSE substr(md5(%L || %s), 1, 16) END', col, salt, col)
-      WHEN 'discard_secret'  THEN quote_literal('scrubbed:not-a-valid-credential')
+      -- Shaped correctly and derived from nothing: the schema refuses a credential column
+      -- that is not a digest, so a sentinel string would fail the constraint on its way in.
+      -- Correct shape is also what a developer needs - a login path that never sees a
+      -- realistic hash is a login path nobody has tested.
+      WHEN 'scramble_password' THEN format($p$CASE WHEN %s IS NULL THEN NULL ELSE '$argon2id$v=19$m=65536,t=3,p=4$' || substr(md5(%L || %s), 1, 22) || '$' || substr(md5(%L || %s) || md5(%s || %L), 1, 43) END$p$, col, salt, col, salt, col, col, salt)
+      WHEN 'scramble_digest'   THEN format('CASE WHEN %s IS NULL THEN NULL ELSE md5(%L || %s) || md5(%s || %L) END', col, salt, col, col, salt)
       WHEN 'null_out'        THEN 'NULL'
       WHEN 'shift_days'      THEN CASE WHEN r.dt = 'date'
                                        THEN format('%s + %s', col, shift)

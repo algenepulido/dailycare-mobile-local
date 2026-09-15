@@ -111,6 +111,48 @@ COMMENT ON COLUMN facilities.timezone IS
 -- the membership rows below, never from a column here — the same person can be a
 -- caregiver at one facility and a daughter at another.
 
+-- ════════════════════════════════════════════════════════════════════ credentials
+--
+-- What a credential column may contain, written once and used by both the constraint that
+-- enforces it and the trigger that reports it.
+
+CREATE OR REPLACE FUNCTION is_argon2id(candidate text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT candidate ~ '^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]{16,}\$[A-Za-z0-9+/]{16,}$'
+$$;
+
+CREATE OR REPLACE FUNCTION is_sha256_hex(candidate text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT candidate ~ '^[0-9a-f]{64}$'
+$$;
+
+-- A check constraint is the right enforcement and the wrong error message. PostgreSQL
+-- reports the failing row in full, so the rejection of a plaintext password is itself a
+-- message containing that password, on its way to wherever the application sends errors.
+-- That is precisely the accidental exposure the vendor register names Cloud Logging for,
+-- and it would have been introduced by the constraint meant to prevent the problem.
+--
+-- So the constraint stays as the backstop and this runs first, refusing without repeating
+-- the value. Both use the same predicate, so they cannot come to disagree, and the
+-- constraint still holds if somebody disables the trigger.
+
+CREATE OR REPLACE FUNCTION reject_unhashed_credential() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  value text := to_jsonb(NEW) ->> TG_ARGV[0];
+  ok    boolean;
+BEGIN
+  IF value IS NULL THEN RETURN NEW; END IF;
+  EXECUTE format('SELECT %I($1)', TG_ARGV[1]) INTO ok USING value;
+  IF NOT ok THEN
+    RAISE EXCEPTION '%.% is not %', TG_TABLE_NAME, TG_ARGV[0], TG_ARGV[2]
+      USING ERRCODE = 'check_violation',
+            HINT = 'The value is deliberately not repeated here. A database error carrying a credential ends up wherever errors are logged.';
+  END IF;
+  RETURN NEW;
+END; $$;
+
+
 CREATE TABLE users (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email              citext NOT NULL UNIQUE,
@@ -120,7 +162,17 @@ CREATE TABLE users (
   last_seen_at       timestamptz,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now(),
-  deactivated_at     timestamptz    -- sign-in refused, records they filed are untouched
+  deactivated_at     timestamptz,   -- sign-in refused, records they filed are untouched
+
+  -- A password that reaches this column in any form other than an Argon2id digest is
+  -- refused by the database. "We hash credentials" is otherwise a property of whichever
+  -- handler happened to write the row, and the day somebody adds a second one - an admin
+  -- import, a seeding script, a migration - it stops being true quietly.
+  --
+  -- Pinning the algorithm here is deliberate. Changing how a password is stored should
+  -- be a migration somebody wrote on purpose, not a line in a handler.
+  CONSTRAINT password_hash_is_argon2id
+    CHECK (password_hash IS NULL OR is_argon2id(password_hash))
 );
 
 -- Password reset and invitation acceptance both land here. Single-use, short-lived, and
@@ -130,7 +182,9 @@ CREATE TABLE user_tokens (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   purpose     text NOT NULL CHECK (purpose IN ('password_reset', 'invitation', 'email_verification')),
-  token_hash  text NOT NULL,
+  -- Same rule as a session. An invitation or reset link is a bearer credential: the only
+  -- copy that should exist outside the recipient's inbox is a digest.
+  token_hash  text NOT NULL CHECK (is_sha256_hex(token_hash)),
   expires_at  timestamptz NOT NULL,
   consumed_at timestamptz,
   created_at  timestamptz NOT NULL DEFAULT now()
@@ -139,10 +193,15 @@ CREATE TABLE user_tokens (
 CREATE INDEX ON user_tokens (user_id, purpose) WHERE consumed_at IS NULL;
 CREATE INDEX ON user_tokens (token_hash);
 
+
 CREATE TABLE sessions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  refresh_hash    text NOT NULL,
+  -- The token itself is shown to the client once and never stored. What is kept is a
+  -- SHA-256 of it, and the constraint is what makes that a fact about the table rather
+  -- than about the code that last wrote to it: a raw token is the wrong shape and is
+  -- refused. A stolen dump of this table cannot be replayed as a session.
+  refresh_hash    text NOT NULL CHECK (is_sha256_hex(refresh_hash)),
   device_label    text,          -- "iPhone 15", for a user reviewing their own sessions
   issued_at       timestamptz NOT NULL DEFAULT now(),
   last_used_at    timestamptz NOT NULL DEFAULT now(),
@@ -159,6 +218,22 @@ COMMENT ON TABLE sessions IS
 
 
 -- ════════════════════════════════════════════════════════════════════ staff roles
+
+-- The polite door, attached once all three credential tables exist. The check constraints
+-- on those columns are the enforcement; these only make the refusal safe to log.
+
+CREATE TRIGGER reject_plaintext_password BEFORE INSERT OR UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION
+  reject_unhashed_credential('password_hash', 'is_argon2id', 'an Argon2id digest');
+
+CREATE TRIGGER reject_plaintext_refresh_token BEFORE INSERT OR UPDATE ON sessions
+  FOR EACH ROW EXECUTE FUNCTION
+  reject_unhashed_credential('refresh_hash', 'is_sha256_hex', 'a SHA-256 digest');
+
+CREATE TRIGGER reject_plaintext_token BEFORE INSERT OR UPDATE ON user_tokens
+  FOR EACH ROW EXECUTE FUNCTION
+  reject_unhashed_credential('token_hash', 'is_sha256_hex', 'a SHA-256 digest');
+
 
 CREATE TABLE facility_members (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),

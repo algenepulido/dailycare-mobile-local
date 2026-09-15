@@ -51,22 +51,27 @@ INSERT INTO facilities (id, name, timezone) VALUES
 INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days)
 VALUES ('f1000000-0000-0000-0000-000000000001', 2555, 2555, 2190);
 
+-- The credential canaries have to be the shape the schema demands, or the row never
+-- lands and the check that follows would be searching an empty table. Base64 for a
+-- password digest, lowercase hex for a token.
 INSERT INTO users (id, email, display_name, password_hash) VALUES
   ('a0000000-0000-0000-0000-00000000000a', 'maria.CANARY-EMAIL-4b71@realdomain.test',
-   'Maria CANARY-STAFFNAME-8d03', '$argon2id$v=19$m=65536,t=3,p=4$CANARY-SECRET-1f55'),
+   'Maria CANARY-STAFFNAME-8d03',
+   '$argon2id$v=19$m=65536,t=3,p=4$CANARYSECRET1f55aaaaaa$' || repeat('b', 43)),
   ('a0000000-0000-0000-0000-00000000000b', 'daniel.CANARY-EMAIL-2a90@realdomain.test',
-   'Daniel CANARY-STAFFNAME-6e14', '$argon2id$v=19$m=65536,t=3,p=4$CANARY-SECRET-7b22');
+   'Daniel CANARY-STAFFNAME-6e14',
+   '$argon2id$v=19$m=65536,t=3,p=4$CANARYSECRET7b22aaaaaa$' || repeat('c', 43));
 
 INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
   ('fa000000-0000-0000-0000-00000000000a', 'f1000000-0000-0000-0000-000000000001',
    'a0000000-0000-0000-0000-00000000000a', 'caregiver', 'active');
 
 INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at) VALUES
-  ('a0000000-0000-0000-0000-00000000000a', 'CANARY-REFRESH-3e88',
+  ('a0000000-0000-0000-0000-00000000000a', 'deadbeefcafe3e88' || repeat('a', 48),
    'iPhone 15 CANARY-DEVICE-5c41', now() + interval '30 days');
 
 INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
-  ('a0000000-0000-0000-0000-00000000000a', 'invitation', 'CANARY-TOKEN-0d76',
+  ('a0000000-0000-0000-0000-00000000000a', 'invitation', 'deadbeefcafe0d76' || repeat('a', 48),
    now() + interval '7 days');
 
 INSERT INTO residents (id, facility_id, display_name, external_source, external_patient_id,
@@ -122,8 +127,8 @@ CREATE TEMP TABLE canaries (pattern text);
 INSERT INTO canaries VALUES
   ('CANARY-RESIDENT-7f3a'), ('CANARY-RESIDENT-1c58'), ('CANARY-NOTE-6a19'),
   ('CANARY-EMAIL-4b71'),    ('CANARY-EMAIL-2a90'),    ('CANARY-STAFFNAME-8d03'),
-  ('CANARY-STAFFNAME-6e14'),('CANARY-SECRET-1f55'),   ('CANARY-SECRET-7b22'),
-  ('CANARY-REFRESH-3e88'),  ('CANARY-DEVICE-5c41'),   ('CANARY-TOKEN-0d76'),
+  ('CANARY-STAFFNAME-6e14'),('CANARYSECRET1f55'),    ('CANARYSECRET7b22'),
+  ('deadbeefcafe3e88'),     ('CANARY-DEVICE-5c41'),   ('deadbeefcafe0d76'),
   ('CANARY-PATIENT-2b64'),  ('CANARY-SOURCEREF-4d27'),('CANARY-MEDDETAIL-8e35'),
   ('CANARY-OBJECTPATH-3f82'),('CANARY-IPHASH-5a70'),  ('realdomain.test');
 
@@ -138,6 +143,11 @@ UNION ALL SELECT 'resident_contacts', count(*) FROM resident_contacts
 UNION ALL SELECT 'users',             count(*) FROM users
 UNION ALL SELECT 'sessions',          count(*) FROM sessions
 UNION ALL SELECT 'audit_events',      count(*) FROM audit_events;
+
+CREATE TEMP TABLE before_secrets AS
+SELECT 'password:' || id::text AS k, password_hash AS v FROM users
+UNION ALL SELECT 'refresh:' || id::text, refresh_hash FROM sessions
+UNION ALL SELECT 'token:'   || id::text, token_hash   FROM user_tokens;
 
 CREATE TEMP TABLE before_shape AS
 SELECT (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000002')
@@ -284,12 +294,26 @@ SELECT expect('every login is an address that cannot receive mail',
 SELECT expect('and the logins are still distinct from one another',
   (SELECT count(DISTINCT email) = count(*) FROM users));
 
-SELECT expect('no password hash can authenticate anybody',
-  (SELECT count(*) = 0 FROM users WHERE password_hash LIKE '$argon2%'));
+SELECT expect('not one credential is the digest it was',
+  NOT EXISTS (
+    SELECT 1 FROM before_secrets b
+    JOIN (SELECT 'password:' || id::text AS k, password_hash AS v FROM users
+          UNION ALL SELECT 'refresh:' || id::text, refresh_hash FROM sessions
+          UNION ALL SELECT 'token:'   || id::text, token_hash   FROM user_tokens) a
+      ON a.k = b.k
+    WHERE a.v IS NOT DISTINCT FROM b.v));
 
-SELECT expect('no refresh token and no invitation token survives',
-  (SELECT count(*) = 0 FROM sessions  WHERE refresh_hash <> 'scrubbed:not-a-valid-credential')
-  AND (SELECT count(*) = 0 FROM user_tokens WHERE token_hash <> 'scrubbed:not-a-valid-credential'));
+-- The replacement is the right shape, not a sentinel. The schema refuses anything else,
+-- and a login path that has never seen a realistic digest is one nobody has tested.
+SELECT expect('and every one of them is still a well-formed digest',
+  (SELECT count(*) = 0 FROM users       WHERE NOT is_argon2id(password_hash))
+  AND (SELECT count(*) = 0 FROM sessions    WHERE NOT is_sha256_hex(refresh_hash))
+  AND (SELECT count(*) = 0 FROM user_tokens WHERE NOT is_sha256_hex(token_hash)));
+
+SELECT expect('which means the credential triggers stayed on through the scrub',
+  (SELECT count(*) = 3 FROM pg_trigger
+   WHERE NOT tgisinternal AND tgfoid = 'reject_unhashed_credential'::regproc
+     AND tgenabled = 'O'));
 
 SELECT expect('the object path no longer carries a name',
   (SELECT object_path !~ 'cathy' AND length(object_path) = 16 FROM media_objects LIMIT 1));

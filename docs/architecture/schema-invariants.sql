@@ -38,6 +38,25 @@ EXCEPTION WHEN others THEN
   RAISE NOTICE 'FAIL  REJECTED, and should not have: % (%)', label, SQLERRM;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
+BEGIN
+  IF condition THEN RAISE NOTICE 'PASS  %', label;
+  ELSE            RAISE NOTICE 'FAIL  %', label;
+  END IF;
+END; $$ LANGUAGE plpgsql;
+
+-- Everything the server would hand back about a refusal: the message, the detail line that
+-- quotes the failing row, and the hint. What the application would log, if it logs errors.
+CREATE OR REPLACE FUNCTION refusal_text(stmt text) RETURNS text AS $$
+DECLARE msg text; det text; hnt text;
+BEGIN
+  EXECUTE stmt;
+  RETURN '<accepted>';
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT, det = PG_EXCEPTION_DETAIL, hnt = PG_EXCEPTION_HINT;
+  RETURN coalesce(msg,'') || ' ' || coalesce(det,'') || ' ' || coalesce(hnt,'');
+END; $$ LANGUAGE plpgsql;
 \set QUIET off
 
 
@@ -186,5 +205,87 @@ SELECT must_reject('a second resident claiming the same clinical record', $$
   WHERE id = '77777777-7777-7777-7777-777777777777'
 $$);
 
+-- ── credentials ────────────────────────────────────────────────────────────────
+--
+-- "Passwords are hashed" is a property of whichever handler last wrote the row. These make
+-- it a property of the table, so it survives the second handler nobody remembers about -
+-- an import, a seeding script, a migration written in a hurry.
+
+\echo ''
+\echo '── what a credential column will accept'
+
+SELECT must_reject('a password stored as the user typed it', $$
+  INSERT INTO users (email, display_name, password_hash)
+  VALUES ('plaintext@example.test', 'Plain', 'hunter2')
+$$);
+
+SELECT must_reject('a password digest from some other algorithm', $$
+  INSERT INTO users (email, display_name, password_hash)
+  VALUES ('bcrypt@example.test', 'Bee', '$2b$12$K7k9Zr8aQeF3xN0pLm2sOu7yTgB1cVdEwXfHiJkLmNoPqRsTuVwXy')
+$$);
+
+SELECT must_accept('an Argon2id digest', $$
+  INSERT INTO users (email, display_name, password_hash)
+  VALUES ('hashed@example.test', 'Hashed',
+          '$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHR2YWx1ZQ$aGFzaHZhbHVlaGFzaHZhbHVlaGFzaHZhbHVlaGFzaA')
+$$);
+
+SELECT must_reject('a refresh token kept as the client received it', $$
+  INSERT INTO sessions (user_id, refresh_hash, expires_at)
+  VALUES ('22222222-2222-2222-2222-222222222222', 'rt_live_9f2a7c4e', now() + interval '30 days')
+$$);
+
+SELECT must_accept('a refresh token kept as a SHA-256 digest', $$
+  INSERT INTO sessions (user_id, refresh_hash, expires_at)
+  VALUES ('22222222-2222-2222-2222-222222222222', md5('one') || md5('two'),
+          now() + interval '30 days')
+$$);
+
+SELECT must_reject('an invitation token digest of the wrong length', $$
+  INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
+  VALUES ('22222222-2222-2222-2222-222222222222', 'invitation', 'abc123',
+          now() + interval '7 days')
+$$);
+
+
+-- The refusal is the second half of this. A check constraint reports the failing row in
+-- full, so the rejection of a plaintext password is a message containing that password -
+-- on its way to wherever the application sends errors.
+
+\echo ''
+\echo '── and what the refusal says about the value it refused'
+
+SELECT expect('the refusal repeats nothing of the password',
+  position('hunter2' in refusal_text($$
+    INSERT INTO users (email, display_name, password_hash)
+    VALUES ('leak@example.test', 'Leak', 'hunter2')
+  $$)) = 0);
+
+SELECT expect('nor of a raw refresh token',
+  position('rt_live_9f2a7c4e' in refusal_text($$
+    INSERT INTO sessions (user_id, refresh_hash, expires_at)
+    VALUES ('22222222-2222-2222-2222-222222222222', 'rt_live_9f2a7c4e', now() + interval '1 day')
+  $$)) = 0);
+
+\set QUIET on
+ALTER TABLE users DISABLE TRIGGER reject_plaintext_password;
+\set QUIET off
+
+SELECT expect('though the constraint alone would have, which is why the trigger is there',
+  position('hunter2' in refusal_text($$
+    INSERT INTO users (email, display_name, password_hash)
+    VALUES ('leak2@example.test', 'Leak', 'hunter2')
+  $$)) > 0);
+
+SELECT expect('and the constraint still refuses it with the trigger switched off',
+  (SELECT count(*) = 0 FROM users WHERE email = 'leak2@example.test'));
+
+\set QUIET on
+ALTER TABLE users ENABLE TRIGGER reject_plaintext_password;
+\set QUIET off
+
+
 DROP FUNCTION must_reject(text, text);
 DROP FUNCTION must_accept(text, text);
+DROP FUNCTION expect(text, boolean);
+DROP FUNCTION refusal_text(text);

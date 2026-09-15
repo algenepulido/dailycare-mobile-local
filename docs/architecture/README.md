@@ -9,7 +9,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | | |
 |---|---|
 | `schema.sql` | The production schema. 15 tables, 12 enums. Applied first. |
-| `schema-invariants.sql` | The guarantees the schema makes, written as the smallest statements that prove them. Self-reporting. |
+| `schema-invariants.sql` | The guarantees the schema makes, written as the smallest statements that prove them. Self-reporting. Includes what a credential column will and will not accept. |
 | `access-policies.sql` | The three roles as row-level security. Applied after the schema. |
 | `access-invariants.sql` | Attempts to reach things that should be unreachable. Runs as a non-superuser, because a superuser bypasses row-level security and would report that everything works. |
 | `data-classification.sql` | Which columns hold PHI, and the views that generate the inventory from it. |
@@ -38,17 +38,17 @@ psql -v ON_ERROR_STOP=1 -d dc_check -f retention.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f environments.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f vendors.sql
 
-psql -d dc_check -f schema-invariants.sql     # 14 checks
+psql -d dc_check -f schema-invariants.sql     # 24 checks
 psql -d dc_check -f access-invariants.sql     # 24 checks
 psql -d dc_check -f audit-invariants.sql      # 13 checks
 psql -d dc_check -f retention-invariants.sql  # 38 checks
-psql -d dc_check -f environment-invariants.sql # 36 checks
+psql -d dc_check -f environment-invariants.sql # 37 checks
 psql -d dc_check -f vendor-invariants.sql     # 23 checks
 
 dropdb dc_check
 ```
 
-Each invariant file prints `PASS` or `FAIL` per check, on stderr. 148 checks in total. A `FAIL` means a
+Each invariant file prints `PASS` or `FAIL` per check, on stderr. 159 checks in total. A `FAIL` means a
 guarantee has been removed — which is sometimes the right thing to do, but it should be a
 decision rather than a discovery.
 
@@ -125,6 +125,15 @@ are a table with a completeness check — a column added in a later migration ar
 without a rule and the scrub refuses to run at all. What is kept is kept deliberately, with
 a reason recorded: once names are gone and every date has moved by one offset, a mood and a
 meal amount are what make the copy worth developing against.
+
+**A credential column refuses anything but a digest.** "Passwords are hashed" is otherwise
+a property of whichever handler last wrote the row, and stops being true the day a second
+one appears — an import, a seeding script, a migration written in a hurry. A check
+constraint is the enforcement; a trigger using the same predicate runs first and produces
+the refusal, because PostgreSQL reports a failing row in full and the rejection of a
+plaintext password would otherwise be a message containing that password, on its way to
+wherever errors are logged. The suite proves both halves: the refusal repeats nothing, and
+with the trigger switched off it would have.
 
 **A third party that could receive PHI by accident needs a control, not a contract.** The
 vendors everyone remembers are the ones the data is sent to. The one that gets missed is
