@@ -433,8 +433,13 @@ CREATE TABLE audit_events (
   action        text NOT NULL,               -- 'care_day.read', 'resident.update', ...
   subject_type  text NOT NULL,               -- 'resident', 'care_day', 'media_object'
   subject_id    uuid,
-  resident_id   uuid REFERENCES residents(id),  -- denormalised: the question is always
-                                                -- "who saw this resident's record"
+  -- Denormalised, because the question is always "who saw this resident's record".
+  -- Deliberately not a foreign key: the trail has to outlive the record it describes.
+  -- Audit is kept for years; a care record is deleted when the facility's retention
+  -- window closes, and a reference here would make that deletion impossible. After
+  -- retention this column names a resident who no longer exists, which is the correct
+  -- answer rather than a dangling one.
+  resident_id   uuid,
 
   request_id    text,        -- ties a row to one HTTP request across services
   ip_hash       text,        -- hashed, not stored raw
