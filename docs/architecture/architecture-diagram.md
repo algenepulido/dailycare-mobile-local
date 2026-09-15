@@ -48,8 +48,8 @@ graph TB
   API -->|"a link and a code, no name"| SMS
   SMS -->|"text message"| FM
 
-  classDef phi fill:#7f1d1d,stroke:#450a0a,color:#fff
-  classDef near fill:#78350f,stroke:#451a03,color:#fff
+  classDef phi fill:#991b1b,stroke:#450a0a,color:#fff
+  classDef near fill:#c2410c,stroke:#7c2d12,color:#fff
   class DB,GCS phi
   class API,JOB,PCC near
 ```
@@ -87,6 +87,12 @@ graph LR
     S3[("audit_events<br/><i>who touched what, never what it said</i>")]
   end
 
+  subgraph legend["What the colour means"]
+    L1["Holds a resident's record"]
+    L2["Handles one without keeping it"]
+    L3["Never sees one"]
+  end
+
   subgraph never["Never holds a record"]
     N1["Cloud Logging<br/><i>uuids and codes</i>"]
     N2["Twilio<br/><i>a link and a code</i>"]
@@ -105,12 +111,14 @@ graph LR
   S1 --> P2
   S2 --> P2
 
-  classDef phi fill:#7f1d1d,stroke:#450a0a,color:#fff
-  classDef near fill:#78350f,stroke:#451a03,color:#fff
-  classDef clean fill:#14532d,stroke:#052e16,color:#fff
+  classDef phi fill:#991b1b,stroke:#450a0a,color:#fff
+  classDef near fill:#c2410c,stroke:#7c2d12,color:#fff
+  classDef clean fill:#15803d,stroke:#052e16,color:#fff
   class C1,C2,C3,S1,S2 phi
   class T1,T2,T3,P1,P2,S3 near
-  class N1,N2,N3,N4 clean
+  class N1,N2,N3,N4,L3 clean
+  class L1 phi
+  class L2 near
 ```
 
 `audit_events` is amber rather than red on purpose. It records which columns changed and
