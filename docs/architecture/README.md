@@ -19,6 +19,8 @@ constraint and a constraint are different things, and only one of them stops a m
 | `retention-invariants.sql` | Counts rows in the tables themselves after a retention run, because a soft delete would pass a test that only asked the API. |
 | `environments.sql` | How a production snapshot becomes a database a developer may hold: what is replaced, what is deliberately kept, and the two locks that stop it running anywhere near production. |
 | `environment-invariants.sql` | Plants a unique string in every sensitive field, scrubs, then searches every column of every table for all of them. |
+| `vendors.sql` | Who else touches the data, what they touch, and which agreements are not in place yet. |
+| `vendor-invariants.sql` | Moves the register into each bad state in turn and asks whether anything noticed. |
 
 ## Verifying it
 
@@ -34,17 +36,19 @@ psql -v ON_ERROR_STOP=1 -d dc_check -f data-classification.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f audit-logging.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f retention.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f environments.sql
+psql -v ON_ERROR_STOP=1 -d dc_check -f vendors.sql
 
 psql -d dc_check -f schema-invariants.sql     # 14 checks
 psql -d dc_check -f access-invariants.sql     # 24 checks
 psql -d dc_check -f audit-invariants.sql      # 13 checks
 psql -d dc_check -f retention-invariants.sql  # 38 checks
 psql -d dc_check -f environment-invariants.sql # 36 checks
+psql -d dc_check -f vendor-invariants.sql     # 23 checks
 
 dropdb dc_check
 ```
 
-Each invariant file prints `PASS` or `FAIL` per check, on stderr. 125 checks in total. A `FAIL` means a
+Each invariant file prints `PASS` or `FAIL` per check, on stderr. 148 checks in total. A `FAIL` means a
 guarantee has been removed — which is sometimes the right thing to do, but it should be a
 decision rather than a discovery.
 
@@ -58,6 +62,12 @@ The classification has one further check, and it is a query rather than a script
 SELECT * FROM unclassified_columns;   -- must be empty
 SELECT * FROM unscrubbed_columns;     -- must be empty
 SELECT * FROM phi_inventory;          -- what goes to the reviewer
+
+SELECT * FROM phi_vendors;            -- who else touches a resident record
+SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
+SELECT * FROM live_without_agreement; -- must be empty
+SELECT * FROM unacknowledged_gaps;    -- must be empty
+SELECT * FROM uncontrolled_exposure;  -- must be empty
 ```
 
 A column added in a later migration arrives unclassified and appears in the first query.
@@ -115,6 +125,16 @@ are a table with a completeness check — a column added in a later migration ar
 without a rule and the scrub refuses to run at all. What is kept is kept deliberately, with
 a reason recorded: once names are gone and every date has moved by one offset, a mood and a
 meal amount are what make the copy worth developing against.
+
+**A third party that could receive PHI by accident needs a control, not a contract.** The
+vendors everyone remembers are the ones the data is sent to. The one that gets missed is
+the logging service that receives whatever an error message happened to contain, and no
+agreement stops a stack trace carrying a resident's name. So exposure is recorded as four
+kinds and anything marked `could_receive` must name what stops it — enforced by a
+constraint, not by a view noticing afterwards. The register is also allowed to hold an
+uncomfortable answer: gaps are expected, and what must be empty is the set of gaps with
+nobody's name on them and the set of vendors already carrying live records without an
+agreement.
 
 **An unidentified request sees nothing.** Access resolves from a session variable the
 application sets per request. Unset compares false everywhere, so the failure mode of
