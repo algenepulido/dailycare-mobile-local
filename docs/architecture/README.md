@@ -33,6 +33,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | `encryption-and-secrets.sql` | Where every secret lives, what is kept instead of it, and what is encrypted — including the two controls that were declined and why. |
 | `secrets-invariants.sql` | Mostly negative controls: a credential in the repository, one baked into an image, one nobody said anything about. |
 | `checks-support.sql` | Not part of the model. What lets a suite give the same answers to a superuser and to a managed-instance owner. |
+| `review.sh` | The whole thing in one command, in a throwaway container, for a reviewer with nothing installed but Docker. |
 | `verify.sh` | Runs every suite, each in its own database, and exits non-zero if anything failed. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
 | `inktree-alignment.md` | Where this model meets the InkTree field guide and where it does not, and the one difference that is a boundary rather than a preference. |
@@ -42,9 +43,21 @@ constraint and a constraint are different things, and only one of them stops a m
 Everything below runs against scratch databases and leaves nothing behind. PostgreSQL 14
 or newer.
 
+With nothing installed but Docker, and nothing left behind:
+
 ```bash
-./verify.sh          # 277 checks across ten suites
-./restore-drill.sh --build   # 13 more, and a real dump and restore
+./review.sh
+```
+
+That starts a throwaway PostgreSQL 14, runs everything inside it as an ordinary database
+user, and removes the container. It runs as an ordinary user rather than as a superuser
+deliberately — see below.
+
+With your own PostgreSQL:
+
+```bash
+./verify.sh                  # 277 checks across ten suites
+./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
 `verify.sh` is the whole thing: it creates the three application roles once, then builds a

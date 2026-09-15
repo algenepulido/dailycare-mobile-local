@@ -17,6 +17,25 @@ family accounts, links and photo download, notifications, email and SMS delivery
 report automation, HIPAA production infrastructure, App Store release, and final visual
 polish.
 
+## Milestone 2 — the production foundation
+
+The data model, the access model and the HIPAA architecture review package are in
+[`docs/architecture`](docs/architecture). That directory is SQL rather than prose, because
+a description of a constraint and a constraint are different things and only one of them
+stops a mistake.
+
+For a reviewer with nothing installed but Docker, the whole of it runs in one command and
+leaves nothing behind:
+
+```bash
+cd docs/architecture
+./review.sh
+```
+
+It starts a throwaway PostgreSQL 14, runs 277 checks across ten suites and a restore drill
+as an ordinary database user, and removes the container. `docs/architecture/README.md` maps
+every item in the review package to the file that answers it.
+
 ## Requirements
 
 | | |
