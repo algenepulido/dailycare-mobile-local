@@ -98,6 +98,13 @@ INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, 
    'e2000000-0000-0000-0000-000000000002', '2026-09-14', 'calm', 'good', 'slept_well',
    'a0000000-0000-0000-0000-00000000000a');
 
+-- One meal and one concern on Cathy's day, so that the checks about what cannot be deleted
+-- have something to fail to delete.
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-000000000001', 'breakfast', true, 'half');
+INSERT INTO care_day_concerns (care_day_id, concern) VALUES
+  ('cd000000-0000-0000-0000-000000000001', 'sundowning');
+
 SET ROLE dailycare_app;
 
 
@@ -191,6 +198,91 @@ SELECT expect_rows('her own grant, so the app can list who she is linked to', 1,
 -- ── access that has been taken away ────────────────────────────────────────────
 
 \echo ''
+-- ── nothing deletes ────────────────────────────────────────────────────────────
+--
+-- These exist because the previous version of this file proved the wrong thing. It tried
+-- to delete a resident as the application, saw nothing removed, and passed - while
+-- app.user_id was unset, so the row was hidden rather than protected. The care manager
+-- below is identified and is the one person who would be expected to get away with it.
+
+\echo ''
+\echo '── what the application may destroy, which is nothing'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false) \gset
+
+SELECT expect_rows('an identified care manager sees her residents, so she is really a manager', 2,
+  'SELECT * FROM residents');
+
+-- Table-level DELETE is granted for this section on purpose. In production it is not
+-- granted at all, and the point of these checks is that the policies would stop the
+-- deletes even if it were - so that the guarantee does not rest on one GRANT nobody
+-- reviews again.
+RESET ROLE;
+\set QUIET on
+GRANT DELETE ON residents, resident_contacts, care_days, care_day_meals,
+  care_day_concerns, medication_events, media_objects TO dailycare_app;
+\set QUIET off
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false) \gset
+
+\set QUIET on
+DELETE FROM residents         WHERE id = 'e1000000-0000-0000-0000-000000000001';
+DELETE FROM resident_contacts WHERE resident_id = 'e1000000-0000-0000-0000-000000000001';
+DELETE FROM care_days         WHERE id = 'cd000000-0000-0000-0000-000000000001';
+DELETE FROM medication_events WHERE resident_id = 'e1000000-0000-0000-0000-000000000001';
+DELETE FROM media_objects     WHERE resident_id = 'e1000000-0000-0000-0000-000000000001';
+\set QUIET off
+
+SELECT expect_rows('and she still cannot remove one', 2, 'SELECT * FROM residents');
+SELECT expect_rows('nor withdraw access by deleting the grant', 1,
+  'SELECT * FROM resident_contacts');
+SELECT expect_rows('nor remove a care day', 2, 'SELECT * FROM care_days');
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+\set QUIET on
+DELETE FROM care_day_meals    WHERE care_day_id = 'cd000000-0000-0000-0000-000000000001';
+DELETE FROM care_day_concerns WHERE care_day_id = 'cd000000-0000-0000-0000-000000000001';
+\set QUIET off
+RESET ROLE;
+
+SELECT expect_rows('nor a caregiver a meal she filed', 1,
+  $$SELECT * FROM care_day_meals WHERE care_day_id = 'cd000000-0000-0000-0000-000000000001'$$);
+SELECT expect_rows('nor a concern', 1,
+  $$SELECT * FROM care_day_concerns WHERE care_day_id = 'cd000000-0000-0000-0000-000000000001'$$);
+
+-- And the structural version of the same statement, which does not depend on anybody
+-- having thought to try the right delete.
+SELECT expect_rows('no policy in the access model permits an application role to delete', 0,
+  $$SELECT * FROM pg_policies
+    WHERE schemaname = 'public' AND cmd IN ('DELETE','ALL')
+      AND NOT (roles::text LIKE '%dailycare_retention%')$$);
+
+
+-- ── the matrix and the database agree ──────────────────────────────────────────
+
+\echo ''
+\echo '── the access matrix against the catalogue it describes'
+
+SELECT expect_rows('every actor has an answer for every table and every operation', 0,
+  'SELECT * FROM access_matrix_blanks');
+
+SELECT expect_rows('and the matrix is not empty, which would make that cheap',
+  192, 'SELECT * FROM access_matrix');
+
+SELECT expect_rows('no table permits a delete the matrix says nothing can be deleted from', 0,
+  'SELECT * FROM access_matrix_delete_drift');
+
+SELECT expect_rows('no PHI-bearing table is missing from the matrix', 0,
+  'SELECT * FROM access_matrix_uncovered_tables');
+
+\echo ''
+\echo '── the matrix as the reviewer reads it'
+SELECT table_name, operation, caregiver, care_manager, family FROM access_matrix_report
+WHERE table_name IN ('residents','care_days','media_objects') ORDER BY table_name, operation;
+
+
 \echo '── after access is withdrawn and after a shift ends'
 RESET ROLE;
 UPDATE resident_contacts SET state = 'revoked', revoked_at = now()

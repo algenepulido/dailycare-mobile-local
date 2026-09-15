@@ -288,10 +288,10 @@ CREATE POLICY care_days_retention_select ON care_days FOR SELECT
 CREATE POLICY care_days_retention_delete ON care_days FOR DELETE
   TO dailycare_retention USING (retention_resident_expired(resident_id));
 
-CREATE POLICY care_day_meals_retention_delete ON care_day_meals FOR DELETE
-  TO dailycare_retention USING (false);
-CREATE POLICY care_day_concerns_retention_delete ON care_day_concerns FOR DELETE
-  TO dailycare_retention USING (false);
+-- Nothing for care_day_meals or care_day_concerns, deliberately. They belong to a care day
+-- and go when it goes, by cascade, which the referential action performs rather than this
+-- role. A policy permitting nothing would say the same thing while reading, to anything
+-- inspecting the catalogue, as a delete path that exists.
 
 CREATE POLICY medication_retention_select ON medication_events FOR SELECT
   TO dailycare_retention USING (true);
@@ -317,6 +317,3 @@ CREATE POLICY media_retention_confirm ON media_objects FOR UPDATE
   TO dailycare_retention
   USING (deleted_at IS NULL) WITH CHECK (deleted_at IS NOT NULL);
 
-COMMENT ON POLICY care_day_meals_retention_delete ON care_day_meals IS
-  'Never directly. Meals and concerns belong to a care day and go when it goes, by
-   cascade, which the referential action performs rather than this role.';

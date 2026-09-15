@@ -17,7 +17,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_PREFIX="${DB_PREFIX:-dc_verify}"
 
-MODEL=(schema.sql access-policies.sql data-classification.sql audit-logging.sql
+MODEL=(schema.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
        retention.sql environments.sql vendors.sql backup-recovery.sql
        checks-support.sql)
 SUITES=(schema-invariants.sql access-invariants.sql audit-invariants.sql

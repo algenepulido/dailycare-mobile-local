@@ -119,7 +119,15 @@ CREATE POLICY residents_read ON residents FOR SELECT
 
 -- Only a care manager creates or edits a resident. A caregiver files days about them;
 -- they do not admit them or change their baseline.
-CREATE POLICY residents_write ON residents FOR ALL
+-- Deliberately not FOR ALL. ALL includes DELETE, which is how a policy meant to say
+-- "a manager may admit and correct a resident" quietly also says "and may destroy one".
+-- Found by the access matrix, which compares what the catalogue permits against what the
+-- model claims, and reported a DELETE policy on a table nothing is supposed to be deleted
+-- from. Every write policy below is spelled out for the same reason.
+CREATE POLICY residents_insert ON residents FOR INSERT
+  WITH CHECK (app_is_care_manager(facility_id));
+
+CREATE POLICY residents_update ON residents FOR UPDATE
   USING      (app_is_care_manager(facility_id))
   WITH CHECK (app_is_care_manager(facility_id));
 
@@ -146,7 +154,11 @@ CREATE POLICY care_day_meals_read ON care_day_meals FOR SELECT
   USING (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
                    AND app_may_read_resident(cd.resident_id, cd.facility_id)));
 
-CREATE POLICY care_day_meals_write ON care_day_meals FOR ALL
+CREATE POLICY care_day_meals_insert ON care_day_meals FOR INSERT
+  WITH CHECK (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
+                        AND app_may_write_resident(cd.resident_id, cd.facility_id)));
+
+CREATE POLICY care_day_meals_update ON care_day_meals FOR UPDATE
   USING      (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
                         AND app_may_write_resident(cd.resident_id, cd.facility_id)))
   WITH CHECK (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
@@ -156,7 +168,11 @@ CREATE POLICY care_day_concerns_read ON care_day_concerns FOR SELECT
   USING (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
                    AND app_may_read_resident(cd.resident_id, cd.facility_id)));
 
-CREATE POLICY care_day_concerns_write ON care_day_concerns FOR ALL
+CREATE POLICY care_day_concerns_insert ON care_day_concerns FOR INSERT
+  WITH CHECK (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
+                        AND app_may_write_resident(cd.resident_id, cd.facility_id)));
+
+CREATE POLICY care_day_concerns_update ON care_day_concerns FOR UPDATE
   USING      (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
                         AND app_may_write_resident(cd.resident_id, cd.facility_id)))
   WITH CHECK (EXISTS (SELECT 1 FROM care_days cd WHERE cd.id = care_day_id
@@ -199,6 +215,12 @@ CREATE POLICY contacts_read ON resident_contacts FOR SELECT
 
 -- Only a care manager grants or withdraws access. A caregiver files care; they do not
 -- decide who in a family may read it.
-CREATE POLICY contacts_write ON resident_contacts FOR ALL
+CREATE POLICY contacts_insert ON resident_contacts FOR INSERT
+  WITH CHECK (app_is_care_manager(facility_id));
+
+-- Access is withdrawn by revoking the row, never by removing it: revoked_by and revoked_at
+-- are answers a reviewer asks for, and neither can be reconstructed from a row that is
+-- gone. Which is also why there is no DELETE policy here.
+CREATE POLICY contacts_update ON resident_contacts FOR UPDATE
   USING      (app_is_care_manager(facility_id))
   WITH CHECK (app_is_care_manager(facility_id));
