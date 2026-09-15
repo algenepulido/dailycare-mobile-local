@@ -13,6 +13,9 @@ constraint and a constraint are different things, and only one of them stops a m
 | `schema-invariants.sql` | The guarantees the schema makes, written as the smallest statements that prove them. Self-reporting. Includes what a credential column will and will not accept. |
 | `access-policies.sql` | The three roles as row-level security. Applied after the schema. |
 | `access-invariants.sql` | Attempts to reach things that should be unreachable. Runs as a non-superuser, because a superuser bypasses row-level security and would report that everything works. |
+| `architecture-diagram.md` | The four diagrams: what the pieces are, where a resident's record exists, one request end to end, and the one flow that leaves the database. |
+| `authentication.sql` | Sessions, refresh rotation and single-use tokens. What could be moved out of a handler and into the database. |
+| `auth-invariants.sql` | Including the milestone's own acceptance criteria: reinstall and sign back in, and two authorised devices. |
 | `access-matrix.sql` | The role and access-control matrix as a table, checked against the catalogue it describes. |
 | `data-classification.sql` | Which columns hold PHI, and the views that generate the inventory from it. |
 | `audit-logging.sql` | Triggers that record every write to a PHI table, and the coverage views that find a table without one. |
@@ -25,6 +28,10 @@ constraint and a constraint are different things, and only one of them stops a m
 | `vendor-invariants.sql` | Moves the register into each bad state in turn and asks whether anything noticed. |
 | `backup-recovery.sql` | What is backed up, for how long, who may restore it, and the record of somebody having done so. |
 | `backup-invariants.sql` | Mostly the restore gate: a database that finds itself somewhere other than where it was written serves nothing until it has been scrubbed. |
+| `phi-safe-logging.sql` | What a log line may not contain, what a notification may say, and what is watched. Generated from the classification rather than remembered. |
+| `logging-invariants.sql` | Including the notification somebody will ask for — the one that names a resident — being refused. |
+| `encryption-and-secrets.sql` | Where every secret lives, what is kept instead of it, and what is encrypted — including the two controls that were declined and why. |
+| `secrets-invariants.sql` | Mostly negative controls: a credential in the repository, one baked into an image, one nobody said anything about. |
 | `checks-support.sql` | Not part of the model. What lets a suite give the same answers to a superuser and to a managed-instance owner. |
 | `verify.sh` | Runs every suite, each in its own database, and exits non-zero if anything failed. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
@@ -36,7 +43,7 @@ Everything below runs against scratch databases and leaves nothing behind. Postg
 or newer.
 
 ```bash
-./verify.sh          # 204 checks across seven suites
+./verify.sh          # 277 checks across ten suites
 ./restore-drill.sh --build   # 13 more, and a real dump and restore
 ```
 
@@ -55,17 +62,20 @@ By hand, one suite at a time, the same way the script does it:
 psql -d postgres -f roles.sql          # once per cluster
 
 createdb dc_check
-for f in schema.sql access-policies.sql data-classification.sql access-matrix.sql \
+for f in schema.sql authentication.sql access-policies.sql data-classification.sql \
+         access-matrix.sql \
          audit-logging.sql retention.sql environments.sql vendors.sql \
-         backup-recovery.sql checks-support.sql; do
+         backup-recovery.sql phi-safe-logging.sql encryption-and-secrets.sql \
+         checks-support.sql; do
   psql -v ON_ERROR_STOP=1 -d dc_check -f $f
 done
 psql -d dc_check -f schema-invariants.sql     # 24 checks
 dropdb dc_check                               # and again for the next suite
 ```
 
-The suites are: `schema` (24), `access` (35), `audit` (13), `retention` (38),
-`environment` (37), `vendor` (23), `backup` (34).
+The suites are: `schema` (24), `access` (38), `audit` (13), `retention` (38),
+`environment` (37), `vendor` (23), `backup` (34), `logging` (23), `auth` (26),
+`secrets` (21).
 
 Each prints `PASS` or `FAIL` per check, on stderr. A `FAIL` means a guarantee has been
 removed — which is sometimes the right thing to do, but it should be a decision rather than
@@ -114,6 +124,16 @@ SELECT * FROM access_matrix_blanks;            -- must be empty
 SELECT * FROM access_matrix_delete_drift;      -- must be empty
 SELECT * FROM access_matrix_uncovered_tables;  -- must be empty
 
+SELECT * FROM never_log;              -- field names a log line may not contain
+SELECT * FROM notification_audit;     -- every template, and what it may interpolate
+SELECT * FROM monitoring_signals;     -- what is watched and who hears about it
+
+SELECT * FROM secrets_inventory;      -- every secret, where it lives, who may read it
+SELECT * FROM secrets_never_rotated;  -- and the argument for each one
+SELECT * FROM encryption_controls;    -- including what was declined, and why
+SELECT * FROM phi_stores_without_encryption;  -- must be empty
+SELECT * FROM session_inventory;      -- sessions per person, active and revoked
+
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
 SELECT * FROM live_without_agreement; -- must be empty
@@ -142,6 +162,34 @@ The one that is not a preference is the direction data flows. InkTree into Daily
 safe. DailyCare into InkTree puts every service that can reach the record into HIPAA scope,
 along with the model and voice providers behind it — which is a decision worth making
 deliberately rather than discovering after the first feature that needed it.
+
+## The review package, item by item
+
+What Milestone 2 asked for, and where each of it is. Nothing here is a document describing
+a control; where a row says "generated" the answer is produced from the database, and where
+it says "checked" a failing suite is what drift looks like.
+
+| Asked for | Where | |
+|---|---|---|
+| Architecture and data-flow diagram | `architecture-diagram.md` | four diagrams, parsed |
+| PHI inventory: created, transmitted, processed, stored | `data-classification.sql`, diagram 2 | generated |
+| GCP services used, and which handle PHI | `vendors.sql` | checked |
+| Authentication and authorisation model | `authentication.sql`, `access-policies.sql` | checked |
+| Role and access-control matrix | `access-matrix.sql` | checked against the catalogue |
+| Resident, caregiver, family, facility relationships | `schema.sql` | checked |
+| Audit logging design | `audit-logging.sql` | checked, with a canary |
+| Retention and deletion design | `retention.sql` | checked |
+| Encryption and secrets management | `encryption-and-secrets.sql` | checked |
+| PHI-safe logging, monitoring, notification | `phi-safe-logging.sql` | generated and checked |
+| Development, test and production separation | `environments.sql` | checked |
+| Backup and recovery | `backup-recovery.sql`, `restore-drill.sh` | drilled |
+| Third-party and vendor inventory | `vendors.sql` | checked |
+| Assumptions, open questions, reviewer confirmations | this file, below | — |
+
+The other half of Milestone 2 — the backend running on GCP, accounts in use, data moving
+between real devices — is not here and is not claimed. It waits on the project, the billing
+account and IAM. What is here is the model those will be built on, and it is the part that
+can be reviewed before rather than after.
 
 ## What the model assumes
 
@@ -213,6 +261,44 @@ the refusal, because PostgreSQL reports a failing row in full and the rejection 
 plaintext password would otherwise be a message containing that password, on its way to
 wherever errors are logged. The suite proves both halves: the refusal repeats nothing, and
 with the trigger switched off it would have.
+
+**A definer function pins its own search_path.** A `SECURITY DEFINER` function runs with
+the privileges of whoever wrote it, and every one of these exists to answer a question
+about who may see a resident — so an unqualified call inside one lets a caller who controls
+`search_path` put their own function in front of the real one and have it run as the
+definer. All eleven pin it, and so does every function reached from a constraint or a
+trigger. It was found the ordinary way rather than by reading about it: `pg_dump` restores
+with an empty `search_path`, and the database could not be restored from its own dump.
+
+**A credential is not stored, and a session is one function rather than a condition
+repeated at every call site.** Authentication is the API's job, which makes it the weaker
+half by construction, so what could be moved into the database has been: a refresh rotates
+in the same statement that revokes the one it replaces, so a stolen token dies the moment
+the real client uses theirs; a single-use token is consumed atomically, so an invitation
+forwarded to a whole family admits one person whatever order the requests arrive in; and
+signing out of one device leaves the others signed in, which is a row a reviewer can be
+shown rather than a sentence.
+
+**A secret in the repository is a refused row, not a review finding.** The two places a
+credential must never be are the two places it always ends up. Both are unrepresentable in
+the register. What is kept instead of a password is a digest the column refuses to hold in
+any other form. Two controls were declined — customer-managed keys and field-level
+encryption — and the reasons are recorded, because the threat customer-managed keys creates
+is losing the key, after which nobody reads the records, including the facility whose they
+are.
+
+**A log line may not carry a field name from the classification.** The realistic way a
+resident's name reaches Cloud Logging is a developer serialising a row at two in the
+morning, and a serialised row carries its column names with it. So `never_log` is generated
+from the classification and `log_scan()` checks a candidate line against it — a guard that
+says "this line should not have been written", not a filter that quietly removes the name.
+Several forbidden fields collide with ordinary logging vocabulary; that is a naming rule
+rather than a false positive, and an HTTP status is logged as `http_status`.
+
+**A notification says that something happened, never what.** There is no placeholder for a
+resident's name and none for anything clinical, so the warm version somebody will ask for —
+"Cathy had a difficult night" — is a refused row rather than a review conversation. It ends
+up on a lock screen in a room with other people in it.
 
 **The access matrix is a table, and it is checked against the database it describes.** A
 matrix in a document says what the application intends; the policies say what the database

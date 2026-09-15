@@ -62,9 +62,9 @@ CANARY="DRILL-CANARY-$(date +%s)"
 if [ "$BUILD" = 1 ]; then
   say "building $SOURCE"
   createdb "$SOURCE" || exit 1
-  for f in schema.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
+  for f in schema.sql authentication.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
            retention.sql environments.sql vendors.sql backup-recovery.sql \
-           phi-safe-logging.sql checks-support.sql; do
+           phi-safe-logging.sql encryption-and-secrets.sql checks-support.sql; do
     psql -q -v ON_ERROR_STOP=1 -d "$SOURCE" -f "$HERE/$f" >/dev/null || {
       echo "could not apply $f" >&2; exit 1; }
   done
@@ -142,7 +142,8 @@ if ! pg_dump -d "$SOURCE" -f "$DUMP" 2>"$DUMP.err"; then
 fi
 rm -f "$DUMP.err"
 createdb "$TARGET" || { fail "createdb"; exit 1; }
-psql -q -v ON_ERROR_STOP=1 -d "$TARGET" -f "$DUMP" >/dev/null 2>&1 || { fail "restore"; exit 1; }
+psql -q -v ON_ERROR_STOP=1 -d "$TARGET" -f "$DUMP" >/dev/null 2>"$DUMP.err" || {
+  fail "restore"; grep -E 'ERROR' "$DUMP.err" | head -5 | sed 's/^/    /'; exit 1; }
 ELAPSED=$(( ($(date +%s) - STARTED + 59) / 60 ))
 
 # A dump taken with FORCE lifted restores a database where the owner is no longer subject

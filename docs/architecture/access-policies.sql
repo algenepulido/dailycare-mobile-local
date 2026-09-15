@@ -26,7 +26,8 @@
 -- ════════════════════════════════════════════════════════════════════ who is asking
 
 CREATE OR REPLACE FUNCTION app_user_id() RETURNS uuid
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT nullif(current_setting('app.user_id', true), '')::uuid
 $$;
 
@@ -39,7 +40,8 @@ COMMENT ON FUNCTION app_user_id() IS
 -- policies on another and recurse. They are read-only and take a single resident.
 
 CREATE OR REPLACE FUNCTION app_is_care_manager(target_facility uuid) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1 FROM facility_members fm
     WHERE fm.user_id     = app_user_id()
@@ -51,7 +53,8 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION app_is_assigned(target_resident uuid) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1
     FROM assignments a
@@ -66,7 +69,8 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION app_is_contact(target_resident uuid) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1 FROM resident_contacts rc
     WHERE rc.user_id     = app_user_id()
@@ -77,7 +81,8 @@ $$;
 
 -- Reading a resident's record. Staff by assignment or management, family by grant.
 CREATE OR REPLACE FUNCTION app_may_read_resident(target_resident uuid, target_facility uuid)
-RETURNS boolean LANGUAGE sql STABLE AS $$
+RETURNS boolean LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT app_is_care_manager(target_facility)
       OR app_is_assigned(target_resident)
       OR app_is_contact(target_resident)
@@ -85,7 +90,8 @@ $$;
 
 -- Writing it. The same, minus family — which is the whole point of separating them.
 CREATE OR REPLACE FUNCTION app_may_write_resident(target_resident uuid, target_facility uuid)
-RETURNS boolean LANGUAGE sql STABLE AS $$
+RETURNS boolean LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT app_is_care_manager(target_facility)
       OR app_is_assigned(target_resident)
 $$;

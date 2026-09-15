@@ -1,0 +1,240 @@
+-- Authentication checks for authentication.sql
+--
+-- Run by verify.sh. See README.md for the manual sequence.
+--
+-- Two of these are the milestone's own acceptance criteria rather than a design opinion:
+-- that a caregiver who reinstalls the app and signs back in finds their records, and that
+-- two authorised devices see the same facility. Both are stated as things somebody can
+-- watch happen rather than as a sentence in a document.
+
+\set QUIET on
+SET client_min_messages TO notice;
+
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql.
+SELECT checks_begin();
+
+CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
+BEGIN
+  IF condition THEN RAISE NOTICE 'PASS  %', label;
+  ELSE            RAISE NOTICE 'FAIL  %', label;
+  END IF;
+END; $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION expect_rejected(label text, stmt text) RETURNS void AS $$
+BEGIN
+  BEGIN
+    EXECUTE stmt;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'PASS  refused: %', label; RETURN;
+  END;
+  RAISE NOTICE 'FAIL  ALLOWED, and should not have been: %', label;
+END; $$ LANGUAGE plpgsql;
+
+-- Digests, the shape the columns demand. The tokens themselves never exist here, which is
+-- the point of the columns demanding it.
+CREATE OR REPLACE FUNCTION h(token text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$ SELECT md5('a' || token) || md5(token || 'b') $$;
+
+INSERT INTO facilities (id, name, timezone) VALUES
+  ('f1000000-0000-0000-0000-000000000001', 'Cedar House', 'America/Chicago');
+INSERT INTO users (id, email, display_name) VALUES
+  ('a0000000-0000-0000-0000-00000000000a', 'maria@example.test', 'Maria'),
+  ('c0000000-0000-0000-0000-00000000000c', 'anna@example.test',  'Anna');
+INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
+  ('fa000000-0000-0000-0000-00000000000a', 'f1000000-0000-0000-0000-000000000001',
+   'a0000000-0000-0000-0000-00000000000a', 'caregiver', 'active');
+INSERT INTO residents (id, facility_id, display_name) VALUES
+  ('e1000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001', 'Cathy');
+INSERT INTO assignments (facility_id, resident_id, facility_member_id) VALUES
+  ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+   'fa000000-0000-0000-0000-00000000000a');
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, filed_by)
+VALUES ('cd000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000001', current_date, 'calm', 'good', 'restless',
+        'a0000000-0000-0000-0000-00000000000a');
+\set QUIET off
+
+
+-- ── a session is valid, or it is not ───────────────────────────────────────────
+
+\echo ''
+\echo '── sessions'
+
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at) VALUES
+  ('a0000000-0000-0000-0000-00000000000a', h('phone'),  'iPhone 15', now() + interval '30 days'),
+  ('a0000000-0000-0000-0000-00000000000a', h('tablet'), 'iPad',      now() + interval '30 days'),
+  ('a0000000-0000-0000-0000-00000000000a', h('old'),    'old phone', now() - interval '1 day');
+\set QUIET off
+
+SELECT expect('a session issued today is valid',        session_is_valid(h('phone')));
+SELECT expect('one that has run out is not',        NOT session_is_valid(h('old')));
+SELECT expect('and a token nobody issued is not',   NOT session_is_valid(h('invented')));
+
+\set QUIET on
+SELECT revoke_session(h('phone'));
+\set QUIET off
+SELECT expect('a revoked session stops working',    NOT session_is_valid(h('phone')));
+
+SELECT expect('and revoking one device leaves the other signed in',
+  session_is_valid(h('tablet')));
+
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', h('phone2'), 'iPhone 15', now() + interval '30 days');
+\set QUIET off
+
+SELECT expect('signing out everywhere takes both live sessions and leaves the expired one alone',
+  (SELECT revoke_all_sessions('a0000000-0000-0000-0000-00000000000a') = 2));
+
+SELECT expect('so a session that timed out still reads as expired rather than revoked',
+  (SELECT revoked_at IS NULL FROM sessions WHERE refresh_hash = h('old')));
+
+SELECT expect('and leaves nothing active',
+  (SELECT active = 0 FROM session_inventory
+   WHERE user_id = 'a0000000-0000-0000-0000-00000000000a'));
+
+
+-- ── rotation ───────────────────────────────────────────────────────────────────
+
+\echo ''
+\echo '── refreshing'
+
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', h('r1'), 'iPhone 15', now() + interval '30 days');
+\set QUIET off
+
+SELECT expect('a refresh issues a new session',
+  (SELECT rotate_session(h('r1'), h('r2')) IS NOT NULL));
+
+SELECT expect('the new one works',        session_is_valid(h('r2')));
+SELECT expect('and the old one does not, so a stolen refresh token dies on first use',
+  NOT session_is_valid(h('r1')));
+
+SELECT expect('it keeps the device it belongs to, so the user still recognises the row',
+  (SELECT device_label = 'iPhone 15' FROM sessions WHERE refresh_hash = h('r2')));
+
+SELECT expect('refreshing with the stale token returns nothing rather than raising',
+  (SELECT rotate_session(h('r1'), h('r3')) IS NULL));
+
+SELECT expect('and that failed attempt issued nothing',
+  NOT session_is_valid(h('r3')));
+
+
+-- ── single-use tokens ──────────────────────────────────────────────────────────
+
+\echo ''
+\echo '── invitations and resets'
+
+\set QUIET on
+INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
+  ('c0000000-0000-0000-0000-00000000000c', 'invitation',     h('invite'), now() + interval '7 days'),
+  ('c0000000-0000-0000-0000-00000000000c', 'password_reset', h('reset'),  now() + interval '1 hour'),
+  ('c0000000-0000-0000-0000-00000000000c', 'invitation',     h('stale'),  now() - interval '1 day');
+\set QUIET off
+
+SELECT expect('an invitation admits the person it was sent to',
+  (SELECT consume_token(h('invite'), 'invitation')
+          = 'c0000000-0000-0000-0000-00000000000c'));
+
+SELECT expect('the same link a second time admits nobody',
+  (SELECT consume_token(h('invite'), 'invitation') IS NULL));
+
+SELECT expect('an expired invitation admits nobody',
+  (SELECT consume_token(h('stale'), 'invitation') IS NULL));
+
+SELECT expect('a reset link cannot be redeemed as an invitation',
+  (SELECT consume_token(h('reset'), 'invitation') IS NULL));
+
+SELECT expect('but it still works as what it is',
+  (SELECT consume_token(h('reset'), 'password_reset')
+          = 'c0000000-0000-0000-0000-00000000000c'));
+
+SELECT expect('an invitation nobody accepted is visible rather than lost',
+  (SELECT count(*) = 1 FROM stale_invitations
+   WHERE user_id = 'c0000000-0000-0000-0000-00000000000c' AND purpose = 'invitation'));
+
+SELECT expect_rejected('storing an invitation token as it was sent', $$
+  INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
+  VALUES ('c0000000-0000-0000-0000-00000000000c', 'invitation', 'dc-invite-9f2a7c4e',
+          now() + interval '7 days')
+$$);
+
+
+-- ── the milestone's own acceptance criteria ────────────────────────────────────
+--
+-- "authorized data persists across reinstall/sign-in" and "authorized caregivers on
+-- separate devices access the appropriate shared facility/resident data". Both are worth
+-- proving rather than asserting, because both are about what a caregiver sees rather than
+-- about what a table contains.
+
+\echo ''
+\echo '── reinstalling the app, and using two of them'
+
+\set QUIET on
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
+    RAISE EXCEPTION 'role dailycare_app does not exist. Apply roles.sql first.';
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO dailycare_app;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
+
+-- Maria reinstalls. Everything local is gone; she signs in and gets a new session.
+SELECT revoke_all_sessions('a0000000-0000-0000-0000-00000000000a');
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', h('reinstalled'), 'iPhone 15 (new)',
+        now() + interval '30 days');
+\set QUIET off
+
+SELECT expect('the new install has a working session and the old ones are gone',
+  session_is_valid(h('reinstalled'))
+  AND (SELECT active = 1 FROM session_inventory
+       WHERE user_id = 'a0000000-0000-0000-0000-00000000000a'));
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+SELECT expect('and the care day she filed before the reinstall is still hers to read',
+  (SELECT count(*) = 1 FROM care_days
+   WHERE id = 'cd000000-0000-0000-0000-000000000001'));
+RESET ROLE;
+
+-- The second device. A different session, the same person, the same building.
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', h('second_device'), 'facility iPad',
+        now() + interval '30 days');
+\set QUIET off
+
+SELECT expect('a second authorised device is a second session, not a second account',
+  session_is_valid(h('second_device'))
+  AND (SELECT active = 2 FROM session_inventory
+       WHERE user_id = 'a0000000-0000-0000-0000-00000000000a'));
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+SELECT expect('and it reads the same resident and the same day',
+  (SELECT count(*) = 1 FROM residents WHERE id = 'e1000000-0000-0000-0000-000000000001')
+  AND (SELECT count(*) = 1 FROM care_days));
+RESET ROLE;
+
+-- And the lost phone, which is the case sign-out-everywhere exists for.
+\set QUIET on
+SELECT revoke_session(h('second_device'));
+\set QUIET off
+SELECT expect('losing the second device does not sign her out of the first',
+  session_is_valid(h('reinstalled')) AND NOT session_is_valid(h('second_device')));
+
+\echo ''
+\echo '   sessions on record:'
+SELECT email, active, revoked, expired FROM session_inventory ORDER BY email;
+
+\set QUIET on
+SELECT checks_end();
+DROP FUNCTION expect(text, boolean);
+DROP FUNCTION expect_rejected(text, text);
+DROP FUNCTION h(text);
+\set QUIET off

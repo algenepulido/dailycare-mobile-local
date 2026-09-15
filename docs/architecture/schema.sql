@@ -117,12 +117,14 @@ COMMENT ON COLUMN facilities.timezone IS
 -- enforces it and the trigger that reports it.
 
 CREATE OR REPLACE FUNCTION is_argon2id(candidate text) RETURNS boolean
-LANGUAGE sql IMMUTABLE AS $$
+LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT candidate ~ '^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]{16,}\$[A-Za-z0-9+/]{16,}$'
 $$;
 
 CREATE OR REPLACE FUNCTION is_sha256_hex(candidate text) RETURNS boolean
-LANGUAGE sql IMMUTABLE AS $$
+LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT candidate ~ '^[0-9a-f]{64}$'
 $$;
 
@@ -137,7 +139,8 @@ $$;
 -- constraint still holds if somebody disables the trigger.
 
 CREATE OR REPLACE FUNCTION reject_unhashed_credential() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE
   value text := to_jsonb(NEW) ->> TG_ARGV[0];
   ok    boolean;

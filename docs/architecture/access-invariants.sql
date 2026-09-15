@@ -260,6 +260,43 @@ SELECT expect_rows('no policy in the access model permits an application role to
       AND NOT (roles::text LIKE '%dailycare_retention%')$$);
 
 
+-- ── the classic way a definer function is turned against its own database ──────
+--
+-- A SECURITY DEFINER function runs with the privileges of whoever wrote it. If it calls
+-- anything unqualified, a caller who controls search_path can put their own function in
+-- front of the real one and have it run as the definer. Every one of these functions
+-- exists to answer a question about who may see a resident, so that would be the whole
+-- access model.
+--
+-- It also breaks something much more ordinary: pg_dump restores with an empty search_path,
+-- so an unqualified call inside a function body fails during a restore. That is how this
+-- was found - the database could not be restored from its own dump.
+
+\echo ''
+\echo '── definer functions cannot be redirected'
+
+SELECT expect_rows('every SECURITY DEFINER function pins its own search_path', 0,
+  $$SELECT p.proname FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.prosecdef
+      AND NOT coalesce(array_to_string(p.proconfig, ',') LIKE '%search_path%', false)$$);
+
+SELECT expect_rows('and there are definer functions, which would make that cheap otherwise',
+  11,
+  $$SELECT p.proname FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.prosecdef$$);
+
+SELECT expect_rows('so does every function the model calls from a constraint or a trigger', 0,
+  $$SELECT p.proname FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
+    WHERE n.nspname = 'public' AND l.lanname = 'plpgsql'
+      AND p.proname IN ('reject_unhashed_credential','notification_body_is_safe',
+                        'audit_phi_write','scrub_phi','apply_retention')
+      AND NOT coalesce(array_to_string(p.proconfig, ',') LIKE '%search_path%', false)$$);
+
+
 -- ── the matrix and the database agree ──────────────────────────────────────────
 
 \echo ''

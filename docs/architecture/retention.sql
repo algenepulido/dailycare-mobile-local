@@ -40,7 +40,8 @@
 -- table by hand.
 
 CREATE OR REPLACE FUNCTION retention_resident_expired(target_resident uuid)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS $$
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1
     FROM residents r
@@ -68,7 +69,8 @@ CREATE OR REPLACE FUNCTION retention_due_residents(
   target_facility uuid,
   as_of           date DEFAULT current_date
 ) RETURNS TABLE (resident_id uuid, departed_on date, days_past integer)
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT r.id, r.departed_on, (as_of - r.departed_on) - p.care_record_days
   FROM residents r
   JOIN retention_policies p ON p.facility_id = r.facility_id
@@ -82,7 +84,8 @@ CREATE OR REPLACE FUNCTION retention_due_media(
   target_facility uuid,
   as_of           date DEFAULT current_date
 ) RETURNS TABLE (media_id uuid, bucket text, object_path text, reason text)
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT m.id, m.bucket, m.object_path,
          CASE WHEN retention_resident_expired(m.resident_id)
               THEN 'resident record expired'
@@ -106,7 +109,8 @@ COMMENT ON FUNCTION retention_due_media(uuid, date) IS
 -- ════════════════════════════════════════════════════════════════════ the handshake
 
 CREATE OR REPLACE FUNCTION retention_confirm_media(media_ids uuid[])
-RETURNS integer LANGUAGE plpgsql AS $$
+RETURNS integer LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE n integer;
 BEGIN
   PERFORM set_config('app.role', 'retention', true);
@@ -126,7 +130,8 @@ COMMENT ON FUNCTION retention_confirm_media(uuid[]) IS
 
 CREATE OR REPLACE FUNCTION apply_retention(target_facility uuid)
 RETURNS TABLE (what text, removed bigint)
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE
   due         uuid[];
   held        bigint;
@@ -218,7 +223,8 @@ COMMENT ON FUNCTION apply_retention(uuid) IS
 -- the people whose records were supposed to have stopped existing.
 
 CREATE OR REPLACE FUNCTION retention_record_run(target_facility uuid, counts jsonb)
-RETURNS void LANGUAGE sql SECURITY DEFINER AS $$
+RETURNS void LANGUAGE sql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   INSERT INTO audit_events (actor_user_id, actor_role, facility_id,
                             action, subject_type, subject_id, detail)
   VALUES (NULL, 'retention', target_facility,

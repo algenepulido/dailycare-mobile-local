@@ -26,7 +26,8 @@
 -- ════════════════════════════════════════════════════════════════════ the writer
 
 CREATE OR REPLACE FUNCTION audit_phi_write() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER AS $$
+LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
 DECLARE
   resident   uuid;
   facility   uuid;
@@ -127,7 +128,8 @@ CREATE OR REPLACE FUNCTION audit_read(
   subject         text,
   target_subject  uuid DEFAULT NULL
 ) RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER AS $$
+LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
 BEGIN
   INSERT INTO audit_events (
     actor_user_id, actor_role, facility_id,

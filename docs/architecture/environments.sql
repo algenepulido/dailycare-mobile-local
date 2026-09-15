@@ -33,7 +33,8 @@
 CREATE TYPE deployment_environment AS ENUM ('production', 'staging', 'development');
 
 CREATE OR REPLACE FUNCTION deployment_cluster_id() RETURNS text
-LANGUAGE sql STABLE AS $$ SELECT system_identifier::text FROM pg_control_system() $$;
+LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public AS $$ SELECT system_identifier::text FROM pg_control_system() $$;
 
 CREATE TABLE deployment (
   only_row     boolean PRIMARY KEY DEFAULT true CHECK (only_row),
@@ -85,7 +86,8 @@ COMMENT ON TABLE scrub_runs IS
 -- this database's own name the application reads nothing at all.
 
 CREATE OR REPLACE FUNCTION deployment_is_original() RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1 FROM deployment d
     WHERE d.database_name = current_database()
@@ -94,7 +96,8 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION app_data_is_servable() RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER AS $$
+LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
   SELECT CASE
     -- Never labelled. It has not claimed to be anything, so there is nothing to have been
     -- copied from; row-level security is still in force and is the protection here. Failing
@@ -129,7 +132,8 @@ COMMENT ON FUNCTION app_data_is_servable() IS
 -- request that cannot be identified.
 
 CREATE OR REPLACE FUNCTION app_user_id() RETURNS uuid
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT CASE WHEN app_data_is_servable()
               THEN nullif(current_setting('app.user_id', true), '')::uuid
               ELSE NULL END
@@ -145,7 +149,8 @@ CREATE OR REPLACE FUNCTION claim_this_database(
   confirm_database text,
   as_environment   deployment_environment,
   why              text
-) RETURNS void LANGUAGE plpgsql AS $$
+) RETURNS void LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 BEGIN
   IF confirm_database IS DISTINCT FROM current_database() THEN
     RAISE EXCEPTION 'refusing: called with %, connected to %',
@@ -283,7 +288,8 @@ COMMENT ON VIEW unscrubbed_columns IS
 -- ════════════════════════════════════════════════════════════════════ the replacements
 
 CREATE OR REPLACE FUNCTION scrub_fake_name(original text, salt text)
-RETURNS text LANGUAGE sql IMMUTABLE AS $$
+RETURNS text LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT CASE WHEN original IS NULL THEN NULL ELSE
     (ARRAY['Alice','Beatrice','Cathy','Dorothy','Evelyn','Frances','Grace','Harriet',
            'Irene','Josephine','Katherine','Lillian','Margaret','Nora','Opal','Pearl',
@@ -301,7 +307,8 @@ COMMENT ON FUNCTION scrub_fake_name(text, text) IS
    real name to its replacement exists only for the length of the transaction.';
 
 CREATE OR REPLACE FUNCTION scrub_redact(original text)
-RETURNS text LANGUAGE sql IMMUTABLE AS $$
+RETURNS text LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT CASE
     WHEN original IS NULL THEN NULL
     WHEN original =  ''   THEN ''
@@ -323,7 +330,8 @@ COMMENT ON FUNCTION scrub_redact(text) IS
 
 CREATE OR REPLACE FUNCTION phi_residue(patterns text[])
 RETURNS TABLE (table_name text, column_name text, pattern text, hits bigint)
-LANGUAGE plpgsql STABLE AS $$
+LANGUAGE plpgsql STABLE
+  SET search_path = pg_catalog, public AS $$
 DECLARE
   c record;
   p text;
@@ -357,7 +365,8 @@ COMMENT ON FUNCTION phi_residue(text[]) IS
 
 CREATE OR REPLACE FUNCTION scrub_phi(confirm_database text)
 RETURNS TABLE (what text, changed bigint)
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE
   env        deployment_environment;
   salt       text := gen_random_uuid()::text;

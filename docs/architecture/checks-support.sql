@@ -22,7 +22,8 @@
 CREATE TABLE IF NOT EXISTS checks_forced_tables (table_name text PRIMARY KEY);
 
 CREATE OR REPLACE FUNCTION checks_begin() RETURNS void
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE r record;
 BEGIN
   DELETE FROM checks_forced_tables;
@@ -35,7 +36,8 @@ BEGIN
 END; $$;
 
 CREATE OR REPLACE FUNCTION checks_end() RETURNS void
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE r record;
 BEGIN
   FOR r IN SELECT table_name FROM checks_forced_tables LOOP

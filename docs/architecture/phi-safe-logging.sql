@@ -50,7 +50,8 @@ COMMENT ON VIEW never_log IS
 -- removed the name", it is "this line should not have been written".
 CREATE OR REPLACE FUNCTION log_scan(line jsonb)
 RETURNS TABLE (problem text, field text)
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public AS $$
   -- A forbidden field name used as a key.
   SELECT 'field name', k
   FROM jsonb_object_keys(line) k
@@ -87,7 +88,8 @@ CREATE TABLE notification_templates (
 
 -- The only placeholders that exist. None of them is about a resident's day.
 CREATE OR REPLACE FUNCTION notification_placeholder_allowed(p text)
-RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+RETURNS boolean LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public AS $$
   SELECT p IN ('facility_name',   -- a business, not a person
                 'app_name',
                 'code',           -- a sign-in code
@@ -96,7 +98,8 @@ RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION notification_body_is_safe(body text, declared text[])
-RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE
+  SET search_path = pg_catalog, public AS $$
 DECLARE used text[];
 BEGIN
   SELECT coalesce(array_agg(m[1]), '{}') INTO used
