@@ -13,6 +13,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | `schema-invariants.sql` | The guarantees the schema makes, written as the smallest statements that prove them. Self-reporting. Includes what a credential column will and will not accept. |
 | `access-policies.sql` | The three roles as row-level security. Applied after the schema. |
 | `access-invariants.sql` | Attempts to reach things that should be unreachable. Runs as a non-superuser, because a superuser bypasses row-level security and would report that everything works. |
+| `access-matrix.sql` | The role and access-control matrix as a table, checked against the catalogue it describes. |
 | `data-classification.sql` | Which columns hold PHI, and the views that generate the inventory from it. |
 | `audit-logging.sql` | Triggers that record every write to a PHI table, and the coverage views that find a table without one. |
 | `audit-invariants.sql` | Including the canary: a care note written with a unique string, then every column of every audit row searched for it. |
@@ -35,7 +36,7 @@ Everything below runs against scratch databases and leaves nothing behind. Postg
 or newer.
 
 ```bash
-./verify.sh          # 193 checks across seven suites
+./verify.sh          # 204 checks across seven suites
 ./restore-drill.sh --build   # 13 more, and a real dump and restore
 ```
 
@@ -54,16 +55,16 @@ By hand, one suite at a time, the same way the script does it:
 psql -d postgres -f roles.sql          # once per cluster
 
 createdb dc_check
-for f in schema.sql access-policies.sql data-classification.sql audit-logging.sql \
-         retention.sql environments.sql vendors.sql backup-recovery.sql \
-         checks-support.sql; do
+for f in schema.sql access-policies.sql data-classification.sql access-matrix.sql \
+         audit-logging.sql retention.sql environments.sql vendors.sql \
+         backup-recovery.sql checks-support.sql; do
   psql -v ON_ERROR_STOP=1 -d dc_check -f $f
 done
 psql -d dc_check -f schema-invariants.sql     # 24 checks
 dropdb dc_check                               # and again for the next suite
 ```
 
-The suites are: `schema` (24), `access` (24), `audit` (13), `retention` (38),
+The suites are: `schema` (24), `access` (35), `audit` (13), `retention` (38),
 `environment` (37), `vendor` (23), `backup` (34).
 
 Each prints `PASS` or `FAIL` per check, on stderr. A `FAIL` means a guarantee has been
@@ -107,6 +108,11 @@ The classification has one further check, and it is a query rather than a script
 SELECT * FROM unclassified_columns;   -- must be empty
 SELECT * FROM unscrubbed_columns;     -- must be empty
 SELECT * FROM phi_inventory;          -- what goes to the reviewer
+
+SELECT * FROM access_matrix_report;            -- the role and access-control matrix
+SELECT * FROM access_matrix_blanks;            -- must be empty
+SELECT * FROM access_matrix_delete_drift;      -- must be empty
+SELECT * FROM access_matrix_uncovered_tables;  -- must be empty
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -207,6 +213,16 @@ the refusal, because PostgreSQL reports a failing row in full and the rejection 
 plaintext password would otherwise be a message containing that password, on its way to
 wherever errors are logged. The suite proves both halves: the refusal repeats nothing, and
 with the trigger switched off it would have.
+
+**The access matrix is a table, and it is checked against the database it describes.** A
+matrix in a document says what the application intends; the policies say what the database
+permits, and nothing compares them. Here the matrix is 192 cells with no blanks allowed,
+and two views cross-check it against the catalogue. It earned that on its first run: it
+found `FOR ALL` write policies on four tables, and `ALL` includes `DELETE` — so a care
+manager could delete a resident and a family grant, and a caregiver a meal, while this
+README said no such path existed. The check that should have caught it was passing for the
+wrong reason: it attempted the delete without identifying anybody, so the row was hidden
+rather than protected.
 
 **A third party that could receive PHI by accident needs a control, not a contract.** The
 vendors everyone remembers are the ones the data is sent to. The one that gets missed is

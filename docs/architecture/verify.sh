@@ -19,10 +19,10 @@ DB_PREFIX="${DB_PREFIX:-dc_verify}"
 
 MODEL=(schema.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
        retention.sql environments.sql vendors.sql backup-recovery.sql
-       checks-support.sql)
+       phi-safe-logging.sql checks-support.sql)
 SUITES=(schema-invariants.sql access-invariants.sql audit-invariants.sql
         retention-invariants.sql environment-invariants.sql vendor-invariants.sql
-        backup-invariants.sql)
+        backup-invariants.sql logging-invariants.sql)
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
