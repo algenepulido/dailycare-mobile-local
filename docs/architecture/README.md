@@ -24,6 +24,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | `backup-recovery.sql` | What is backed up, for how long, who may restore it, and the record of somebody having done so. |
 | `backup-invariants.sql` | Mostly the restore gate: a database that finds itself somewhere other than where it was written serves nothing until it has been scrubbed. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
+| `inktree-alignment.md` | Where this model meets the InkTree field guide and where it does not, and the one difference that is a boundary rather than a preference. |
 
 ## Verifying it
 
@@ -92,6 +93,18 @@ SELECT * FROM rto_missed;             -- must be empty
 A column added in a later migration arrives unclassified and appears in the first query.
 That is deliberate: the inventory is generated from the database rather than maintained
 beside it, so it cannot quietly stop being true.
+
+## Against the InkTree field guide
+
+`inktree-alignment.md` is the divergence review. The short version: the framework, the
+database engine, the platform and the relation-as-a-row model already agree; the backend
+language, the service count and the event bus are open questions whose answers do not touch
+anything in this directory, because all of it is PostgreSQL rather than application code.
+
+The one that is not a preference is the direction data flows. InkTree into DailyCare is
+safe. DailyCare into InkTree puts every service that can reach the record into HIPAA scope,
+along with the model and voice providers behind it — which is a decision worth making
+deliberately rather than discovering after the first feature that needed it.
 
 ## What the model assumes
 
