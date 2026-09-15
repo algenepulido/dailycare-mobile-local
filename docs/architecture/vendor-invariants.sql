@@ -19,6 +19,10 @@
 
 \set QUIET on
 SET client_min_messages TO notice;
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql: the policies stay in force, and every
+-- check that tests one does it by becoming the role it is about.
+SELECT checks_begin();
 
 CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
 BEGIN
@@ -116,16 +120,22 @@ SELECT expect('there are open gaps, and hiding them would be the actual failure'
 \echo ''
 \echo '── proving the checks above can fail'
 
+-- Deliberately a vendor that still has an open gap. Pointing a probe at one whose
+-- agreement has since been signed is how a negative control quietly stops being one, and
+-- this pair caught exactly that when the platform agreement was recorded as signed.
 SELECT expect_noticed('a vendor with an unsigned agreement is switched on',
-  $$UPDATE vendors SET live = true WHERE id = 'gcp'$$,
+  -- It has to be one that holds PHI, not merely one that could receive it by accident:
+  -- switching on a conduit with no clinical content in its messages is not the finding
+  -- this view exists to make.
+  $$UPDATE vendors SET live = true WHERE id = 'pointclickcare'$$,
   'live_without_agreement');
 
 SELECT expect_noticed('an open gap loses its owner',
-  $$UPDATE vendors SET gap_owner = NULL WHERE id = 'gcp'$$,
+  $$UPDATE vendors SET gap_owner = NULL WHERE id = 'twilio'$$,
   'unacknowledged_gaps');
 
 SELECT expect_noticed('an open gap loses its date',
-  $$UPDATE vendors SET gap_required_before = NULL WHERE id = 'twilio'$$,
+  $$UPDATE vendors SET gap_required_before = NULL WHERE id = 'pointclickcare'$$,
   'unacknowledged_gaps');
 
 SELECT expect_noticed('a new vendor is added and nobody says anything about PHI',
@@ -183,7 +193,7 @@ SELECT expect('and nothing became live while the checks were running',
 \set QUIET on
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
-    CREATE ROLE dailycare_app NOLOGIN;
+    RAISE EXCEPTION 'role dailycare_app does not exist. Apply roles.sql first.';
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
@@ -207,6 +217,7 @@ SELECT ve.vendor_id, ve.class, ve.exposure,
 FROM vendor_exposure ve ORDER BY ve.vendor_id, ve.class;
 
 \set QUIET on
+SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_rejected(text, text);
 DROP FUNCTION expect_noticed(text, text, text);

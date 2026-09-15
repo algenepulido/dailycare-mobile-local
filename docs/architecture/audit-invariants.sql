@@ -15,10 +15,14 @@
 
 \set QUIET on
 SET client_min_messages TO notice;
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql: the policies stay in force, and every
+-- check that tests one does it by becoming the role it is about.
+SELECT checks_begin();
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
-    CREATE ROLE dailycare_app NOLOGIN;
+    RAISE EXCEPTION 'role dailycare_app does not exist. Apply roles.sql first.';
   END IF;
 END $$;
 
@@ -190,6 +194,7 @@ SELECT action, subject_type, coalesce(detail -> 'columns', '[]'::jsonb) AS colum
 FROM audit_events ORDER BY id;
 
 \set QUIET on
+SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_refused(text, text);
 \set QUIET off

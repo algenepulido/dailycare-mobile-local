@@ -14,6 +14,10 @@
 
 \set QUIET on
 SET client_min_messages TO notice;
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql: the policies stay in force, and every
+-- check that tests one does it by becoming the role it is about.
+SELECT checks_begin();
 
 -- Each check that must be rejected runs inside its own block. If the statement raises,
 -- the constraint did its job; if it succeeds, the block falls through and says so.
@@ -285,6 +289,7 @@ ALTER TABLE users ENABLE TRIGGER reject_plaintext_password;
 \set QUIET off
 
 
+SELECT checks_end();
 DROP FUNCTION must_reject(text, text);
 DROP FUNCTION must_accept(text, text);
 DROP FUNCTION expect(text, boolean);

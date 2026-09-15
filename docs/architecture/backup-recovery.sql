@@ -17,6 +17,28 @@
 -- nothing until it has been scrubbed. What is here is the record that somebody proved it.
 
 
+-- One operational fact worth stating before the table, because it was found by running the
+-- drill as somebody who is not a superuser, which is what a managed instance gives you and
+-- therefore what production is.
+--
+-- FORCE ROW LEVEL SECURITY applies to the owner. pg_dump run as the owner therefore fails
+-- on every PHI table:
+--
+--   ERROR: query would be affected by row-level security policy for table "care_days"
+--
+-- That is the correct failure. The dangerous alternative is pg_dump --enable-row-security,
+-- which succeeds and dumps only the rows the policies admitted - a partial backup that
+-- looks complete and would restore a database missing records nobody would think to count.
+--
+-- So a logical export is taken by dailycare_backup, which is the only role that bypasses
+-- row-level security. The managed snapshot and point-in-time recovery below work at the
+-- storage layer and are unaffected by any of this; they are the primary mechanism, and the
+-- logical export exists for moving a database rather than for recovering one.
+--
+-- A second consequence, which the drill now checks: a dump taken while FORCE was lifted
+-- restores into a database where the owner is no longer subject to the policies. The copy
+-- would be weaker than the original with nothing saying so.
+
 CREATE TABLE backup_policies (
   environment       deployment_environment PRIMARY KEY,
 
@@ -36,6 +58,7 @@ CREATE TABLE backup_policies (
   key_management    text NOT NULL,
   storage_location  text NOT NULL,
   who_may_restore   text NOT NULL,
+  logical_export_by text,           -- null where logical export is not part of the plan
 
   note              text,
   reviewed_on       date NOT NULL,
@@ -56,7 +79,7 @@ COMMENT ON COLUMN backup_policies.rto_minutes IS
 
 INSERT INTO backup_policies (environment, in_effect, schedule, retention_days,
   pitr_window_hours, rpo_minutes, rto_minutes, encryption, key_management,
-  storage_location, who_may_restore, note, reviewed_on) VALUES
+  storage_location, who_may_restore, logical_export_by, note, reviewed_on) VALUES
 
 ('production', false,
  'Managed daily snapshot, plus continuous write-ahead log archiving for point-in-time recovery.',
@@ -65,6 +88,7 @@ INSERT INTO backup_policies (environment, in_effect, schedule, retention_days,
  'Platform-managed keys to begin with. Customer-managed keys are a later decision and change who can make a backup unreadable, which is a question about key loss as much as key theft.',
  'Same region as the instance, plus one cross-region copy. A backup in the region that just failed is not a backup.',
  'The recovery role only. Not the deployment account, and not a person''s own credentials.',
+ 'dailycare_backup, which is the only role permitted to bypass row-level security. Nothing else can take a complete logical export, and nothing else should.',
  'Thirty-five days of snapshots against seven of point-in-time: the long window is for a corruption nobody noticed for a month, the short one for the mistake somebody noticed in an hour.',
  DATE '2026-09-15'),
 
@@ -75,6 +99,7 @@ INSERT INTO backup_policies (environment, in_effect, schedule, retention_days,
  'Platform-managed keys.',
  'Same region. No cross-region copy: losing staging costs a rebuild, not a record.',
  'The recovery role.',
+ 'dailycare_backup.',
  'Holds scrubbed data only, so a lost staging backup is a lost afternoon rather than an incident.',
  DATE '2026-09-15'),
 
@@ -85,6 +110,7 @@ INSERT INTO backup_policies (environment, in_effect, schedule, retention_days,
  'Platform-managed keys.',
  'Not stored.',
  'Anyone on the team.',
+ NULL,
  'Deliberately nothing to back up. A developer who loses their database runs the restore drill, which is the same procedure as the one being tested.',
  DATE '2026-09-15');
 

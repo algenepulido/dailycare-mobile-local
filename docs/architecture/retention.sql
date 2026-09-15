@@ -228,9 +228,11 @@ $$;
 
 -- ════════════════════════════════════════════════════════════════════ the role
 
+-- Created by roles.sql, not here, so that everything from schema.sql onward can be applied
+-- by somebody who is not permitted to create a role.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_retention') THEN
-    CREATE ROLE dailycare_retention NOLOGIN;
+    RAISE EXCEPTION 'role dailycare_retention does not exist. Apply roles.sql first.';
   END IF;
 END $$;
 

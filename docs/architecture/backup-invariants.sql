@@ -22,6 +22,10 @@
 
 \set QUIET on
 SET client_min_messages TO notice;
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql: the policies stay in force, and every
+-- check that tests one does it by becoming the role it is about.
+SELECT checks_begin();
 
 CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
 BEGIN
@@ -61,7 +65,7 @@ END; $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
-    CREATE ROLE dailycare_app NOLOGIN;
+    RAISE EXCEPTION 'role dailycare_app does not exist. Apply roles.sql first.';
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
@@ -266,7 +270,9 @@ SELECT expect('relabelling it development is not enough on its own',
   NOT app_data_is_servable());
 
 \set QUIET on
+SELECT checks_end();
 SELECT scrub_phi(current_database());
+SELECT checks_begin();
 \set QUIET off
 
 SELECT expect('the scrub reopened the gate and took ownership of the database',
@@ -323,6 +329,7 @@ SELECT performed_on, environment, restored_into, minutes_to_restore,
        copy_detected, scrub_confirmed, outcome FROM restore_drills ORDER BY id;
 
 \set QUIET on
+SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_rejected(text, text);
 DROP FUNCTION expect_noticed(text, text, text);

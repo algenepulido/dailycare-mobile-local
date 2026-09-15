@@ -90,15 +90,13 @@ COMMENT ON CONSTRAINT vendor_exposure_check ON vendor_exposure IS
 
 -- ── the infrastructure ─────────────────────────────────────────────────────────
 
-INSERT INTO vendors (id, name, purpose, role, live, baa, covered_scope,
-                     gap_owner, gap_required_before, gap_blocker, note, reviewed_on) VALUES
+INSERT INTO vendors (id, name, purpose, role, live, baa, baa_signed_on, covered_scope,
+                     note, reviewed_on) VALUES
 ('gcp', 'Google Cloud Platform',
  'Cloud Run for the API, Cloud SQL for PostgreSQL, Cloud Storage for photographs, Secret Manager for credentials, Cloud Logging, Artifact Registry.',
- 'processor', false, 'offered_not_signed',
- 'Only the products on Google''s HIPAA Included Products list are in scope. Anything used outside that list is outside the agreement, whatever else the contract says.',
- 'InkTree', 'the first deployment that carries a real record',
- 'The project, billing account and IAM do not exist yet.',
- 'The agreement is accepted in the console by the billing account owner, which is why it cannot be done from this side.',
+ 'processor', false, 'signed', DATE '2026-09-10',
+ 'Only the products on Google''s HIPAA Included Products list are in scope. Anything used outside that list is outside the agreement, whatever else the contract says, and the list is worth rereading when a new service is adopted.',
+ 'Accepted in the console by the billing account owner. Signed before the project exists, which is the right order: the alternative is a window where something is deployed and not covered.',
  DATE '2026-09-15');
 
 INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
@@ -109,15 +107,15 @@ INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
 
 -- Logging is the accident, and it is a separate entry because it is a separate problem.
 INSERT INTO vendors (id, name, purpose, role, live, baa, covered_scope,
-                     gap_owner, gap_required_before, gap_blocker, note, reviewed_on) VALUES
+                     gap_owner, gap_required_before, gap_blocker, note, reviewed_on,
+                     baa_signed_on) VALUES
 ('gcp-logging', 'Google Cloud Logging',
  'Application and request logs.',
- 'subprocessor', false, 'offered_not_signed',
+ 'subprocessor', false, 'signed',
  'Covered by the same agreement as the platform.',
- 'InkTree', 'the first deployment that carries a real record',
- 'The same agreement as the platform, blocked on the same project creation.',
- 'Listed separately because the agreement is not the control. A log line is written by our code, and no contract stops one from containing a resident name. It still carries the gap fields: an accidental exposure inside an agreement is a different conversation from one outside it.',
- DATE '2026-09-15');
+ NULL, NULL, NULL,
+ 'Listed separately because the agreement is not the control. A log line is written by our code, and no contract stops one from containing a resident name.',
+ DATE '2026-09-15', DATE '2026-09-10');
 
 INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
 ('gcp-logging','phi','could_receive',

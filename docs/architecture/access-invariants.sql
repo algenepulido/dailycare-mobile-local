@@ -14,11 +14,15 @@
 
 \set QUIET on
 SET client_min_messages TO notice;
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql: the policies stay in force, and every
+-- check that tests one does it by becoming the role it is about.
+SELECT checks_begin();
 
 -- The role the application will connect as. Ordinary privileges, no BYPASSRLS.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
-    CREATE ROLE dailycare_app NOLOGIN;
+    RAISE EXCEPTION 'role dailycare_app does not exist. Apply roles.sql first.';
   END IF;
 END $$;
 
@@ -215,5 +219,6 @@ SELECT expect_rows('a deactivated care manager', 0, 'SELECT * FROM residents');
 
 \echo ''
 RESET ROLE;
+SELECT checks_end();
 DROP FUNCTION expect_rows(text, int, text);
 DROP FUNCTION expect_refused(text, text);

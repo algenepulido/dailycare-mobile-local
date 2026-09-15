@@ -8,6 +8,7 @@ constraint and a constraint are different things, and only one of them stops a m
 
 | | |
 |---|---|
+| `roles.sql` | The three application roles plus the export role. Applied first, and the only file needing the privilege to create a role. |
 | `schema.sql` | The production schema. 15 tables, 12 enums. Applied first. |
 | `schema-invariants.sql` | The guarantees the schema makes, written as the smallest statements that prove them. Self-reporting. Includes what a credential column will and will not accept. |
 | `access-policies.sql` | The three roles as row-level security. Applied after the schema. |
@@ -23,52 +24,82 @@ constraint and a constraint are different things, and only one of them stops a m
 | `vendor-invariants.sql` | Moves the register into each bad state in turn and asks whether anything noticed. |
 | `backup-recovery.sql` | What is backed up, for how long, who may restore it, and the record of somebody having done so. |
 | `backup-invariants.sql` | Mostly the restore gate: a database that finds itself somewhere other than where it was written serves nothing until it has been scrubbed. |
+| `checks-support.sql` | Not part of the model. What lets a suite give the same answers to a superuser and to a managed-instance owner. |
+| `verify.sh` | Runs every suite, each in its own database, and exits non-zero if anything failed. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
 | `inktree-alignment.md` | Where this model meets the InkTree field guide and where it does not, and the one difference that is a boundary rather than a preference. |
 
 ## Verifying it
 
-Everything below runs against a scratch database and leaves nothing behind. PostgreSQL 14
+Everything below runs against scratch databases and leaves nothing behind. PostgreSQL 14
 or newer.
 
 ```bash
-createdb dc_check
-
-psql -v ON_ERROR_STOP=1 -d dc_check -f schema.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f access-policies.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f data-classification.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f audit-logging.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f retention.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f environments.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f vendors.sql
-psql -v ON_ERROR_STOP=1 -d dc_check -f backup-recovery.sql
-
-psql -d dc_check -f schema-invariants.sql     # 24 checks
-psql -d dc_check -f access-invariants.sql     # 24 checks
-psql -d dc_check -f audit-invariants.sql      # 13 checks
-psql -d dc_check -f retention-invariants.sql  # 38 checks
-psql -d dc_check -f environment-invariants.sql # 37 checks
-psql -d dc_check -f vendor-invariants.sql     # 23 checks
-psql -d dc_check -f backup-invariants.sql     # 34 checks
-
-dropdb dc_check
+./verify.sh          # 193 checks across seven suites
+./restore-drill.sh --build   # 13 more, and a real dump and restore
 ```
 
-The restore drill is a script rather than a check, because it needs two databases and a
-shell. It builds a source, dumps it, restores it under another name, and removes
-everything it made:
+`verify.sh` is the whole thing: it creates the three application roles once, then builds a
+separate database per suite, applies the model, runs the suite and drops the database. It
+exits non-zero if a single check failed.
+
+A suite needs a database of its own because each one seeds its own fixtures and then tries
+to violate them — running two against the same database fails on the first one's seed data
+rather than on anything real. That is why the script exists rather than a list of commands
+to paste.
+
+By hand, one suite at a time, the same way the script does it:
 
 ```bash
-./restore-drill.sh --build        # 11 checks
+psql -d postgres -f roles.sql          # once per cluster
+
+createdb dc_check
+for f in schema.sql access-policies.sql data-classification.sql audit-logging.sql \
+         retention.sql environments.sql vendors.sql backup-recovery.sql \
+         checks-support.sql; do
+  psql -v ON_ERROR_STOP=1 -d dc_check -f $f
+done
+psql -d dc_check -f schema-invariants.sql     # 24 checks
+dropdb dc_check                               # and again for the next suite
 ```
 
-Each invariant file prints `PASS` or `FAIL` per check, on stderr. 193 checks in total. A `FAIL` means a
-guarantee has been removed — which is sometimes the right thing to do, but it should be a
-decision rather than a discovery.
+The suites are: `schema` (24), `access` (24), `audit` (13), `retention` (38),
+`environment` (37), `vendor` (23), `backup` (34).
 
-They are not idempotent, and deliberately so: each seeds its own fixtures and then tries
-to violate them. Running one twice against the same database fails on its own seed data
-rather than on anything real. Drop and recreate between runs.
+Each prints `PASS` or `FAIL` per check, on stderr. A `FAIL` means a guarantee has been
+removed — which is sometimes the right thing to do, but it should be a decision rather than
+a discovery.
+
+### Who you are running as matters
+
+The checks pass as a superuser and as a non-superuser with `CREATEDB` and `CREATEROLE`,
+and both are tested. The difference is not cosmetic: a superuser bypasses row-level
+security entirely, so a suite run as one can report success while the policies under test
+were never consulted. A managed instance gives nobody a superuser, which is what production
+will actually be.
+
+`checks-support.sql` is what makes the two agree. It lets each suite lift `FORCE` on the
+PHI tables for its own owner-level reads and put it back at the end, so a check that counts
+what survived a deletion is counting rows rather than counting what a policy let it see.
+Every check that tests a policy does it by becoming `dailycare_app` or
+`dailycare_retention` and asking as them.
+
+If you cannot create roles, ask for these four once and then run everything else as
+yourself:
+
+```sql
+CREATE ROLE dailycare_app NOLOGIN;
+CREATE ROLE dailycare_retention NOLOGIN;
+CREATE ROLE dailycare_integration NOLOGIN;
+CREATE ROLE dailycare_backup NOLOGIN BYPASSRLS;   -- BYPASSRLS needs a superuser
+GRANT dailycare_app, dailycare_retention, dailycare_integration, dailycare_backup
+  TO <your user>;
+```
+
+`dailycare_backup` is the only role that bypasses row-level security, and it exists for one
+reason: `pg_dump` run by the owner fails on every PHI table while `FORCE` is on. That is the
+correct failure — `pg_dump --enable-row-security` succeeds instead and silently dumps only
+the rows the policies admitted, which is a partial backup that looks complete.
 
 The classification has one further check, and it is a query rather than a script:
 

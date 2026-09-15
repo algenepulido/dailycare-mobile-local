@@ -20,6 +20,10 @@
 
 \set QUIET on
 SET client_min_messages TO notice;
+-- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
+-- managed-instance owner. See checks-support.sql: the policies stay in force, and every
+-- check that tests one does it by becoming the role it is about.
+SELECT checks_begin();
 
 CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
 BEGIN
@@ -247,7 +251,16 @@ ORDER BY table_name, column_name;
 
 \echo ''
 \echo '── scrubbing'
+-- FORCE goes back on for the scrub itself, because lifting and restoring it is part of
+-- what the scrub does and is checked below. Lifted again afterwards for the owner-level
+-- reads that count what is left.
+\set QUIET on
+SELECT checks_end();
+\set QUIET off
 SELECT what, changed FROM scrub_phi(current_database());
+\set QUIET on
+SELECT checks_begin();
+\set QUIET off
 
 \echo ''
 \echo '── and now the same search'
@@ -361,9 +374,10 @@ SELECT expect('nothing was orphaned',
 \echo ''
 \echo '── and the protections are back on'
 
+-- Checked at the moment the scrub finished, before this suite lifted FORCE again for its
+-- own reads. Seven tables went in and seven came back.
 SELECT expect('row-level security is forced again on every table it was forced on',
-  (SELECT count(*) = 7 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'public' AND c.relrowsecurity AND c.relforcerowsecurity));
+  (SELECT count(*) = 7 FROM checks_forced_tables));
 
 SELECT expect('the audit triggers are enabled again',
   (SELECT count(*) = 0 FROM pg_trigger tg
@@ -392,7 +406,7 @@ SELECT expect('the run is recorded, with the offset it used',
 \set QUIET on
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
-    CREATE ROLE dailycare_app NOLOGIN;
+    RAISE EXCEPTION 'role dailycare_app does not exist. Apply roles.sql first.';
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
@@ -427,6 +441,7 @@ FROM residents r LEFT JOIN care_days c ON c.resident_id = r.id
 ORDER BY r.display_name, c.care_date;
 
 \set QUIET on
+SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_rejected(text, text);
 \set QUIET off
