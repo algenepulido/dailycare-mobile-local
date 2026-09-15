@@ -21,6 +21,9 @@ constraint and a constraint are different things, and only one of them stops a m
 | `environment-invariants.sql` | Plants a unique string in every sensitive field, scrubs, then searches every column of every table for all of them. |
 | `vendors.sql` | Who else touches the data, what they touch, and which agreements are not in place yet. |
 | `vendor-invariants.sql` | Moves the register into each bad state in turn and asks whether anything noticed. |
+| `backup-recovery.sql` | What is backed up, for how long, who may restore it, and the record of somebody having done so. |
+| `backup-invariants.sql` | Mostly the restore gate: a database that finds itself somewhere other than where it was written serves nothing until it has been scrubbed. |
+| `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
 
 ## Verifying it
 
@@ -37,6 +40,7 @@ psql -v ON_ERROR_STOP=1 -d dc_check -f audit-logging.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f retention.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f environments.sql
 psql -v ON_ERROR_STOP=1 -d dc_check -f vendors.sql
+psql -v ON_ERROR_STOP=1 -d dc_check -f backup-recovery.sql
 
 psql -d dc_check -f schema-invariants.sql     # 24 checks
 psql -d dc_check -f access-invariants.sql     # 24 checks
@@ -44,11 +48,20 @@ psql -d dc_check -f audit-invariants.sql      # 13 checks
 psql -d dc_check -f retention-invariants.sql  # 38 checks
 psql -d dc_check -f environment-invariants.sql # 37 checks
 psql -d dc_check -f vendor-invariants.sql     # 23 checks
+psql -d dc_check -f backup-invariants.sql     # 34 checks
 
 dropdb dc_check
 ```
 
-Each invariant file prints `PASS` or `FAIL` per check, on stderr. 159 checks in total. A `FAIL` means a
+The restore drill is a script rather than a check, because it needs two databases and a
+shell. It builds a source, dumps it, restores it under another name, and removes
+everything it made:
+
+```bash
+./restore-drill.sh --build        # 11 checks
+```
+
+Each invariant file prints `PASS` or `FAIL` per check, on stderr. 193 checks in total. A `FAIL` means a
 guarantee has been removed — which is sometimes the right thing to do, but it should be a
 decision rather than a discovery.
 
@@ -68,6 +81,12 @@ SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns cl
 SELECT * FROM live_without_agreement; -- must be empty
 SELECT * FROM unacknowledged_gaps;    -- must be empty
 SELECT * FROM uncontrolled_exposure;  -- must be empty
+
+SELECT * FROM backup_policies;        -- what is kept, how long, and who may restore it
+SELECT * FROM policies_not_in_effect; -- which of those are still plans
+SELECT * FROM never_drilled;          -- environments nobody has restored from yet
+SELECT * FROM in_effect_without_drill;-- must be empty
+SELECT * FROM rto_missed;             -- must be empty
 ```
 
 A column added in a later migration arrives unclassified and appears in the first query.
@@ -126,6 +145,16 @@ without a rule and the scrub refuses to run at all. What is kept is kept deliber
 a reason recorded: once names are gone and every date has moved by one offset, a mood and a
 meal amount are what make the copy worth developing against.
 
+**A restored copy knows it is a copy.** The dangerous moment in a backup strategy is not
+the backup. It is the twenty minutes after a restore, when a production snapshot is sitting
+in a database called something like `dailycare_dev` with a laptop already pointed at it.
+The deployment row records the database and the instance it was written in, and travels
+inside the dump — so when it lands anywhere else it no longer matches, and `app_user_id()`
+returns null until a scrub has run under this database's own name. Every policy in the
+access model inherits that at once, because they all resolve from the same function. A
+production recovery is not blocked: it takes one deliberate statement that says this is the
+database now, and records who decided that.
+
 **A credential column refuses anything but a digest.** "Passwords are hashed" is otherwise
 a property of whichever handler last wrote the row, and stops being true the day a second
 one appears — an import, a seeding script, a migration written in a hurry. A check
@@ -169,6 +198,9 @@ These are judgements rather than facts, and worth confirming rather than assumin
 - The scrub replaces a care note with filler of the same length, so a layout bug still
   reproduces in dev. Length is the one thing it leaks. That reads as a reasonable trade
   here and is worth a second opinion.
+- The restore gate stops the application, not a person with direct database access. It
+  buys the window between a restore and a scrub, which is where the accident happens; it is
+  not a substitute for who holds the recovery role.
 - Project-level separation — one GCP project per environment, no shared service account,
   no path from a dev workload to a production bucket — is infrastructure rather than
   schema, and waits on the project and billing setup.

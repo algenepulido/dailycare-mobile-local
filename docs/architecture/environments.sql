@@ -32,10 +32,22 @@
 
 CREATE TYPE deployment_environment AS ENUM ('production', 'staging', 'development');
 
+CREATE OR REPLACE FUNCTION deployment_cluster_id() RETURNS text
+LANGUAGE sql STABLE AS $$ SELECT system_identifier::text FROM pg_control_system() $$;
+
 CREATE TABLE deployment (
   only_row     boolean PRIMARY KEY DEFAULT true CHECK (only_row),
   environment  deployment_environment NOT NULL,
   label        text NOT NULL,
+
+  -- Where this row was written. Both of these travel inside a backup, which is the point:
+  -- a restore into another database or another instance arrives carrying the name and the
+  -- cluster it came from, and no longer matches the one it is now running in. That is how
+  -- a copy can know it is a copy without anybody remembering to tell it.
+  database_name text NOT NULL DEFAULT current_database(),
+  cluster_id    text NOT NULL DEFAULT deployment_cluster_id(),
+
+  phi_scrubbed_at timestamptz,
   set_at       timestamptz NOT NULL DEFAULT now()
 );
 
@@ -43,6 +55,116 @@ COMMENT ON TABLE deployment IS
   'One row, enforced by the primary key. A database that has not said which environment it
    is refuses to be scrubbed, because the safe assumption about an unlabelled database is
    that it is the live one.';
+
+
+CREATE TABLE scrub_runs (
+  id            bigserial PRIMARY KEY,
+  ran_at        timestamptz NOT NULL DEFAULT now(),
+  ran_by        text NOT NULL DEFAULT current_user,
+  database_name text NOT NULL DEFAULT current_database(),
+  environment   deployment_environment NOT NULL,
+  shift_days    integer NOT NULL,
+  columns_changed integer NOT NULL,
+  rows_changed  bigint NOT NULL
+);
+
+COMMENT ON TABLE scrub_runs IS
+  'A dev database can be asked when it was last scrubbed, and by whom. A snapshot that has
+   been restored but not scrubbed has no row here, which is the question to ask it.';
+
+-- ════════════════════════════════════════════════════════════════════ am I a copy
+--
+-- The dangerous moment in a backup strategy is not the backup. It is the twenty minutes
+-- after a restore, when a production snapshot is sitting in a database called something
+-- like dailycare_dev with somebody's laptop already pointed at it.
+--
+-- Asking an operator to scrub before connecting is a convention, and conventions are what
+-- this whole directory exists to replace. So the database works it out. The deployment row
+-- travels inside the dump; when it lands somewhere else, the name and the cluster it
+-- records are no longer the ones it is running in, and until a scrub has been run under
+-- this database's own name the application reads nothing at all.
+
+CREATE OR REPLACE FUNCTION deployment_is_original() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM deployment d
+    WHERE d.database_name = current_database()
+      AND d.cluster_id    = deployment_cluster_id()
+  )
+$$;
+
+CREATE OR REPLACE FUNCTION app_data_is_servable() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT CASE
+    -- Never labelled. It has not claimed to be anything, so there is nothing to have been
+    -- copied from; row-level security is still in force and is the protection here. Failing
+    -- closed instead would brick a database whose deployment row was never written, and
+    -- would buy nothing: anybody able to empty this table can already read the tables it
+    -- is guarding.
+    WHEN NOT EXISTS (SELECT 1 FROM deployment) THEN true
+    WHEN deployment_is_original() THEN true
+    -- A copy. Clear only once the scrub has run here, under this database's own name -
+    -- the source's scrub history came along in the dump and does not count.
+    --
+    -- Read the other way round, this also says that a database scrubbed under its own name
+    -- stays clear whatever its deployment row later claims about where it came from. That
+    -- is right rather than a hole: the scrub happened in this database, so the records here
+    -- have been through it, and the row is a statement about origin rather than contents.
+    ELSE EXISTS (SELECT 1 FROM scrub_runs WHERE database_name = current_database())
+  END
+$$;
+
+COMMENT ON FUNCTION app_data_is_servable() IS
+  'False in a restored copy that has not been scrubbed. Read by app_user_id below, so the
+   answer propagates to every policy in the access model at once rather than being
+   remembered in each of them.';
+
+
+-- A restore into a new instance is also how a real disaster recovery looks, and that one
+-- must not be blocked. One deliberate statement, which belongs in the runbook and leaves
+-- a record of itself.
+-- The gate is wired in here rather than into each policy. app_user_id() already has the
+-- property the access model is built on - null compares false everywhere, so a request that
+-- cannot be identified reads nothing - and an unscrubbed copy should look exactly like a
+-- request that cannot be identified.
+
+CREATE OR REPLACE FUNCTION app_user_id() RETURNS uuid
+LANGUAGE sql STABLE AS $$
+  SELECT CASE WHEN app_data_is_servable()
+              THEN nullif(current_setting('app.user_id', true), '')::uuid
+              ELSE NULL END
+$$;
+
+COMMENT ON FUNCTION app_user_id() IS
+  'Null when unset, and null compares false everywhere in the access model - so a request
+   that forgets to identify itself reads nothing rather than everything. Null also in a
+   restored copy that has not been scrubbed, for the same reason and with the same effect.';
+
+
+CREATE OR REPLACE FUNCTION claim_this_database(
+  confirm_database text,
+  as_environment   deployment_environment,
+  why              text
+) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  IF confirm_database IS DISTINCT FROM current_database() THEN
+    RAISE EXCEPTION 'refusing: called with %, connected to %',
+      coalesce(confirm_database, '<null>'), current_database();
+  END IF;
+  UPDATE deployment SET environment   = as_environment,
+                        label         = why,
+                        database_name = current_database(),
+                        cluster_id    = deployment_cluster_id(),
+                        set_at        = now();
+  IF NOT FOUND THEN
+    INSERT INTO deployment (environment, label) VALUES (as_environment, why);
+  END IF;
+END; $$;
+
+COMMENT ON FUNCTION claim_this_database(text, deployment_environment, text) IS
+  'Used at the end of a production recovery, when the restore is the real database now.
+   Naming it as production here is a person deciding that, which is the intent: recovery is
+   not blocked, and it is not silent either.';
 
 
 -- ════════════════════════════════════════════════════════════════════ the rules
@@ -233,21 +355,6 @@ COMMENT ON FUNCTION phi_residue(text[]) IS
 
 -- ════════════════════════════════════════════════════════════════════ the scrub
 
-CREATE TABLE scrub_runs (
-  id            bigserial PRIMARY KEY,
-  ran_at        timestamptz NOT NULL DEFAULT now(),
-  ran_by        text NOT NULL DEFAULT current_user,
-  database_name text NOT NULL DEFAULT current_database(),
-  environment   deployment_environment NOT NULL,
-  shift_days    integer NOT NULL,
-  columns_changed integer NOT NULL,
-  rows_changed  bigint NOT NULL
-);
-
-COMMENT ON TABLE scrub_runs IS
-  'A dev database can be asked when it was last scrubbed, and by whom. A snapshot that has
-   been restored but not scrubbed has no row here, which is the question to ask it.';
-
 CREATE OR REPLACE FUNCTION scrub_phi(confirm_database text)
 RETURNS TABLE (what text, changed bigint)
 LANGUAGE plpgsql AS $$
@@ -363,6 +470,11 @@ BEGIN
 
   INSERT INTO scrub_runs (environment, shift_days, columns_changed, rows_changed)
   VALUES (env, shift, cols, total);
+
+  -- The copy is now this database rather than a snapshot of another one.
+  UPDATE deployment SET database_name   = current_database(),
+                        cluster_id      = deployment_cluster_id(),
+                        phi_scrubbed_at = now();
 
   what := 'columns rewritten'; changed := cols;  RETURN NEXT;
   what := 'rows touched';      changed := total; RETURN NEXT;
