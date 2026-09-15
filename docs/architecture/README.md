@@ -56,7 +56,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 277 checks across ten suites
+./verify.sh                  # 281 checks across ten suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -87,7 +87,7 @@ dropdb dc_check                               # and again for the next suite
 ```
 
 The suites are: `schema` (24), `access` (38), `audit` (13), `retention` (38),
-`environment` (37), `vendor` (23), `backup` (34), `logging` (23), `auth` (26),
+`environment` (37), `vendor` (23), `backup` (34), `logging` (27), `auth` (26),
 `secrets` (21).
 
 Each prints `PASS` or `FAIL` per check, on stderr. A `FAIL` means a guarantee has been

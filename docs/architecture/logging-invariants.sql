@@ -66,6 +66,38 @@ ALTER TABLE care_days DROP COLUMN behaviour_note;
 \set QUIET off
 
 
+-- ── and the classification it is generated from is complete ────────────────────
+--
+-- never_log is only as good as the classification underneath it, and the completeness of
+-- that classification was a line in a README telling somebody to run a query. It was wrong
+-- for twelve tables and ninety-seven columns before anybody ran it, which is the argument
+-- for it being a check rather than an instruction.
+
+\echo ''
+\echo '── the classification underneath it'
+
+SELECT expect('every column in the schema has been classified',
+  (SELECT count(*) = 0 FROM unclassified_columns));
+
+SELECT expect('and the inventory is not empty, which would make that cheap',
+  (SELECT count(*) > 100 FROM data_classification));
+
+\set QUIET on
+ALTER TABLE facilities ADD COLUMN nobody_thought_about_this text;
+\set QUIET off
+
+SELECT expect('a column added without a classification is reported rather than assumed harmless',
+  (SELECT count(*) = 1 FROM unclassified_columns
+   WHERE table_name = 'facilities' AND column_name = 'nobody_thought_about_this'));
+
+\set QUIET on
+ALTER TABLE facilities DROP COLUMN nobody_thought_about_this;
+\set QUIET off
+
+SELECT expect('and once it is gone the answer is zero again',
+  (SELECT count(*) = 0 FROM unclassified_columns));
+
+
 -- ── the scan ───────────────────────────────────────────────────────────────────
 
 \echo ''

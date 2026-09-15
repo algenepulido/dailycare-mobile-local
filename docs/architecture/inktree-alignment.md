@@ -44,7 +44,7 @@ TypeScript — one language across the app and the API, one test runner, one set
 **What converging costs.** Less than it looks, and the reason is the point of this whole
 directory. The data model, the access rules, the audit trail, the retention job and the
 scrub are all in the database. They are the same whether the handler above them is Go or
-TypeScript, and none of the 193 checks in this directory would change. What changes is the
+TypeScript, and none of the 281 checks in this directory would change. What changes is the
 handler layer: request parsing, session handling, the PointClickCare client, the media
 signing path. That is real work and it is bounded.
 
@@ -171,7 +171,7 @@ non-production scrub, the vendor register, the backup policy and the restore gat
 PostgreSQL. A Go handler and a TypeScript handler connect to the same database, as the same
 role, under the same policies, and get the same answers.
 
-The 193 checks run against the database, not against an application. They will still run,
+The 281 checks run against the database, not against an application. They will still run,
 and still pass, whichever way the decisions below go.
 
 ---

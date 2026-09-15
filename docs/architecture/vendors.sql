@@ -287,3 +287,34 @@ DO $$ BEGIN
     REVOKE ALL ON vendors, vendor_exposure FROM dailycare_app;
   END IF;
 END $$;
+
+-- ════════════════════════════════════════════════════════════════════ classification
+--
+-- A table added to this schema is a table the PHI inventory has to have an answer for,
+-- and "operational" is an answer that has to be written down rather than inferred from
+-- nobody having said otherwise. unclassified_columns is checked by the suites.
+
+-- vendors: Third parties and the agreements with them. Business facts.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('vendors','baa','operational',NULL),
+ ('vendors','baa_signed_on','operational',NULL),
+ ('vendors','covered_scope','operational',NULL),
+ ('vendors','gap_blocker','operational',NULL),
+ ('vendors','gap_owner','operational',NULL),
+ ('vendors','gap_required_before','operational',NULL),
+ ('vendors','id','operational',NULL),
+ ('vendors','live','operational',NULL),
+ ('vendors','name','operational',NULL),
+ ('vendors','note','operational',NULL),
+ ('vendors','purpose','operational',NULL),
+ ('vendors','reviewed_on','operational',NULL),
+ ('vendors','role','operational',NULL);
+
+-- vendor_exposure: Which class of data each vendor touches. About the classes, not the data.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('vendor_exposure','class','operational',NULL),
+ ('vendor_exposure','control','operational',NULL),
+ ('vendor_exposure','exposure','operational',NULL),
+ ('vendor_exposure','note','operational',NULL),
+ ('vendor_exposure','vendor_id','operational',NULL);
+

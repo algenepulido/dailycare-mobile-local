@@ -206,3 +206,29 @@ DO $$ BEGIN
     GRANT EXECUTE ON FUNCTION log_scan(jsonb) TO dailycare_app;
   END IF;
 END $$;
+
+-- ════════════════════════════════════════════════════════════════════ classification
+--
+-- A table added to this schema is a table the PHI inventory has to have an answer for,
+-- and "operational" is an answer that has to be written down rather than inferred from
+-- nobody having said otherwise. unclassified_columns is checked by the suites.
+
+-- notification_templates: Fixed strings with no resident in them, which is enforced by a constraint rather than assumed here.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('notification_templates','audience','operational',NULL),
+ ('notification_templates','body','operational',NULL),
+ ('notification_templates','channel','operational',NULL),
+ ('notification_templates','id','operational',NULL),
+ ('notification_templates','note','operational',NULL),
+ ('notification_templates','placeholders','operational',NULL),
+ ('notification_templates','title','operational',NULL);
+
+-- monitoring_signals: What is watched and who is told. The constraint on this table refuses a signal that would carry PHI.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('monitoring_signals','alert_body','operational',NULL),
+ ('monitoring_signals','audience','operational',NULL),
+ ('monitoring_signals','carries_phi','operational',NULL),
+ ('monitoring_signals','id','operational',NULL),
+ ('monitoring_signals','watches','operational',NULL),
+ ('monitoring_signals','why','operational',NULL);
+

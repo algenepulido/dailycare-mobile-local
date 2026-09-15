@@ -285,3 +285,19 @@ WHERE dc.class = 'phi'
 COMMENT ON VIEW access_matrix_uncovered_tables IS
   'Must be empty. A table acquires a PHI column in a later migration and nobody says who
    may read it; this is where that shows up.';
+
+-- ════════════════════════════════════════════════════════════════════ classification
+--
+-- A table added to this schema is a table the PHI inventory has to have an answer for,
+-- and "operational" is an answer that has to be written down rather than inferred from
+-- nobody having said otherwise. unclassified_columns is checked by the suites.
+
+-- access_matrix: Who may do what. A statement about the model rather than about anybody in it.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('access_matrix','actor','operational',NULL),
+ ('access_matrix','allowed','operational',NULL),
+ ('access_matrix','condition','operational',NULL),
+ ('access_matrix','note','operational',NULL),
+ ('access_matrix','operation','operational',NULL),
+ ('access_matrix','table_name','operational',NULL);
+

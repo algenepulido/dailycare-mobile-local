@@ -512,3 +512,38 @@ END $$;
 
 REVOKE EXECUTE ON FUNCTION scrub_phi(text)      FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION phi_residue(text[])  FROM PUBLIC;
+
+-- ════════════════════════════════════════════════════════════════════ classification
+--
+-- A table added to this schema is a table the PHI inventory has to have an answer for,
+-- and "operational" is an answer that has to be written down rather than inferred from
+-- nobody having said otherwise. unclassified_columns is checked by the suites.
+
+-- deployment: Which environment this database is, and where it was written.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('deployment','cluster_id','operational',NULL),
+ ('deployment','database_name','operational',NULL),
+ ('deployment','environment','operational',NULL),
+ ('deployment','label','operational',NULL),
+ ('deployment','only_row','operational',NULL),
+ ('deployment','phi_scrubbed_at','operational',NULL),
+ ('deployment','set_at','operational',NULL);
+
+-- scrub_rules: What happens to each column when a snapshot is made safe to develop against.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('scrub_rules','column_name','operational',NULL),
+ ('scrub_rules','reason','operational',NULL),
+ ('scrub_rules','strategy','operational',NULL),
+ ('scrub_rules','table_name','operational',NULL);
+
+-- scrub_runs: When a copy was scrubbed, and by whom. Counts only.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('scrub_runs','columns_changed','operational',NULL),
+ ('scrub_runs','database_name','operational',NULL),
+ ('scrub_runs','environment','operational',NULL),
+ ('scrub_runs','id','operational',NULL),
+ ('scrub_runs','ran_at','operational',NULL),
+ ('scrub_runs','ran_by','operational',NULL),
+ ('scrub_runs','rows_changed','operational',NULL),
+ ('scrub_runs','shift_days','operational',NULL);
+

@@ -224,3 +224,42 @@ DO $$ BEGIN
     REVOKE ALL ON backup_policies, restore_drills FROM dailycare_app;
   END IF;
 END $$;
+
+-- ════════════════════════════════════════════════════════════════════ classification
+--
+-- A table added to this schema is a table the PHI inventory has to have an answer for,
+-- and "operational" is an answer that has to be written down rather than inferred from
+-- nobody having said otherwise. unclassified_columns is checked by the suites.
+
+-- backup_policies: Schedules, windows and targets.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('backup_policies','encryption','operational',NULL),
+ ('backup_policies','environment','operational',NULL),
+ ('backup_policies','in_effect','operational',NULL),
+ ('backup_policies','key_management','operational',NULL),
+ ('backup_policies','logical_export_by','operational',NULL),
+ ('backup_policies','note','operational',NULL),
+ ('backup_policies','pitr_window_hours','operational',NULL),
+ ('backup_policies','retention_days','operational',NULL),
+ ('backup_policies','reviewed_on','operational',NULL),
+ ('backup_policies','rpo_minutes','operational',NULL),
+ ('backup_policies','rto_minutes','operational',NULL),
+ ('backup_policies','schedule','operational',NULL),
+ ('backup_policies','storage_location','operational',NULL),
+ ('backup_policies','who_may_restore','operational',NULL);
+
+-- restore_drills: That somebody restored a backup, how long it took, and how many rows came back. A count is not a record.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('restore_drills','copy_detected','operational',NULL),
+ ('restore_drills','environment','operational',NULL),
+ ('restore_drills','id','operational',NULL),
+ ('restore_drills','minutes_to_restore','operational',NULL),
+ ('restore_drills','note','operational',NULL),
+ ('restore_drills','outcome','operational',NULL),
+ ('restore_drills','performed_by','operational',NULL),
+ ('restore_drills','performed_on','operational',NULL),
+ ('restore_drills','restored_into','operational',NULL),
+ ('restore_drills','rows_verified','operational',NULL),
+ ('restore_drills','scrub_confirmed','operational',NULL),
+ ('restore_drills','source_snapshot_at','operational',NULL);
+

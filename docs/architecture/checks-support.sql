@@ -19,31 +19,35 @@
 -- Nothing under test is weakened, because every check that tests a policy does it by
 -- becoming dailycare_app or dailycare_retention and asking as them.
 
-CREATE TABLE IF NOT EXISTS checks_forced_tables (table_name text PRIMARY KEY);
+-- Its own schema, not public. A table belonging to the test scaffolding sitting beside the
+-- model would appear in the model's own completeness views as a column nobody classified -
+-- which it did, and which is how this was noticed.
+CREATE SCHEMA IF NOT EXISTS checks;
+CREATE TABLE IF NOT EXISTS checks.forced_tables (table_name text PRIMARY KEY);
 
 CREATE OR REPLACE FUNCTION checks_begin() RETURNS void
 LANGUAGE plpgsql
-  SET search_path = pg_catalog, public AS $$
+  SET search_path = pg_catalog, public, checks AS $$
 DECLARE r record;
 BEGIN
-  DELETE FROM checks_forced_tables;
+  DELETE FROM checks.forced_tables;
   FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
            WHERE n.nspname = 'public' AND c.relrowsecurity AND c.relforcerowsecurity
   LOOP
-    INSERT INTO checks_forced_tables VALUES (r.relname);
+    INSERT INTO checks.forced_tables VALUES (r.relname);
     EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', r.relname);
   END LOOP;
 END; $$;
 
 CREATE OR REPLACE FUNCTION checks_end() RETURNS void
 LANGUAGE plpgsql
-  SET search_path = pg_catalog, public AS $$
+  SET search_path = pg_catalog, public, checks AS $$
 DECLARE r record;
 BEGIN
-  FOR r IN SELECT table_name FROM checks_forced_tables LOOP
+  FOR r IN SELECT table_name FROM checks.forced_tables LOOP
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', r.table_name);
   END LOOP;
-  DELETE FROM checks_forced_tables;
+  DELETE FROM checks.forced_tables;
 END; $$;
 
 COMMENT ON FUNCTION checks_begin() IS

@@ -203,3 +203,31 @@ DO $$ BEGIN
     REVOKE ALL ON secrets_inventory, encryption_controls FROM dailycare_app;
   END IF;
 END $$;
+
+-- ════════════════════════════════════════════════════════════════════ classification
+--
+-- A table added to this schema is a table the PHI inventory has to have an answer for,
+-- and "operational" is an answer that has to be written down rather than inferred from
+-- nobody having said otherwise. unclassified_columns is checked by the suites.
+
+-- secrets_inventory: Where a secret lives and who may read it. Never the secret.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('secrets_inventory','id','operational',NULL),
+ ('secrets_inventory','last_rotated_on','operational',NULL),
+ ('secrets_inventory','note','operational',NULL),
+ ('secrets_inventory','reviewed_on','operational',NULL),
+ ('secrets_inventory','rotation_days','operational',NULL),
+ ('secrets_inventory','store','operational',NULL),
+ ('secrets_inventory','what','operational',NULL),
+ ('secrets_inventory','who_may_read','operational',NULL);
+
+-- encryption_controls: What is encrypted and how keys are held.
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('encryption_controls','covers','operational',NULL),
+ ('encryption_controls','id','operational',NULL),
+ ('encryption_controls','key_management','operational',NULL),
+ ('encryption_controls','mechanism','operational',NULL),
+ ('encryption_controls','note','operational',NULL),
+ ('encryption_controls','reviewed_on','operational',NULL),
+ ('encryption_controls','state','operational',NULL);
+

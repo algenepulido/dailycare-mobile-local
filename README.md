@@ -32,7 +32,7 @@ cd docs/architecture
 ./review.sh
 ```
 
-It starts a throwaway PostgreSQL 14, runs 277 checks across ten suites and a restore drill
+It starts a throwaway PostgreSQL 14, runs 281 checks across ten suites and a restore drill
 as an ordinary database user, and removes the container. `docs/architecture/README.md` maps
 every item in the review package to the file that answers it.
 
