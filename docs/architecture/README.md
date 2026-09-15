@@ -171,7 +171,7 @@ it says "checked" a failing suite is what drift looks like.
 
 | Asked for | Where | |
 |---|---|---|
-| Architecture and data-flow diagram | `architecture-diagram.md` | four diagrams, parsed |
+| Architecture and data-flow diagram | `architecture-diagram.md` | four diagrams, rendered |
 | PHI inventory: created, transmitted, processed, stored | `data-classification.sql`, diagram 2 | generated |
 | GCP services used, and which handle PHI | `vendors.sql` | checked |
 | Authentication and authorisation model | `authentication.sql`, `access-policies.sql` | checked |
