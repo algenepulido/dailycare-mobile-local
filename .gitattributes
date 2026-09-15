@@ -1,0 +1,15 @@
+# The shell scripts and the SQL run inside a Linux container and on a Linux host, so they
+# are checked out with LF endings whatever the machine doing the checkout does by default.
+# Git for Windows converts to CRLF unless told otherwise, and a script with CRLF endings
+# fails with "$'\r': command not found", which is not a message anybody enjoys receiving
+# from somebody else's repository.
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.md   text eol=lf
+
+# Binary, never converted.
+*.png  binary
+*.jpg  binary
+*.ttf  binary
+*.keystore binary
+*.tar.gz binary

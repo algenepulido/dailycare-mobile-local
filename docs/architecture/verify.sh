@@ -17,6 +17,14 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_PREFIX="${DB_PREFIX:-dc_verify}"
 
+for tool in psql createdb dropdb; do
+  command -v "$tool" >/dev/null || {
+    echo "$tool is not on the path. This needs the PostgreSQL client tools and a role that" >&2
+    echo "may create databases. If you would rather not install anything, review.sh does the" >&2
+    echo "same thing inside a throwaway container and needs only Docker." >&2
+    exit 1; }
+done
+
 MODEL=(schema.sql authentication.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
        retention.sql environments.sql vendors.sql backup-recovery.sql
        phi-safe-logging.sql encryption-and-secrets.sql checks-support.sql)

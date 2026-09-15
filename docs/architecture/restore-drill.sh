@@ -36,6 +36,10 @@ done
 
 [ -n "$SOURCE" ] || { echo "give --source <database> or --build" >&2; exit 2; }
 
+for tool in psql pg_dump createdb dropdb; do
+  command -v "$tool" >/dev/null || { echo "$tool is not on the path" >&2; exit 1; }
+done
+
 PASSED=0
 FAILED=0
 say()  { printf '%s\n' "$*"; }
