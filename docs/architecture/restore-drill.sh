@@ -68,7 +68,8 @@ if [ "$BUILD" = 1 ]; then
   createdb "$SOURCE" || exit 1
   for f in schema.sql authentication.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
            retention.sql environments.sql vendors.sql backup-recovery.sql \
-           phi-safe-logging.sql encryption-and-secrets.sql checks-support.sql; do
+           phi-safe-logging.sql encryption-and-secrets.sql boundary.sql \
+           checks-support.sql; do
     psql -q -v ON_ERROR_STOP=1 -d "$SOURCE" -f "$HERE/$f" >/dev/null || {
       echo "could not apply $f" >&2; exit 1; }
   done

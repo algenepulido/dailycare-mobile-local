@@ -377,7 +377,10 @@ SELECT expect('nothing was orphaned',
 -- Checked at the moment the scrub finished, before this suite lifted FORCE again for its
 -- own reads. Seven tables went in and seven came back.
 SELECT expect('row-level security is forced again on every table it was forced on',
-  (SELECT count(*) = 7 FROM checks.forced_tables));
+  (SELECT count(*) FROM checks.forced_tables)
+  = (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relrowsecurity)
+  AND (SELECT count(*) > 7 FROM checks.forced_tables));
 
 SELECT expect('the audit triggers are enabled again',
   (SELECT count(*) = 0 FROM pg_trigger tg

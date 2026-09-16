@@ -137,6 +137,7 @@ DECLARE
   held        bigint;
   policy_days integer;
   n           bigint;
+  r           record;
   counts      jsonb := '{}'::jsonb;
 BEGIN
   PERFORM set_config('app.role', 'retention', true);
@@ -168,6 +169,15 @@ BEGIN
 
   what := 'records held back, awaiting storage deletion'; removed := held; RETURN NEXT;
   counts := counts || jsonb_build_object('held_for_media', held);
+
+  -- Tables added by later files delete their own rows, so that this job does not have to
+  -- be edited every time the schema grows. Absent in a database that stops at the core.
+  IF to_regprocedure('retention_delete_boundary_rows(uuid[])') IS NOT NULL THEN
+    FOR r IN SELECT * FROM retention_delete_boundary_rows(due) LOOP
+      what := r.what; removed := r.removed; RETURN NEXT;
+      counts := counts || jsonb_build_object(replace(r.what, ' ', '_'), r.removed);
+    END LOOP;
+  END IF;
 
   DELETE FROM medication_events WHERE resident_id = ANY(due);
   GET DIAGNOSTICS n = ROW_COUNT;

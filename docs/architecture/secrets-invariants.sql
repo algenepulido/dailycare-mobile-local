@@ -108,8 +108,16 @@ SELECT expect('the same for a session token',
   AND is_sha256_hex(md5('a') || md5('b'))
   AND NOT is_sha256_hex('rt_live_9f2a7c4e'));
 
-SELECT expect('and every secret column is classified as one, so it can never be logged',
-  (SELECT count(*) = 3 FROM data_classification WHERE class = 'secret'));
+-- Named rather than counted. A count goes stale the moment a file adds a secret column,
+-- and going stale quietly is the thing this directory is against.
+SELECT expect('and every credential column is classified as a secret, so none can be logged',
+  (SELECT count(*) = 4 FROM data_classification
+   WHERE class = 'secret'
+     AND (table_name, column_name) IN (
+       ('users','password_hash'), ('sessions','refresh_hash'),
+       ('user_tokens','token_hash'), ('integration_salts','salt')))
+  AND (SELECT count(*) = 0 FROM never_log
+       WHERE field IN ('password_hash','refresh_hash','token_hash','salt')) = false);
 
 
 -- ── encryption ─────────────────────────────────────────────────────────────────

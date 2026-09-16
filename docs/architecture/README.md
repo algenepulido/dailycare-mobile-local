@@ -30,6 +30,8 @@ constraint and a constraint are different things, and only one of them stops a m
 | `backup-invariants.sql` | Mostly the restore gate: a database that finds itself somewhere other than where it was written serves nothing until it has been scrubbed. |
 | `phi-safe-logging.sql` | What a log line may not contain, what a notification may say, and what is watched. Generated from the classification rather than remembered. |
 | `logging-invariants.sql` | Including the notification somebody will ask for — the one that names a resident — being refused. |
+| `boundary.sql` | The InkTree boundary: which way content may cross, what a reversal would require, and the two ways it gets crossed by accident. |
+| `boundary-invariants.sql` | Breaks the boundary four plausible ways and asks whether anything noticed. |
 | `encryption-and-secrets.sql` | Where every secret lives, what is kept instead of it, and what is encrypted — including the two controls that were declined and why. |
 | `secrets-invariants.sql` | Mostly negative controls: a credential in the repository, one baked into an image, one nobody said anything about. |
 | `checks-support.sql` | Not part of the model. What lets a suite give the same answers to a superuser and to a managed-instance owner. |
@@ -56,7 +58,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 281 checks across ten suites
+./verify.sh                  # 319 checks across eleven suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -79,6 +81,7 @@ for f in schema.sql authentication.sql access-policies.sql data-classification.s
          access-matrix.sql \
          audit-logging.sql retention.sql environments.sql vendors.sql \
          backup-recovery.sql phi-safe-logging.sql encryption-and-secrets.sql \
+         boundary.sql \
          checks-support.sql; do
   psql -v ON_ERROR_STOP=1 -d dc_check -f $f
 done
@@ -88,7 +91,7 @@ dropdb dc_check                               # and again for the next suite
 
 The suites are: `schema` (24), `access` (38), `audit` (13), `retention` (38),
 `environment` (37), `vendor` (23), `backup` (34), `logging` (27), `auth` (26),
-`secrets` (21).
+`secrets` (21), `boundary` (37). Access is 39.
 
 Each prints `PASS` or `FAIL` per check, on stderr. A `FAIL` means a guarantee has been
 removed — which is sometimes the right thing to do, but it should be a decision rather than
@@ -146,6 +149,12 @@ SELECT * FROM secrets_never_rotated;  -- and the argument for each one
 SELECT * FROM encryption_controls;    -- including what was declined, and why
 SELECT * FROM phi_stores_without_encryption;  -- must be empty
 SELECT * FROM session_inventory;      -- sessions per person, active and revoked
+
+SELECT * FROM boundary_channels;      -- which way anything may cross, and what is open
+SELECT * FROM boundary_blocked_channels;  -- shut, and what opening each would require
+SELECT * FROM boundary_leaks;             -- must be empty
+SELECT * FROM boundary_reminiscence_leak; -- must be empty
+SELECT * FROM boundary_database_joins;    -- must be empty
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -275,6 +284,20 @@ plaintext password would otherwise be a message containing that password, on its
 wherever errors are logged. The suite proves both halves: the refusal repeats nothing, and
 with the trigger switched off it would have.
 
+**Content crosses inward; nothing crosses outward, and that is a structure rather than a
+sentence.** Every path between the two systems is a row, every field on every path is
+checked against the classification, and no outbound channel may so much as name a table
+that holds a resident's record. The one outbound channel anybody has thought of is written
+down and shut, with what opening it would cost: even a pseudonym plus a timestamp is a code
+derived from a patient identifier, which Safe Harbor excludes, so opening it is an
+agreement rather than a configuration change.
+
+The likelier accident is not a payload. The InkTree platform is one PostgreSQL instance
+that every one of its services reads and writes directly, so joining the two databases —
+a foreign data wrapper, a dblink, or simply a DailyCare schema in that instance — puts nine
+services and their vendors into scope with nothing published to say so. It is the cheapest
+thing to propose, and `boundary_database_joins` must be empty.
+
 **A definer function pins its own search_path.** A `SECURITY DEFINER` function runs with
 the privileges of whoever wrote it, and every one of these exists to answer a question
 about who may see a resident — so an unqualified call inside one lets a caller who controls
@@ -360,6 +383,9 @@ These are judgements rather than facts, and worth confirming rather than assumin
 - The restore gate stops the application, not a person with direct database access. It
   buys the window between a restore and a scrub, which is where the accident happens; it is
   not a substitute for who holds the recovery role.
+- `imported_content.body` is classified as PHI on the grounds that a family story filed
+  against a named resident in memory care is attached to a patient. The content is not
+  health information; what it is attached to is. That may be stricter than required.
 - Project-level separation — one GCP project per environment, no shared service account,
   no path from a dev workload to a production bucket — is infrastructure rather than
   schema, and waits on the project and billing setup.

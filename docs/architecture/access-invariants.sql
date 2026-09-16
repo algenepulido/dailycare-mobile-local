@@ -30,6 +30,13 @@ GRANT USAGE ON SCHEMA public TO dailycare_app;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
 
+CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
+BEGIN
+  IF condition THEN RAISE NOTICE 'PASS  %', label;
+  ELSE            RAISE NOTICE 'FAIL  %', label;
+  END IF;
+END; $$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION expect_rows(label text, expected int, q text) RETURNS void AS $$
 DECLARE actual int;
 BEGIN
@@ -281,11 +288,13 @@ SELECT expect_rows('every SECURITY DEFINER function pins its own search_path', 0
     WHERE n.nspname = 'public' AND p.prosecdef
       AND NOT coalesce(array_to_string(p.proconfig, ',') LIKE '%search_path%', false)$$);
 
-SELECT expect_rows('and there are definer functions, which would make that cheap otherwise',
-  11,
-  $$SELECT p.proname FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.prosecdef$$);
+-- A lower bound rather than a total. The point of this line is that the one above is not
+-- passing over an empty set; pinning the exact number turns every new definer function
+-- into a failing check that says nothing about what changed.
+SELECT expect('and there are definer functions, which would make that cheap otherwise',
+  (SELECT count(*) >= 11 FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.prosecdef));
 
 SELECT expect_rows('so does every function the model calls from a constraint or a trigger', 0,
   $$SELECT p.proname FROM pg_proc p
@@ -305,8 +314,19 @@ SELECT expect_rows('so does every function the model calls from a constraint or 
 SELECT expect_rows('every actor has an answer for every table and every operation', 0,
   'SELECT * FROM access_matrix_blanks');
 
-SELECT expect_rows('and the matrix is not empty, which would make that cheap',
-  192, 'SELECT * FROM access_matrix');
+SELECT expect('and the matrix is not empty, which would make that cheap',
+  (SELECT count(*) >= 192 FROM access_matrix));
+
+-- The stronger statement, and the one that does not go stale: every table holding a
+-- resident's record has an answer for every actor and every operation. That is
+-- access_matrix_blanks above; this says the set it is drawn from is the real one.
+SELECT expect('and it covers every table that holds a resident record',
+  NOT EXISTS (
+    SELECT DISTINCT dc.table_name FROM data_classification dc
+    WHERE dc.class = 'phi'
+      AND dc.table_name IN (SELECT table_name FROM information_schema.tables
+                            WHERE table_schema = 'public' AND table_type = 'BASE TABLE')
+      AND dc.table_name NOT IN (SELECT table_name FROM access_matrix)));
 
 SELECT expect_rows('no table permits a delete the matrix says nothing can be deleted from', 0,
   'SELECT * FROM access_matrix_delete_drift');
@@ -349,5 +369,6 @@ SELECT expect_rows('a deactivated care manager', 0, 'SELECT * FROM residents');
 \echo ''
 RESET ROLE;
 SELECT checks_end();
+DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_rows(text, int, text);
 DROP FUNCTION expect_refused(text, text);

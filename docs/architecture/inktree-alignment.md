@@ -44,7 +44,7 @@ TypeScript — one language across the app and the API, one test runner, one set
 **What converging costs.** Less than it looks, and the reason is the point of this whole
 directory. The data model, the access rules, the audit trail, the retention job and the
 scrub are all in the database. They are the same whether the handler above them is Go or
-TypeScript, and none of the 281 checks in this directory would change. What changes is the
+TypeScript, and none of the 319 checks in this directory would change. What changes is the
 handler layer: request parsing, session handling, the PointClickCare client, the media
 signing path. That is real work and it is bounded.
 
@@ -147,6 +147,38 @@ a voice provider. It needs an agreement with both, PHI-safe handling inside the 
 pipeline, and an audit trail of who was told what. All of that is buildable. None of it is
 free, and none of it can be retrofitted after the first call.
 
+### Decided, on 16 September 2026
+
+Trevor's answer: InkTree content — stories, photographs and family context — flows into
+DailyCare so a caregiver knows who they are looking after, and eventually to support
+reminiscence. Nothing flows back at this stage, and the boundary should be designed so the
+direction can be revisited on purpose rather than crossed by accident.
+
+That is built, in `boundary.sql`, and there are two things worth adding to it that are not
+obvious from the decision itself.
+
+**The accident is unlikely to be a payload.** The field guide says every InkTree service
+reads and writes one PostgreSQL instance directly, with no events in between — so there is
+no service-level isolation over there to rely on. The cheapest and most natural thing
+anybody could propose is a DailyCare schema in that instance, and the moment it exists,
+nine services and their vendors are handling PHI with nothing published to say so. The
+boundary therefore includes a check that this database has not been joined to another one:
+no foreign data wrapper, no dblink, no foreign server.
+
+**Reminiscence is the feature that reverses it.** Show a story, record how the resident
+responded, send the response back so the next story is chosen better. The third step is a
+resident's reaction to a memory leaving the agreement boundary, and nobody in the room
+would describe it as sending PHI to a vendor — they would describe it as better
+recommendations. `content_responses` exists, is classified as PHI, and no outbound channel
+may reference it. A check adds it to a payload and watches the view report it.
+
+**And even the narrowest outbound channel crosses the line.** A pseudonym plus a timestamp
+is a code derived from a patient identifier, which Safe Harbor excludes from
+de-identification. So the one outbound channel anybody has thought of is written down,
+shut, and marked as requiring an agreement rather than a configuration change. Writing it
+down while shut is the point: the shape of a reversal exists before somebody needs it in a
+hurry.
+
 ### What to build instead, if the valve should stay one-way
 
 Have DailyCare emit events that carry no clinical content: a facility-scoped identifier, a
@@ -171,7 +203,7 @@ non-production scrub, the vendor register, the backup policy and the restore gat
 PostgreSQL. A Go handler and a TypeScript handler connect to the same database, as the same
 role, under the same policies, and get the same answers.
 
-The 281 checks run against the database, not against an application. They will still run,
+The 319 checks run against the database, not against an application. They will still run,
 and still pass, whichever way the decisions below go.
 
 ---
