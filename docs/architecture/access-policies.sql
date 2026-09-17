@@ -143,11 +143,16 @@ CREATE POLICY residents_update ON residents FOR UPDATE
 CREATE POLICY care_days_read ON care_days FOR SELECT
   USING (app_may_read_resident(resident_id, facility_id));
 
+-- filed_by is the person making the request, not a value they send. Without this a
+-- caregiver can file a day in a colleague's name, and the audit trail records the
+-- attribution it was given rather than the one that happened.
 CREATE POLICY care_days_write ON care_days FOR INSERT
-  WITH CHECK (app_may_write_resident(resident_id, facility_id));
+  WITH CHECK (app_may_write_resident(resident_id, facility_id)
+              AND filed_by = app_user_id());
 
--- Update exists only to stamp superseded_at. The correction itself is a new row, so
--- there is no policy that lets anyone rewrite what a day said.
+-- Update exists only to stamp superseded_at. Which columns may change is a statement about
+-- columns and a policy cannot make it - see care_days_are_amended_not_rewritten in
+-- schema.sql, which is what actually holds the line. This decides who may stamp.
 CREATE POLICY care_days_supersede ON care_days FOR UPDATE
   USING      (app_may_write_resident(resident_id, facility_id))
   WITH CHECK (app_may_write_resident(resident_id, facility_id));

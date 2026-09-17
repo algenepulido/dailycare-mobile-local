@@ -52,7 +52,12 @@ CREATE OR REPLACE FUNCTION expect_refused(label text, stmt text) RETURNS void AS
 BEGIN
   BEGIN
     EXECUTE stmt;
-  EXCEPTION WHEN insufficient_privilege OR check_violation THEN
+  -- The codes that mean the database refused the data. Deliberately not WHEN OTHERS: a
+  -- typo in a probe should fail loudly rather than be reported as the refusal it was
+  -- testing for. foreign_key_violation joined the list when the cross-facility fix made
+  -- the refusal a foreign key rather than a policy.
+  EXCEPTION WHEN insufficient_privilege OR check_violation
+               OR foreign_key_violation OR unique_violation OR not_null_violation THEN
     RAISE NOTICE 'PASS  refused: %', label;
     RETURN;
   END;
@@ -265,6 +270,109 @@ SELECT expect_rows('no policy in the access model permits an application role to
   $$SELECT * FROM pg_policies
     WHERE schemaname = 'public' AND cmd IN ('DELETE','ALL')
       AND NOT (roles::text LIKE '%dailycare_retention%')$$);
+
+
+-- ── a filed record cannot be rewritten ─────────────────────────────────────────
+--
+-- An independent review of this model reproduced both of these. They are here as checks
+-- rather than as a note because the guarantee they protect was stated in three places and
+-- enforced in none: the policy restricted which rows could be updated and said nothing
+-- about which columns, so a caregiver could replace a note, reassign its authorship, and
+-- leave nothing behind - the audit trail records column names and never their contents,
+-- which is right, and which means a rewrite is unrecoverable.
+
+\echo ''
+\echo '── what a caregiver may do to a day she filed'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+
+SELECT expect_refused('rewriting the note on a day she filed', $$
+  UPDATE care_days SET note = 'Settled evening, no concerns.'
+  WHERE id = 'cd000000-0000-0000-0000-000000000001'
+$$);
+
+SELECT expect_refused('or reassigning who filed it', $$
+  UPDATE care_days SET filed_by = 'b0000000-0000-0000-0000-00000000000b'
+  WHERE id = 'cd000000-0000-0000-0000-000000000001'
+$$);
+
+SELECT expect_refused('or changing a clinical value on it', $$
+  UPDATE care_days SET mood = 'calm', sleep = 'slept_well'
+  WHERE id = 'cd000000-0000-0000-0000-000000000001'
+$$);
+
+SELECT expect_refused('or filing a day in a colleague''s name', $$
+  INSERT INTO care_days (facility_id, resident_id, care_date, mood, appetite, sleep, filed_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          DATE '2026-09-10','calm','good','slept_well','b0000000-0000-0000-0000-00000000000b')
+$$);
+
+-- The one update that is allowed, so the refusals above are not simply "no updates work".
+\set QUIET on
+UPDATE care_days SET superseded_at = now() WHERE id = 'cd000000-0000-0000-0000-000000000001';
+\set QUIET off
+SELECT expect('retiring a day is allowed, which is the whole of what update is for',
+  (SELECT superseded_at IS NOT NULL FROM care_days
+   WHERE id = 'cd000000-0000-0000-0000-000000000001'));
+
+SELECT expect_refused('and making a retired day current again is not', $$
+  UPDATE care_days SET superseded_at = NULL
+  WHERE id = 'cd000000-0000-0000-0000-000000000001'
+$$);
+RESET ROLE;
+
+SELECT expect('the note she filed is still the note that is there',
+  (SELECT count(*) = 1 FROM care_days
+   WHERE id = 'cd000000-0000-0000-0000-000000000001' AND mood = 'calm'));
+
+
+-- ── a row cannot name a resident in another facility ───────────────────────────
+--
+-- Also from the independent review. Every child of a resident carries facility_id and
+-- resident_id as separate references; each one held, and nothing said the pair belonged
+-- together. A manager at one building inserted a contact row naming their own facility and
+-- a resident at another, named themself in it, and read that resident's record.
+
+\echo ''
+\echo '── and what a manager may do with two identifiers that do not agree'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false) \gset
+
+SELECT expect_refused('granting herself access to a resident at another facility', $$
+  INSERT INTO resident_contacts (facility_id, resident_id, user_id, relation, state, granted_at)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e3000000-0000-0000-0000-000000000003',
+          'b0000000-0000-0000-0000-00000000000b','other_family','active',now())
+$$);
+
+SELECT expect_refused('assigning one of her caregivers to a resident at another facility', $$
+  INSERT INTO assignments (facility_id, resident_id, facility_member_id)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e3000000-0000-0000-0000-000000000003',
+          'fa000000-0000-0000-0000-00000000000a')
+$$);
+
+SELECT expect_refused('filing a care day against a resident at another facility', $$
+  INSERT INTO care_days (facility_id, resident_id, care_date, mood, appetite, sleep, filed_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e3000000-0000-0000-0000-000000000003',
+          DATE '2026-09-11','calm','good','slept_well','b0000000-0000-0000-0000-00000000000b')
+$$);
+
+SELECT expect_refused('or a medication event against one', $$
+  INSERT INTO medication_events (facility_id, resident_id, care_date, slot, status, source, recorded_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e3000000-0000-0000-0000-000000000003',
+          DATE '2026-09-11','am','given','caregiver','b0000000-0000-0000-0000-00000000000b')
+$$);
+RESET ROLE;
+
+SELECT expect_refused('and a resident cannot be moved into another building by an update', $$
+  UPDATE residents SET facility_id = 'f2000000-0000-0000-0000-000000000002'
+  WHERE id = 'e1000000-0000-0000-0000-000000000001'
+$$);
+
+SELECT expect('so Mabel at the other facility is still only hers',
+  (SELECT count(*) = 0 FROM resident_contacts
+   WHERE resident_id = 'e3000000-0000-0000-0000-000000000003'));
 
 
 -- ── the classic way a definer function is turned against its own database ──────

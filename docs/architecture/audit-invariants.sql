@@ -104,8 +104,23 @@ VALUES ('cd000000-0000-0000-0000-000000000001',
         'CANARY-7f3a91-she-was-frightened-again-tonight',
         'a0000000-0000-0000-0000-00000000000a');
 
-UPDATE care_days SET note = 'CANARY-7f3a91-amended', mood = 'anxious'
+-- An amendment, in the shape the model now enforces: the correction is a new row and the
+-- original is stamped. This check used to rewrite the note in place, which the model
+-- described as impossible and the database allowed - so the check was demonstrating the
+-- defect rather than the guarantee.
+UPDATE care_days SET superseded_at = now()
 WHERE id = 'cd000000-0000-0000-0000-000000000001';
+
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       filed_by, amends_id)
+VALUES ('cd000000-0000-0000-0000-000000000002',
+        'f1000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000001',
+        '2026-09-14', 'anxious', 'poor', 'up_a_lot',
+        'CANARY-7f3a91-amended',
+        'a0000000-0000-0000-0000-00000000000a',
+        'cd000000-0000-0000-0000-000000000001');
+
 
 SELECT expect('the note never appears anywhere in the audit trail',
   NOT EXISTS (
@@ -121,10 +136,18 @@ SELECT expect('nor does a clinical value the caregiver recorded',
        OR detail::text ILIKE '%didnt_sleep%'
   ));
 
-SELECT expect('but the trail does say which columns an amendment touched',
-  (SELECT detail -> 'columns' @> '["note"]'::jsonb
-      AND detail -> 'columns' @> '["mood"]'::jsonb
-   FROM audit_events WHERE action = 'care_days.update' LIMIT 1));
+SELECT expect('but the trail does say which column retiring a day touched, and only that',
+  (SELECT detail -> 'columns' = '["superseded_at"]'::jsonb
+   FROM audit_events WHERE action = 'care_days.update' ORDER BY id DESC LIMIT 1));
+
+SELECT expect('and the amendment itself is an insert, so both versions are attributable',
+  (SELECT count(*) = 2 FROM audit_events WHERE action = 'care_days.insert'));
+
+SELECT expect('the original is still readable, which is the point of amending by adding',
+  (SELECT count(*) = 1 FROM care_days
+   WHERE id = 'cd000000-0000-0000-0000-000000000001'
+     AND note = 'CANARY-7f3a91-she-was-frightened-again-tonight'
+     AND superseded_at IS NOT NULL));
 
 
 -- ── an update that changed nothing ─────────────────────────────────────────────
@@ -133,7 +156,8 @@ SELECT expect('but the trail does say which columns an amendment touched',
 \echo '── noise'
 
 SELECT count(*) AS before_noop FROM audit_events \gset
-UPDATE care_days SET note = note WHERE id = 'cd000000-0000-0000-0000-000000000001';
+UPDATE care_days SET superseded_at = superseded_at
+WHERE id = 'cd000000-0000-0000-0000-000000000001';
 
 SELECT expect('an update that changed nothing wrote nothing',
   (SELECT count(*) FROM audit_events) = :before_noop);

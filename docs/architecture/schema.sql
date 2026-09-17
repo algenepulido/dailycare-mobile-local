@@ -286,7 +286,12 @@ CREATE TABLE residents (
   departed_on   date,          -- moved out. Records are retained under the policy below.
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (external_source, external_patient_id)
+  UNIQUE (external_source, external_patient_id),
+
+  -- Redundant against the primary key, and there for one reason: it lets every child row
+  -- reference the resident and the facility together, so the pair cannot disagree. See the
+  -- composite foreign keys below.
+  UNIQUE (id, facility_id)
 );
 
 CREATE INDEX ON residents (facility_id) WHERE departed_on IS NULL;
@@ -302,11 +307,16 @@ COMMENT ON COLUMN residents.external_patient_id IS
 CREATE TABLE assignments (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id         uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
-  resident_id         uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  resident_id         uuid NOT NULL,
   facility_member_id  uuid NOT NULL REFERENCES facility_members(id) ON DELETE RESTRICT,
   started_at          timestamptz NOT NULL DEFAULT now(),
   ended_at            timestamptz,
-  created_at          timestamptz NOT NULL DEFAULT now()
+  created_at          timestamptz NOT NULL DEFAULT now(),
+
+  -- The resident and the facility together, so a row cannot name one facility and a
+  -- resident who is in another. Two separate references each held; the pair did not.
+  FOREIGN KEY (resident_id, facility_id)
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX ON assignments (resident_id)        WHERE ended_at IS NULL;
@@ -322,7 +332,7 @@ CREATE INDEX ON assignments (facility_member_id) WHERE ended_at IS NULL;
 CREATE TABLE resident_contacts (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
-  resident_id   uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  resident_id   uuid NOT NULL,
   user_id       uuid NOT NULL REFERENCES users(id)      ON DELETE RESTRICT,
 
   relation      resident_relation NOT NULL,
@@ -337,7 +347,12 @@ CREATE TABLE resident_contacts (
 
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (resident_id, user_id)
+  UNIQUE (resident_id, user_id),
+
+  -- The resident and the facility together, so a row cannot name one facility and a
+  -- resident who is in another. Two separate references each held; the pair did not.
+  FOREIGN KEY (resident_id, facility_id)
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX ON resident_contacts (user_id)     WHERE state = 'active';
@@ -356,7 +371,7 @@ COMMENT ON TABLE resident_contacts IS
 CREATE TABLE care_days (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id    uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
-  resident_id    uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  resident_id    uuid NOT NULL,
 
   -- The day being described, in the facility's timezone. Not the day it was filed:
   -- backdating up to two weeks is normal, and the difference is visible in the product.
@@ -380,7 +395,12 @@ CREATE TABLE care_days (
   amends_id      uuid REFERENCES care_days(id),
 
   created_at     timestamptz NOT NULL DEFAULT now(),
-  updated_at     timestamptz NOT NULL DEFAULT now()
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+
+  -- The resident and the facility together, so a row cannot name one facility and a
+  -- resident who is in another. Two separate references each held; the pair did not.
+  FOREIGN KEY (resident_id, facility_id)
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
 );
 
 -- One current row per resident per day. Superseded rows are exempt, which is what makes
@@ -424,7 +444,7 @@ CREATE TABLE care_day_concerns (
 CREATE TABLE medication_events (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
-  resident_id   uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  resident_id   uuid NOT NULL,
 
   care_date     date NOT NULL,            -- the local day this belongs to
   slot          medication_slot NOT NULL,
@@ -445,7 +465,12 @@ CREATE TABLE medication_events (
 
   created_at    timestamptz NOT NULL DEFAULT now(),
   CHECK (source = 'caregiver' OR source_ref IS NOT NULL),
-  CHECK (slot <> 'supplemental' OR detail IS NOT NULL)
+  CHECK (slot <> 'supplemental' OR detail IS NOT NULL),
+
+  -- The resident and the facility together, so a row cannot name one facility and a
+  -- resident who is in another. Two separate references each held; the pair did not.
+  FOREIGN KEY (resident_id, facility_id)
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
 );
 
 -- The scheduled slots are one per resident per day. Supplemental doses are not, so they
@@ -471,7 +496,7 @@ COMMENT ON COLUMN medication_events.source IS
 CREATE TABLE media_objects (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id    uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
-  resident_id    uuid NOT NULL REFERENCES residents(id)  ON DELETE RESTRICT,
+  resident_id    uuid NOT NULL,
   care_day_id    uuid REFERENCES care_days(id) ON DELETE SET NULL,
 
   bucket         text NOT NULL,
@@ -483,7 +508,12 @@ CREATE TABLE media_objects (
   uploaded_by    uuid NOT NULL REFERENCES users(id),
   created_at     timestamptz NOT NULL DEFAULT now(),
   deleted_at     timestamptz,   -- set when the object has actually been removed from GCS
-  UNIQUE (bucket, object_path)
+  UNIQUE (bucket, object_path),
+
+  -- The resident and the facility together, so a row cannot name one facility and a
+  -- resident who is in another. Two separate references each held; the pair did not.
+  FOREIGN KEY (resident_id, facility_id)
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX ON media_objects (resident_id) WHERE deleted_at IS NULL;
@@ -556,3 +586,84 @@ COMMENT ON TABLE retention_policies IS
   'Deliberately per facility. Two buildings under different operators can be subject to
    different rules, and the code should follow whatever the facility says rather than
    carry a default nobody agreed to.';
+
+
+-- ════════════════════════════════════════════════════════════════════ what may change
+--
+-- A care record is amended by adding: a correction is a new row, and the original is
+-- stamped superseded_at. That is the design, and for a while it was only the design.
+--
+-- The policy that was supposed to enforce it is FOR UPDATE ... USING, which restricts
+-- which rows may be updated and says nothing about which columns. So an assigned caregiver
+-- could replace a note, reassign its authorship, and leave superseded_at null - and the
+-- audit trail, which records column names and never their contents precisely so that it
+-- does not become a second copy of the record, could say only that note and filed_by had
+-- changed. The original was gone from the database and from the trail alike.
+--
+-- Found by an independent review of this model, reproduced, and fixed here rather than in
+-- a policy: a policy can restrict rows, and this is a statement about columns.
+
+CREATE OR REPLACE FUNCTION reject_record_rewrite() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+DECLARE
+  allowed text[] := TG_ARGV::text[];
+  changed text[];
+BEGIN
+  SELECT array_agg(k ORDER BY k) INTO changed
+  FROM jsonb_object_keys(to_jsonb(NEW)) k
+  WHERE to_jsonb(NEW) -> k IS DISTINCT FROM to_jsonb(OLD) -> k
+    AND NOT (k = ANY(allowed));
+
+  IF changed IS NOT NULL THEN
+    RAISE EXCEPTION '%: % may not change on a row that already exists',
+      TG_TABLE_NAME, array_to_string(changed, ', ')
+      USING ERRCODE = 'check_violation',
+            HINT = 'Column names only - the values are deliberately not repeated here, for the same reason the audit trail does not repeat them.';
+  END IF;
+  RETURN NEW;
+END; $$;
+
+COMMENT ON FUNCTION reject_record_rewrite() IS
+  'Takes the columns that may change as trigger arguments. Everything else on the row is
+   what it was when it was filed. The message names the columns and never their contents,
+   so a refusal is safe to log - the same rule reject_unhashed_credential follows.';
+
+
+-- A filed day: only the stamp that retires it, and the timestamp that records when.
+CREATE TRIGGER care_days_are_amended_not_rewritten
+  BEFORE UPDATE ON care_days
+  FOR EACH ROW EXECUTE FUNCTION reject_record_rewrite('superseded_at', 'updated_at');
+
+-- And the stamp is one way. Un-superseding a row would make a correction disappear and
+-- the original current again, which is a rewrite by two statements instead of one.
+CREATE OR REPLACE FUNCTION reject_unsupersede() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF OLD.superseded_at IS NOT NULL AND NEW.superseded_at IS NULL THEN
+    RAISE EXCEPTION 'a superseded care day cannot be made current again'
+      USING ERRCODE = 'check_violation',
+            HINT = 'The correction that superseded it is still there. Making this row current would leave two.';
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE TRIGGER care_days_supersede_is_one_way
+  BEFORE UPDATE ON care_days
+  FOR EACH ROW EXECUTE FUNCTION reject_unsupersede();
+
+-- A resident does not move buildings by an UPDATE. A transfer is a departure and an
+-- admission, and the two facilities' records stay separate - which is also what stops a
+-- manager pulling a resident into their own facility to read them.
+CREATE TRIGGER residents_do_not_change_facility
+  BEFORE UPDATE ON residents
+  FOR EACH ROW EXECUTE FUNCTION reject_record_rewrite(
+    'display_name', 'external_source', 'external_patient_id',
+    'baseline_mood', 'baseline_appetite', 'baseline_sleep',
+    'admitted_on', 'departed_on', 'updated_at');
+
+-- Family access is withdrawn by revoking the row, never by editing who it was for.
+CREATE TRIGGER contacts_are_revoked_not_rewritten
+  BEFORE UPDATE ON resident_contacts
+  FOR EACH ROW EXECUTE FUNCTION reject_record_rewrite(
+    'state', 'revoked_by', 'revoked_at', 'granted_by', 'granted_at', 'updated_at');
+
