@@ -25,9 +25,9 @@ for tool in psql createdb dropdb; do
     exit 1; }
 done
 
-MODEL=(schema.sql authentication.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
+MODEL=(schema.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
        retention.sql environments.sql vendors.sql backup-recovery.sql
-       phi-safe-logging.sql encryption-and-secrets.sql boundary.sql
+       phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql
        checks-support.sql)
 SUITES=(schema-invariants.sql access-invariants.sql audit-invariants.sql
         retention-invariants.sql environment-invariants.sql vendor-invariants.sql

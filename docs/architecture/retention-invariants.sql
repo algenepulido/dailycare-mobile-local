@@ -344,7 +344,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+-- No blanket grant here; see grants.sql. DELETE is granted explicitly further down,
+-- where a check needs to prove the policies stop it even when the grant exists.
 REVOKE INSERT, UPDATE, DELETE ON audit_events FROM dailycare_app;
 \set QUIET off
 
@@ -358,10 +359,12 @@ SELECT expect_refused('the application confirming a media deletion', $$
   SELECT retention_confirm_media(ARRAY[]::uuid[])
 $$);
 
-\set QUIET on
-DELETE FROM residents WHERE id = 'e2000000-0000-0000-0000-000000000002';
-DELETE FROM care_days WHERE resident_id = 'e2000000-0000-0000-0000-000000000002';
-\set QUIET off
+SELECT expect_refused('the application deleting a resident', $$
+  DELETE FROM residents WHERE id = 'e2000000-0000-0000-0000-000000000002'
+$$);
+SELECT expect_refused('or a care day', $$
+  DELETE FROM care_days WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+$$);
 RESET ROLE;
 
 SELECT expect('the application holding table-level DELETE still removes no resident',

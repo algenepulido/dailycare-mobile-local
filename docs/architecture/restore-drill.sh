@@ -66,9 +66,9 @@ CANARY="DRILL-CANARY-$(date +%s)"
 if [ "$BUILD" = 1 ]; then
   say "building $SOURCE"
   createdb "$SOURCE" || exit 1
-  for f in schema.sql authentication.sql access-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
+  for f in schema.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
            retention.sql environments.sql vendors.sql backup-recovery.sql \
-           phi-safe-logging.sql encryption-and-secrets.sql boundary.sql \
+           phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql \
            checks-support.sql; do
     psql -q -v ON_ERROR_STOP=1 -d "$SOURCE" -f "$HERE/$f" >/dev/null || {
       echo "could not apply $f" >&2; exit 1; }

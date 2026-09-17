@@ -319,6 +319,15 @@ CREATE POLICY contacts_retention_select ON resident_contacts FOR SELECT
 CREATE POLICY contacts_retention_delete ON resident_contacts FOR DELETE
   TO dailycare_retention USING (retention_resident_expired(resident_id));
 
+-- assignments gained row-level security in identity-policies.sql, which left this role
+-- with the grant and no policy: its deletes affected nothing, silently, and the resident
+-- then could not be removed for a foreign key that should have been gone. The job reported
+-- zero and carried on, which is why the retention suite checks counts rather than absence.
+CREATE POLICY assignments_retention_select ON assignments FOR SELECT
+  TO dailycare_retention USING (true);
+CREATE POLICY assignments_retention_delete ON assignments FOR DELETE
+  TO dailycare_retention USING (retention_resident_expired(resident_id));
+
 CREATE POLICY media_retention_select ON media_objects FOR SELECT
   TO dailycare_retention USING (true);
 

@@ -27,8 +27,28 @@ DO $$ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA public TO dailycare_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+-- No blanket grant here. grants.sql is the baseline and these checks run against it,
+-- so what the application may touch is the same in a suite as in production.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
+
+CREATE OR REPLACE FUNCTION expect_noticed(label text, break text, view_name text)
+RETURNS void AS $$
+DECLARE before_n bigint; after_n bigint;
+BEGIN
+  EXECUTE format('SELECT count(*) FROM %I', view_name) INTO before_n;
+  BEGIN
+    EXECUTE break;
+    EXECUTE format('SELECT count(*) FROM %I', view_name) INTO after_n;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'PASS  refused outright (%): %', SQLERRM, label; RETURN;
+  END;
+  IF after_n > before_n THEN RAISE NOTICE 'PASS  % noticed: %', view_name, label;
+  ELSE RAISE NOTICE 'FAIL  % did not notice: %', view_name, label;
+  END IF;
+  RAISE EXCEPTION 'rollback_probe';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLERRM <> 'rollback_probe' THEN RAISE; END IF;
+END; $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
 BEGIN
@@ -106,6 +126,13 @@ WHERE id = 'e1000000-0000-0000-0000-000000000001';
 INSERT INTO resident_contacts (facility_id, resident_id, user_id, relation, state, granted_at) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
    'c0000000-0000-0000-0000-00000000000c', 'child', 'active', now());
+
+-- Ben is a caregiver at the other building, with no colleagues there. He is how the checks
+-- below tell "sees their own building" apart from "sees everything".
+INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
+  ('fe000000-0000-0000-0000-00000000000e', 'f2000000-0000-0000-0000-000000000002',
+   'd0000000-0000-0000-0000-00000000000d', 'caregiver', 'active')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, filed_by) VALUES
   ('cd000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001',
@@ -275,6 +302,88 @@ SELECT expect_rows('no policy in the access model permits an application role to
   $$SELECT * FROM pg_policies
     WHERE schemaname = 'public' AND cmd IN ('DELETE','ALL')
       AND NOT (roles::text LIKE '%dailycare_retention%')$$);
+
+
+-- ── the tables that say who people are ─────────────────────────────────────────
+--
+-- Nine tables forced row-level security and twenty-five did not, and the twenty-five
+-- included users, facility_members, assignments, facilities, sessions and the trail. The
+-- application has to read users to sign anybody in, and the moment it could, it could read
+-- every staff and family address at every customer. The access matrix did not notice,
+-- because it asked only about tables with a PHI column and these are identifying.
+--
+-- Before this, every row below read four users, two facilities and three memberships.
+
+\echo ''
+\echo '── what each person can see of everybody else'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+SELECT expect_rows('a caregiver sees herself and her colleague at her building', 2,
+  'SELECT id FROM users');
+SELECT expect_rows('one building', 1, 'SELECT id FROM facilities');
+SELECT expect_rows('and not the other building''s caregiver', 0,
+  $$SELECT id FROM users WHERE email = 'ben@example.test'$$);
+RESET ROLE;
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false) \gset
+SELECT expect_rows('a manager sees her staff and the family she granted access to', 3,
+  'SELECT id FROM users');
+SELECT expect_rows('and the memberships at her facility', 2, 'SELECT id FROM facility_members');
+RESET ROLE;
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'c0000000-0000-0000-0000-00000000000c', false) \gset
+SELECT expect_rows('a family member sees herself and nobody else', 1, 'SELECT id FROM users');
+SELECT expect_rows('the building her mother is in', 1, 'SELECT id FROM facilities');
+SELECT expect_rows('and no memberships, because she is not employed by anybody', 0,
+  'SELECT id FROM facility_members');
+RESET ROLE;
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false) \gset
+SELECT expect_rows('a caregiver at the other building sees only himself', 1,
+  'SELECT id FROM users');
+SELECT expect_rows('and not the first building', 0,
+  $$SELECT id FROM facilities WHERE name = 'Cedar House'$$);
+RESET ROLE;
+
+SELECT set_config('app.user_id', '', false) \gset
+SET ROLE dailycare_app;
+SELECT expect_rows('an unidentified request sees no people', 0, 'SELECT id FROM users');
+SELECT expect_rows('no buildings', 0, 'SELECT id FROM facilities');
+SELECT expect_rows('and no memberships', 0, 'SELECT id FROM facility_members');
+RESET ROLE;
+
+
+-- ── credentials are not application data ───────────────────────────────────────
+
+\echo ''
+\echo '── sessions and tokens'
+
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at) VALUES
+  ('a0000000-0000-0000-0000-00000000000a', md5('one') || md5('two'), 'her phone',
+   now() + interval '30 days');
+INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
+  ('c0000000-0000-0000-0000-00000000000c', 'invitation', md5('t1') || md5('t2'),
+   now() + interval '7 days');
+\set QUIET off
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+SELECT expect_rows('a person sees the devices they are signed in on', 1, 'SELECT id FROM sessions');
+RESET ROLE;
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false) \gset
+SELECT expect_rows('and not a colleague''s', 0, 'SELECT id FROM sessions');
+-- Refused outright rather than filtered: the baseline in grants.sql gives the application
+-- no privilege on this table at all, so the policy never has to decide.
+SELECT expect_refused('nobody reads an invitation token through the application',
+  $$SELECT id FROM user_tokens$$);
+RESET ROLE;
 
 
 -- ── a photograph row is not taken on trust ─────────────────────────────────────
@@ -477,6 +586,62 @@ SELECT expect('so Mabel at the other facility is still only hers',
   (SELECT count(*) = 0 FROM resident_contacts
    WHERE resident_id = 'e3000000-0000-0000-0000-000000000003'));
 
+-- And put the table-level DELETE back the way it was found. It was granted above so that
+-- the refusals were the policies' doing rather than a missing grant; leaving it granted
+-- would make the baseline checks below report drift this file caused itself.
+\set QUIET on
+REVOKE DELETE ON residents, resident_contacts, care_days, care_day_meals,
+  care_day_concerns, medication_events, media_objects FROM dailycare_app;
+\set QUIET off
+
+SELECT expect('and the grant this file borrowed has been given back',
+  (SELECT count(*) = 0 FROM app_can_delete));
+
+
+-- ── what the application is granted, as opposed to what it may reach ───────────
+--
+-- Row-level security decides which rows. Grants decide which tables and which columns, and
+-- no file in the model said anything about the second - the only grants were in these
+-- suites, and they were GRANT SELECT, INSERT, UPDATE ON ALL TABLES. A test scaffold
+-- standing in for a production decision nobody had made.
+
+\echo ''
+\echo '── the grant baseline'
+
+SELECT expect_rows('nothing granted that is not declared, and nothing declared that is not granted',
+  0, 'SELECT * FROM grant_drift');
+
+SELECT expect_rows('the application can delete from nothing', 0, 'SELECT * FROM app_can_delete');
+
+SELECT expect_rows('and owns nothing, which is what FORCE was standing in for', 0,
+  'SELECT * FROM app_owns_something');
+
+SELECT expect_rows('and reaches no part of the compliance register', 0,
+  'SELECT * FROM app_reaches_the_register');
+
+SELECT expect('the baseline is not empty, which would make all four of those cheap',
+  (SELECT count(*) >= 30 FROM app_privileges));
+
+-- The column-level half, which is the second statement of the amend-by-adding rule: the
+-- trigger refuses a rewrite, and this means the request never reaches the trigger.
+SELECT expect('update on a filed day is superseded_at and nothing else',
+  (SELECT columns = ARRAY['superseded_at'] FROM app_privileges
+   WHERE table_name = 'care_days' AND privilege = 'UPDATE'));
+
+SELECT expect('and a resident''s facility is not among the columns that may change',
+  (SELECT NOT ('facility_id' = ANY(columns)) FROM app_privileges
+   WHERE table_name = 'residents' AND privilege = 'UPDATE'));
+
+-- Proving the drift view can see, in both directions.
+SELECT expect_noticed('somebody grants a privilege by hand',
+  $$GRANT DELETE ON residents TO dailycare_app$$, 'grant_drift');
+
+SELECT expect_noticed('or writes one down and never applies it',
+  $$INSERT INTO app_privileges (grantee, table_name, privilege)
+    VALUES ('dailycare_app','vendors','SELECT')$$, 'grant_drift');
+
+SELECT expect_rows('and the probes left the baseline as it was', 0, 'SELECT * FROM grant_drift');
+
 
 -- ── the classic way a definer function is turned against its own database ──────
 --
@@ -581,5 +746,6 @@ SELECT expect_rows('a deactivated care manager', 0, 'SELECT * FROM residents');
 RESET ROLE;
 SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
+DROP FUNCTION expect_noticed(text, text, text);
 DROP FUNCTION expect_rows(text, int, text);
 DROP FUNCTION expect_refused(text, text);

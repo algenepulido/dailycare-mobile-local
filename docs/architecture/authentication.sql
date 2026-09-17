@@ -181,6 +181,11 @@ SELECT t.id, t.user_id, t.purpose, t.expires_at
 FROM user_tokens t
 WHERE t.consumed_at IS NULL AND t.expires_at < now();
 
+COMMENT ON VIEW session_inventory IS
+  'An operator view. Deliberately not granted to the application: it runs as its owner and
+   would return every user at every facility, which is exactly what the policies on
+   sessions exist to prevent.';
+
 COMMENT ON VIEW stale_invitations IS
   'Not an error. An invitation nobody accepted expires, and the row stays so that a manager
    can see they invited somebody who never arrived.';
@@ -193,6 +198,12 @@ DO $$ BEGIN
     GRANT EXECUTE ON FUNCTION revoke_session(text)                      TO dailycare_app;
     GRANT EXECUTE ON FUNCTION revoke_all_sessions(uuid)                 TO dailycare_app;
     GRANT EXECUTE ON FUNCTION consume_token(text, text)                 TO dailycare_app;
-    GRANT SELECT ON session_inventory, stale_invitations                TO dailycare_app;
+    -- Not session_inventory, and not stale_invitations. A view runs with its owner's
+    -- privileges in PostgreSQL 14, so granting one to the application is a way around
+    -- every policy on the table underneath it: session_inventory lists every user's
+    -- sessions at every facility, and the application cannot read sessions at all.
+    -- They are operator views. What a person needs is their own devices, and the policy
+    -- on sessions gives them that directly.
+    REVOKE ALL ON session_inventory, stale_invitations FROM dailycare_app;
   END IF;
 END $$;

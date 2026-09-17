@@ -16,6 +16,8 @@ constraint and a constraint are different things, and only one of them stops a m
 | `architecture-diagram.md` | The four diagrams: what the pieces are, where a resident's record exists, one request end to end, and the one flow that leaves the database. |
 | `authentication.sql` | Sessions, refresh rotation and single-use tokens. What could be moved out of a handler and into the database. |
 | `auth-invariants.sql` | Including the milestone's own acceptance criteria: reinstall and sign back in, and two authorised devices. |
+| `identity-policies.sql` | Row-level security on the tables that say who people are, which nine PHI tables had and twenty-five others did not. |
+| `grants.sql` | What the application is granted, as a table, applied from it and compared to the catalogue both ways. |
 | `access-matrix.sql` | The role and access-control matrix as a table, checked against the catalogue it describes. |
 | `data-classification.sql` | Which columns hold PHI, and the views that generate the inventory from it. |
 | `audit-logging.sql` | Triggers that record every write to a PHI table, and the coverage views that find a table without one. |
@@ -58,7 +60,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 319 checks across eleven suites
+./verify.sh                  # 381 checks across eleven suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -78,10 +80,10 @@ psql -d postgres -f roles.sql          # once per cluster
 
 createdb dc_check
 for f in schema.sql authentication.sql access-policies.sql data-classification.sql \
-         access-matrix.sql \
+         identity-policies.sql access-matrix.sql \
          audit-logging.sql retention.sql environments.sql vendors.sql \
          backup-recovery.sql phi-safe-logging.sql encryption-and-secrets.sql \
-         boundary.sql \
+         boundary.sql grants.sql \
          checks-support.sql; do
   psql -v ON_ERROR_STOP=1 -d dc_check -f $f
 done
@@ -155,6 +157,12 @@ SELECT * FROM boundary_blocked_channels;  -- shut, and what opening each would r
 SELECT * FROM boundary_leaks;             -- must be empty
 SELECT * FROM boundary_reminiscence_leak; -- must be empty
 SELECT * FROM boundary_database_joins;    -- must be empty
+
+SELECT * FROM app_privileges;         -- what the application is granted, declared
+SELECT * FROM grant_drift;            -- must be empty, in both directions
+SELECT * FROM app_can_delete;         -- must be empty
+SELECT * FROM app_owns_something;     -- must be empty
+SELECT * FROM app_reaches_the_register;   -- must be empty
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -297,6 +305,27 @@ that every one of its services reads and writes directly, so joining the two dat
 a foreign data wrapper, a dblink, or simply a DailyCare schema in that instance — puts nine
 services and their vendors into scope with nothing published to say so. It is the cheapest
 thing to propose, and `boundary_database_joins` must be empty.
+
+**Row-level security is on the tables that say who people are, too.** Nine PHI tables
+forced it and twenty-five others did not, and those twenty-five included `users`,
+`facility_members`, `assignments`, `sessions` and the audit trail. The application has to
+read `users` to sign anybody in, and the moment it could it could read every staff and
+family address at every customer. The completeness view had not noticed because it asked
+only about tables with a PHI column, and these are classified identifying — a caregiver's
+email is not PHI; a list of every family member granted access to a resident in memory
+care, across every customer, is what breach notification is written about. `ENABLE` rather
+than `FORCE` here, because a forced policy that consults a helper reading its own table
+recurses, and what `FORCE` was standing in for is now asked directly by
+`app_owns_something`.
+
+**What the application is granted is a table, not a migration.** No file in the model
+granted `dailycare_app` anything; the only grants were in the check suites, and they were
+`ON ALL TABLES`. So the suites were not testing the privilege surface, and the first
+deployment would have decided it. The baseline is declared, applied from the declaration,
+and compared to the catalogue in both directions — a privilege granted by hand and one
+written down but never applied are both findings. `UPDATE` on `care_days` is
+`superseded_at` and nothing else, which is the second half of amend-by-adding: the trigger
+refuses a rewrite, and this means the request never reaches the trigger.
 
 **A definer function pins its own search_path.** A `SECURITY DEFINER` function runs with
 the privileges of whoever wrote it, and every one of these exists to answer a question

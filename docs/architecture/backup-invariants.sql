@@ -69,7 +69,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+-- No blanket grant here. grants.sql is the baseline and these checks run against it,
+-- so what the application may touch is the same in a suite as in production.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
 REVOKE ALL ON deployment, scrub_rules, scrub_runs, vendors, vendor_exposure,
   backup_policies, restore_drills FROM dailycare_app;

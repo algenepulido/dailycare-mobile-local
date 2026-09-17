@@ -79,7 +79,8 @@ INSERT INTO content_responses (facility_id, resident_id, content_id, response, n
    'She asked for her mother afterwards.', 'a0000000-0000-0000-0000-00000000000a');
 
 GRANT USAGE ON SCHEMA public TO dailycare_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+-- No blanket grant here. grants.sql is the baseline and these checks run against it,
+-- so what the application may touch is the same in a suite as in production.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
 REVOKE ALL ON boundary_channels, boundary_fields, integration_salts FROM dailycare_app;
 GRANT SELECT ON boundary_channels TO dailycare_app;

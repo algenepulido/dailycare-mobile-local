@@ -154,7 +154,8 @@ UNION ALL SELECT 'refresh:' || id::text, refresh_hash FROM sessions
 UNION ALL SELECT 'token:'   || id::text, token_hash   FROM user_tokens;
 
 CREATE TEMP TABLE before_shape AS
-SELECT (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000002')
+SELECT (SELECT count(*) FROM checks.forced_tables) AS forced_before,
+       (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000002')
      - (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
        AS gap_days,
        (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
@@ -379,11 +380,11 @@ SELECT expect('nothing was orphaned',
 
 -- Checked at the moment the scrub finished, before this suite lifted FORCE again for its
 -- own reads. Seven tables went in and seven came back.
+-- Counted before the suite started and compared after the scrub. Not against the catalogue
+-- at this moment, because this suite has FORCE lifted for its own reads while it asks - so
+-- the catalogue says zero and would say the scrub had destroyed everything.
 SELECT expect('row-level security is forced again on every table it was forced on',
-  (SELECT count(*) FROM checks.forced_tables)
-  = (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public' AND c.relrowsecurity)
-  AND (SELECT count(*) > 7 FROM checks.forced_tables));
+  (SELECT count(*) FROM checks.forced_tables) = (SELECT forced_before FROM before_shape));
 
 SELECT expect('the audit triggers are enabled again',
   (SELECT count(*) = 0 FROM pg_trigger tg
@@ -416,7 +417,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+-- No blanket grant here. grants.sql is the baseline and these checks run against it,
+-- so what the application may touch is the same in a suite as in production.
 REVOKE ALL ON deployment, scrub_rules, scrub_runs FROM dailycare_app;
 GRANT SELECT ON deployment TO dailycare_app;
 \set QUIET off

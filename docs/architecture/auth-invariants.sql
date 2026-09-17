@@ -214,7 +214,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 GRANT USAGE ON SCHEMA public TO dailycare_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO dailycare_app;
+-- No blanket grant here. grants.sql is the baseline and these checks run against it,
+-- so what the application may touch is the same in a suite as in production.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
 
 -- Maria reinstalls. Everything local is gone; she signs in and gets a new session.

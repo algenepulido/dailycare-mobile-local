@@ -206,6 +206,78 @@ INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, not
 ('unidentified','resident_contacts','update',false,NULL,NULL),
 ('unidentified','resident_contacts','delete',false,NULL,NULL);
 
+-- ── the tables that say who people are ────────────────────────────────────────
+--
+-- These held nothing the matrix asked about until the view above learned to ask about
+-- identifying columns as well as PHI ones.
+
+-- One expression produces the condition, and allowed is whether there is one. Writing them
+-- separately meant they could disagree, and the table's own CHECK said so immediately.
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, t.tbl, o.op::access_operation,
+       c.condition IS NOT NULL,
+       c.condition,
+       CASE WHEN t.tbl IN ('sessions','user_tokens') AND o.op <> 'select' THEN
+         'No policy at all for the application. Row-level security with no policy denies everything, and the functions in authentication.sql are the only way in - a session row is a credential, and the application composing statements against credentials is the thing being prevented.'
+       END
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (VALUES ('users'),('facility_members'),('assignments'),('facilities'),
+                   ('sessions'),('user_tokens'),('retention_policies')) AS t(tbl)
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o
+CROSS JOIN LATERAL (SELECT CASE
+  WHEN a.actor IN ('unidentified','integration') THEN NULL
+
+  WHEN a.actor = 'retention' AND t.tbl = 'assignments' AND o.op = 'select'
+    THEN 'Identifiers only'
+  WHEN a.actor = 'retention' AND t.tbl = 'assignments' AND o.op = 'delete'
+    THEN 'Only assignments belonging to an expired resident'
+  WHEN a.actor = 'retention' AND t.tbl = 'retention_policies' AND o.op = 'select'
+    THEN 'Every policy, which is what the job reads to know the windows'
+  WHEN a.actor = 'retention' THEN NULL
+
+  WHEN o.op = 'select' AND t.tbl = 'users'
+    THEN 'Themself, colleagues at their own building, and - for a manager - the family they granted access to'
+  WHEN o.op = 'select' AND t.tbl = 'facility_members'
+    THEN 'Memberships at facilities they are a member of'
+  WHEN o.op = 'select' AND t.tbl = 'assignments'
+    THEN 'Assignments at facilities they are a member of'
+  WHEN o.op = 'select' AND t.tbl = 'facilities'
+    THEN 'Buildings they work at, or where a resident they may read lives'
+  WHEN o.op = 'select' AND t.tbl = 'sessions'
+    THEN 'Their own devices, so they can notice one they do not recognise'
+  WHEN o.op = 'select' AND t.tbl = 'retention_policies' AND a.actor = 'care_manager'
+    THEN 'Their own facility'
+
+  WHEN t.tbl = 'users' AND o.op = 'update' AND a.actor <> 'family'
+    THEN 'Their own display name'
+  WHEN t.tbl = 'assignments' AND a.actor = 'care_manager' AND o.op = 'insert'
+    THEN 'In their own facility'
+  WHEN t.tbl = 'assignments' AND a.actor = 'care_manager' AND o.op = 'update'
+    THEN 'To end one, in their own facility'
+  ELSE NULL
+END AS condition) c;
+
+-- A family member reads no memberships and no assignments: they are linked to a resident,
+-- not employed by a building.
+UPDATE access_matrix SET allowed = false, condition = NULL
+WHERE table_name IN ('facility_members', 'assignments')
+  AND actor = 'family' AND operation = 'select';
+
+-- Nobody reads user_tokens through the application. consume_token() is the only path.
+UPDATE access_matrix SET allowed = false, condition = NULL
+WHERE table_name = 'user_tokens';
+
+
+-- The outbound table. Nothing writes to it, and the application has no reason to read it -
+-- it is a shape kept for a channel that is shut. Recorded so the completeness view has an
+-- answer rather than a gap.
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, 'outbound_signals', o.op::access_operation, false, NULL,
+       'Written by nothing. The channel it belongs to is shut, and opening it is an agreement rather than a grant - see boundary.sql.'
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;
+
+
 -- ── the trail ──────────────────────────────────────────────────────────────────
 
 INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
@@ -273,18 +345,22 @@ COMMENT ON VIEW access_matrix_delete_drift IS
    deleted from is exactly the drift this file exists to catch.';
 
 CREATE VIEW access_matrix_uncovered_tables AS
--- Tables holding PHI that the matrix says nothing about at all.
+-- Tables holding a resident's record, or anything that identifies a person, that the
+-- matrix says nothing about at all.
 SELECT DISTINCT dc.table_name
 FROM data_classification dc
 JOIN information_schema.tables t
   ON t.table_schema = 'public' AND t.table_name = dc.table_name
  AND t.table_type = 'BASE TABLE'
-WHERE dc.class = 'phi'
+WHERE dc.class IN ('phi', 'identifying')
   AND dc.table_name NOT IN (SELECT table_name FROM access_matrix);
 
 COMMENT ON VIEW access_matrix_uncovered_tables IS
-  'Must be empty. A table acquires a PHI column in a later migration and nobody says who
-   may read it; this is where that shows up.';
+  'Must be empty. Asked about phi and identifying both, which it did not at first - and the
+   difference was the whole of a finding. A caregiver''s email is not PHI, so users,
+   sessions and the rest were invisible to this view; a list of every family member granted
+   access to a resident in memory care, across every customer, is not a table nobody needs
+   to answer for.';
 
 -- ════════════════════════════════════════════════════════════════════ classification
 --
