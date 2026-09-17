@@ -130,7 +130,32 @@ CREATE OR REPLACE FUNCTION audit_read(
 ) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
+DECLARE
+  target_facility uuid;
 BEGIN
+  -- Two checks that were not here, and their absence undid the privilege model above.
+  -- This function runs as the definer and is granted to the application, so without them
+  -- it is the hole in "the application cannot write an audit row": a caller could record a
+  -- read of a resident they cannot see, with free text that became the action.
+  SELECT r.facility_id INTO target_facility FROM residents r WHERE r.id = target_resident;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no such resident' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF NOT app_may_read_resident(target_resident, target_facility) THEN
+    RAISE EXCEPTION 'cannot record a read of a resident this session cannot read'
+      USING ERRCODE = 'insufficient_privilege',
+            HINT = 'The trail is not a place to assert something the access model would refuse.';
+  END IF;
+
+  -- The subject is a table name, not a sentence. Without this the action column takes
+  -- whatever the caller sends, and the trail carries text nobody wrote a policy about.
+  IF NOT EXISTS (SELECT 1 FROM data_classification dc WHERE dc.table_name = subject) THEN
+    RAISE EXCEPTION 'unknown subject %', subject
+      USING ERRCODE = 'check_violation',
+            HINT = 'The subject names a table the classification knows about.';
+  END IF;
+
   INSERT INTO audit_events (
     actor_user_id, actor_role, facility_id,
     action, subject_type, subject_id, resident_id, request_id
@@ -138,13 +163,12 @@ BEGIN
   SELECT
     nullif(current_setting('app.user_id',    true), '')::uuid,
     nullif(current_setting('app.role',       true), ''),
-    r.facility_id,
+    target_facility,
     subject || '.read',
     subject,
     target_subject,
     target_resident,
-    nullif(current_setting('app.request_id', true), '')
-  FROM residents r WHERE r.id = target_resident;
+    nullif(current_setting('app.request_id', true), '');
 END;
 $$;
 
@@ -152,7 +176,12 @@ COMMENT ON FUNCTION audit_read(uuid, text, uuid) IS
   'Called by the application on the single path that serves resident data to a client.
    PostgreSQL cannot trigger on SELECT, so unlike the write path this is a convention the
    code has to keep. It is the weakest guarantee in the audit design and is listed as such
-   in the review package.';
+   in the review package.
+
+   It refuses to record a read the access model would not permit, and refuses a subject
+   that is not a table. Both were missing: a definer function granted to the application
+   and checking nothing is the same as granting the application INSERT on the trail, which
+   the privileges below are careful to revoke.';
 
 
 -- ════════════════════════════════════════════════════════════════════ coverage

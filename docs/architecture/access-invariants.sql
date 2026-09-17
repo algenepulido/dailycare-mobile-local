@@ -98,6 +98,11 @@ INSERT INTO assignments (facility_id, resident_id, facility_member_id) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
    'fa000000-0000-0000-0000-00000000000a');
 
+-- Cathy is matched to a patient in the facility's clinical system, so the feed has
+-- something to find.
+UPDATE residents SET external_source = 'pointclickcare', external_patient_id = 'PCC-77'
+WHERE id = 'e1000000-0000-0000-0000-000000000001';
+
 INSERT INTO resident_contacts (facility_id, resident_id, user_id, relation, state, granted_at) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
    'c0000000-0000-0000-0000-00000000000c', 'child', 'active', now());
@@ -270,6 +275,104 @@ SELECT expect_rows('no policy in the access model permits an application role to
   $$SELECT * FROM pg_policies
     WHERE schemaname = 'public' AND cmd IN ('DELETE','ALL')
       AND NOT (roles::text LIKE '%dailycare_retention%')$$);
+
+
+-- ── a photograph row is not taken on trust ─────────────────────────────────────
+--
+-- From an independent review. The insert policy checked who the resident was and nothing
+-- about the row: any bucket, any path, any uploader, and a deleted_at already set - which
+-- is a row the next retention run removes without the object being touched, leaving a
+-- photograph in a bucket with nothing that knows whose it was.
+
+\echo ''
+\echo '── what may be claimed about a photograph'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+
+SELECT expect_refused('a row that already claims its object is gone', $$
+  INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                             byte_size, uploaded_by, deleted_at)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          'dailycare-media','f1000000-0000-0000-0000-000000000001/a.jpg','image/jpeg',10,
+          'a0000000-0000-0000-0000-00000000000a', now())
+$$);
+
+SELECT expect_refused('an upload attributed to a colleague', $$
+  INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                             byte_size, uploaded_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          'dailycare-media','f1000000-0000-0000-0000-000000000001/b.jpg','image/jpeg',10,
+          'b0000000-0000-0000-0000-00000000000b')
+$$);
+
+SELECT expect_refused('a path that belongs to another building', $$
+  INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                             byte_size, uploaded_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          'dailycare-media','f2000000-0000-0000-0000-000000000002/c.jpg','image/jpeg',10,
+          'a0000000-0000-0000-0000-00000000000a')
+$$);
+
+SELECT expect('and an ordinary upload still works, so none of that is "no inserts"',
+  (SELECT count(*) >= 0 FROM media_objects));
+\set QUIET on
+INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                           byte_size, uploaded_by)
+VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+        'dailycare-media','f1000000-0000-0000-0000-000000000001/ok.jpg','image/jpeg',10,
+        'a0000000-0000-0000-0000-00000000000a');
+\set QUIET off
+SELECT expect_rows('the ordinary upload is there', 1,
+  $$SELECT * FROM media_objects WHERE object_path LIKE '%ok.jpg'$$);
+RESET ROLE;
+
+
+-- ── the clinical feed, which could not write at all ────────────────────────────
+--
+-- The matrix said the feed may insert a medication event with a source and a reference.
+-- The database said nothing may: medication_events forces row-level security, its one
+-- insert policy required source = 'caregiver', and dailycare_integration had no grant
+-- anywhere in the model. A claim the package made and did not back.
+
+\echo ''
+\echo '── the clinical feed'
+
+SET ROLE dailycare_integration;
+
+SELECT expect('the feed can find the resident a patient id was matched to, without reading one',
+  resident_for_external('pointclickcare', 'PCC-77')
+  = 'e1000000-0000-0000-0000-000000000001');
+
+-- Refused outright rather than returning nothing, because the feed has no grant on the
+-- table at all. The stronger of the two answers.
+SELECT expect_refused('and cannot read a resident', $$SELECT id FROM residents$$);
+
+\set QUIET on
+INSERT INTO medication_events (facility_id, resident_id, care_date, slot, status,
+                               occurred_at, source, source_ref)
+VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+        DATE '2026-09-12','am','given', now(), 'pointclickcare','MAR-1');
+\set QUIET off
+SELECT expect_rows('it can write the row it exists to write', 1,
+  $$SELECT id FROM medication_events WHERE source_ref = 'MAR-1'$$);
+
+SELECT expect_refused('but not one that looks like a caregiver''s', $$
+  INSERT INTO medication_events (facility_id, resident_id, care_date, slot, status, source)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          DATE '2026-09-13','pm','given','caregiver')
+$$);
+
+SELECT expect_refused('nor one with no reference back to the record it came from', $$
+  INSERT INTO medication_events (facility_id, resident_id, care_date, slot, status, source)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          DATE '2026-09-13','pm','given','pointclickcare')
+$$);
+
+SELECT expect_refused('and it cannot read a care note', $$
+  SELECT note FROM care_days LIMIT 1
+$$);
+RESET ROLE;
 
 
 -- ── a filed record cannot be rewritten ─────────────────────────────────────────

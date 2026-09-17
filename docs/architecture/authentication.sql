@@ -35,9 +35,14 @@ RETURNS boolean LANGUAGE sql STABLE
   SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1 FROM sessions s
+    JOIN users u ON u.id = s.user_id
     WHERE s.refresh_hash = candidate_hash
       AND s.revoked_at IS NULL
       AND s.expires_at > now()
+      -- The person, not only the session. Without this, deactivating an account left the
+      -- phone in somebody's pocket working until the refresh token expired - thirty days
+      -- after a termination the procedure believed it had completed.
+      AND u.deactivated_at IS NULL
   )
 $$;
 
@@ -62,6 +67,7 @@ DECLARE
 BEGIN
   UPDATE sessions SET revoked_at = now()
   WHERE refresh_hash = old_hash AND revoked_at IS NULL AND expires_at > now()
+    AND user_id IN (SELECT id FROM users WHERE deactivated_at IS NULL)
   RETURNING user_id, device_label INTO owner, label;
 
   IF owner IS NULL THEN
@@ -106,6 +112,25 @@ BEGIN
   GET DIAGNOSTICS n = ROW_COUNT;
   RETURN n;
 END; $$;
+
+
+-- Deactivating an account signs it out everywhere, as one act rather than two. A
+-- termination procedure that has to remember the second step is a procedure that will
+-- eventually forget it, and the failure is silent: the account is closed and the phone
+-- still works.
+CREATE OR REPLACE FUNCTION end_sessions_on_deactivation() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF NEW.deactivated_at IS NOT NULL AND OLD.deactivated_at IS NULL THEN
+    UPDATE sessions SET revoked_at = now()
+    WHERE user_id = NEW.id AND revoked_at IS NULL AND expires_at > now();
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE TRIGGER deactivation_ends_sessions
+  AFTER UPDATE OF deactivated_at ON users
+  FOR EACH ROW EXECUTE FUNCTION end_sessions_on_deactivation();
 
 
 -- ════════════════════════════════════════════════════════════════════ single-use tokens

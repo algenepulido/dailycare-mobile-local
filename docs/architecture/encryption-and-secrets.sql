@@ -151,6 +151,12 @@ INSERT INTO encryption_controls (id, covers, mechanism, key_management, state, n
  'Declined for now, and the reason is worth recording. The threat it addresses is the platform reading the data, which the agreement already addresses contractually. The threat it creates is losing the key, after which nobody reads the data - including the facility whose records they are. Revisit if a facility asks for it.',
  DATE '2026-09-15'),
 
+('signed_url_lifetime', 'Links to photographs',
+ 'Signed URLs minted per request with a short expiry, currently fifteen minutes',
+ 'Platform-managed signing key; the application never holds it', 'planned',
+ 'Recorded as a control because it is the only one acting on a link once it exists. The row in media_objects gates the minting; it cannot reach a URL already handed out, which works until it expires whatever happens to the grant. Three places in this package previously said otherwise. If a withdrawal has to take effect immediately, the alternative is an authenticated proxy - a request per image through the API, paying a round trip for revocation that is measured in minutes rather than instant.',
+ DATE '2026-09-17'),
+
 ('field_level_encryption', 'Care notes and resident names',
  'Application-level encryption before the row is written',
  'Would need a key the database cannot read', 'declined',

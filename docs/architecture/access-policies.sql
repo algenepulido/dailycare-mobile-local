@@ -200,7 +200,56 @@ CREATE POLICY medication_read ON medication_events FOR SELECT
 -- a request, so a compromised session cannot forge an entry attributed to a MedTech.
 CREATE POLICY medication_write ON medication_events FOR INSERT
   WITH CHECK (app_may_write_resident(resident_id, facility_id)
-              AND source = 'caregiver');
+              AND source = 'caregiver'
+              -- The person making the request, not a name they send.
+              AND recorded_by = app_user_id());
+
+-- The clinical feed, which had no policy at all and therefore could write nothing - while
+-- the access matrix said it may insert "with a source and a reference". A claim the
+-- database did not back, which is the kind this package exists to catch and did not.
+-- It connects as its own role, so the rule is about the row rather than about a session.
+CREATE POLICY medication_integration_write ON medication_events FOR INSERT
+  TO dailycare_integration
+  WITH CHECK (source <> 'caregiver' AND source_ref IS NOT NULL AND recorded_by IS NULL);
+
+CREATE POLICY medication_integration_read ON medication_events FOR SELECT
+  TO dailycare_integration
+  -- Enough to see what it has already written, so a re-import is not a duplicate. Not the
+  -- status, and not a caregiver's row: column privileges below decide that.
+  USING (source <> 'caregiver');
+
+-- The feed needs to turn a clinical-system patient id into a resident id without being
+-- able to read a resident. One function, one answer, nothing else reachable.
+CREATE OR REPLACE FUNCTION resident_for_external(src medication_source, patient_id text)
+RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+  SELECT r.id FROM residents r
+  WHERE r.external_source = src AND r.external_patient_id = patient_id
+$$;
+
+COMMENT ON FUNCTION resident_for_external(medication_source, text) IS
+  'The feed knows a patient in its own system and needs the resident it was matched to.
+   A definer function returning one uuid, rather than a SELECT grant on residents, because
+   the second would let the feed enumerate a building.';
+
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_integration') THEN
+    GRANT USAGE ON SCHEMA public TO dailycare_integration;
+    -- The columns it writes, and no others. It cannot see a resident's name, a care note,
+    -- or a caregiver's entry.
+    GRANT INSERT (facility_id, resident_id, care_date, slot, status, occurred_at,
+                  source, source_ref, detail) ON medication_events TO dailycare_integration;
+    GRANT SELECT (id, facility_id, resident_id, care_date, slot, source, source_ref)
+                 ON medication_events TO dailycare_integration;
+    GRANT EXECUTE ON FUNCTION resident_for_external(medication_source, text)
+                 TO dailycare_integration;
+  END IF;
+END $$;
+
+COMMENT ON POLICY medication_integration_write ON medication_events IS
+  'The feed may attribute a row to the clinical system it came from and may not write one
+   that looks like a caregiver. A request cannot reach this policy at all: it is granted to
+   a role the application never becomes.';
 
 
 -- ── media ──────────────────────────────────────────────────────────────────────
@@ -208,13 +257,28 @@ CREATE POLICY medication_write ON medication_events FOR INSERT
 CREATE POLICY media_read ON media_objects FOR SELECT
   USING (deleted_at IS NULL AND app_may_read_resident(resident_id, facility_id));
 
+-- Three conditions, and two of them were missing. Without uploaded_by = app_user_id() a
+-- caller attributes an upload to somebody else. Without deleted_at IS NULL a caller can
+-- insert a row that already claims its object is gone, which the next retention run then
+-- deletes without anybody touching the object - a photograph left in a bucket with nothing
+-- that knows whose it was, which is the exact outcome the handshake exists to prevent.
 CREATE POLICY media_write ON media_objects FOR INSERT
-  WITH CHECK (app_may_write_resident(resident_id, facility_id));
+  WITH CHECK (app_may_write_resident(resident_id, facility_id)
+              AND uploaded_by = app_user_id()
+              AND deleted_at IS NULL);
 
 COMMENT ON POLICY media_read ON media_objects IS
-  'This is the row that gates a signed URL. The URL is minted after this policy has
-   admitted the caller, and never before — so possession of a link is not permission,
-   and an expired grant cannot be replayed by keeping an old link.';
+  'This is the row that gates the minting of a signed URL. The URL is issued after this
+   policy has admitted the caller and never before, so a caller who was never admitted
+   never gets a link.
+
+   What it does not do is revoke a link already issued. A signed URL works until it
+   expires whatever happens to this row afterwards, so a grant withdrawn today does not
+   reach into a link handed out yesterday. That was previously written here, in the
+   diagram and in the matrix as though it did. The control is the lifetime: links are
+   minted short, and if a withdrawal has to take effect immediately the alternative is an
+   authenticated proxy rather than a signed URL, which is a decision with a cost and is
+   recorded as one in encryption-and-secrets.sql.';
 
 
 -- ── family access rows ─────────────────────────────────────────────────────────

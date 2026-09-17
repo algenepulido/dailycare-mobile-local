@@ -179,6 +179,7 @@ CREATE TYPE scrub_strategy AS ENUM (
   'synthetic_email',   -- user<digest>@example.invalid, unique because the original was
   'redact_text',       -- replaced with filler of the same length, so layouts still break
   'hash_token',        -- an opaque digest; keeps uniqueness, keeps nothing else
+  'hash_path',         -- the same, keeping the facility prefix the schema requires
   'scramble_password', -- a well-formed Argon2id digest of nothing anyone knows
   'scramble_digest',   -- a well-formed SHA-256 digest, likewise
   'shift_days',        -- moved by one offset for the whole database, so intervals survive
@@ -250,7 +251,7 @@ INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
 -- The path is the leak nobody expects: cedar/2025/frances-garden.jpg carries a name.
 
 INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
- ('media_objects','object_path','hash_token',NULL);
+ ('media_objects','object_path','hash_path',NULL);
 
 -- ── people who are not the patient ─────────────────────────────────────────────
 
@@ -450,6 +451,10 @@ BEGIN
       WHEN 'synthetic_email' THEN format($e$CASE WHEN %s IS NULL THEN NULL ELSE 'user' || substr(md5(%L || %s), 1, 12) || '@example.invalid' END$e$, col, salt, col)
       WHEN 'redact_text'     THEN format('scrub_redact(%s)', col)
       WHEN 'hash_token'      THEN format('CASE WHEN %s IS NULL THEN NULL ELSE substr(md5(%L || %s), 1, 16) END', col, salt, col)
+      -- An object path begins with the facility it belongs to, and the schema enforces
+      -- that. A plain digest would be a value the table refuses, so the scrub keeps the
+      -- prefix and hashes the rest - which is also what a developer wants to see.
+      WHEN 'hash_path'       THEN format('CASE WHEN %s IS NULL THEN NULL ELSE facility_id::text || ''/'' || substr(md5(%L || %s), 1, 16) END', col, salt, col)
       -- Shaped correctly and derived from nothing: the schema refuses a credential column
       -- that is not a digest, so a sentinel string would fail the constraint on its way in.
       -- Correct shape is also what a developer needs - a login path that never sees a

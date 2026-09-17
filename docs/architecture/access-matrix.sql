@@ -161,7 +161,7 @@ INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, not
 ('care_manager','media_objects','insert',true,'For residents in their facility',NULL),
 ('care_manager','media_objects','update',false,NULL,NULL),
 ('care_manager','media_objects','delete',false,NULL,NULL),
-('family','media_objects','select',true,'Undeleted media for the resident they hold a grant for','An expired grant cannot be replayed by keeping an old link, because the link is minted per request.'),
+('family','media_objects','select',true,'Undeleted media for the resident they hold a grant for','This row gates the minting of a link, not the life of one already issued: a signed URL works until it expires whatever happens here afterwards. The control is that links are minted short.'),
 ('family','media_objects','insert',false,NULL,NULL),
 ('family','media_objects','update',false,NULL,NULL),
 ('family','media_objects','delete',false,NULL,NULL),

@@ -163,6 +163,40 @@ SELECT expect_rejected('storing an invitation token as it was sent', $$
 $$);
 
 
+-- ── a person who has left ──────────────────────────────────────────────────────
+--
+-- From an independent review. session_is_valid() checked the session and nothing about
+-- the person, and users.deactivated_at said "sign-in refused" rather than "signed out" -
+-- so a termination ended a membership, closed an account, and left the phone working for
+-- the remaining life of the refresh token.
+
+\echo ''
+\echo '── somebody who has been deactivated'
+
+\set QUIET on
+INSERT INTO users (id, email, display_name) VALUES
+  ('d0000000-0000-0000-0000-00000000000d', 'leaving@example.test', 'Deborah');
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at) VALUES
+  ('d0000000-0000-0000-0000-00000000000d', h('her_phone'), 'her phone', now() + interval '30 days');
+\set QUIET off
+
+SELECT expect('her session works while she is employed', session_is_valid(h('her_phone')));
+
+\set QUIET on
+UPDATE users SET deactivated_at = now() WHERE id = 'd0000000-0000-0000-0000-00000000000d';
+\set QUIET off
+
+SELECT expect('deactivating the account stops it, without anybody remembering a second step',
+  NOT session_is_valid(h('her_phone')));
+
+SELECT expect('and the row says it was revoked rather than left to expire',
+  (SELECT revoked_at IS NOT NULL FROM sessions WHERE refresh_hash = h('her_phone')));
+
+SELECT expect('refreshing with it issues nothing',
+  (SELECT rotate_session(h('her_phone'), h('her_phone_2')) IS NULL)
+  AND NOT session_is_valid(h('her_phone_2')));
+
+
 -- ── the milestone's own acceptance criteria ────────────────────────────────────
 --
 -- "authorized data persists across reinstall/sign-in" and "authorized caregivers on

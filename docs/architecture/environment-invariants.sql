@@ -116,7 +116,7 @@ INSERT INTO media_objects (facility_id, resident_id, care_day_id, bucket, object
                            content_type, byte_size, uploaded_by) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
    'cd000000-0000-0000-0000-000000000001', 'dailycare-media-prod',
-   'cedar/2026/CANARY-OBJECTPATH-3f82-cathy-garden.jpg', 'image/jpeg', 184320,
+   'f1000000-0000-0000-0000-000000000001/2026/CANARY-OBJECTPATH-3f82-cathy-garden.jpg', 'image/jpeg', 184320,
    'a0000000-0000-0000-0000-00000000000a');
 
 INSERT INTO resident_contacts (facility_id, resident_id, user_id, relation, state) VALUES
@@ -328,8 +328,11 @@ SELECT expect('which means the credential triggers stayed on through the scrub',
    WHERE NOT tgisinternal AND tgfoid = 'reject_unhashed_credential'::regproc
      AND tgenabled = 'O'));
 
-SELECT expect('the object path no longer carries a name',
-  (SELECT object_path !~ 'cathy' AND length(object_path) = 16 FROM media_objects LIMIT 1));
+SELECT expect('the object path no longer carries a name, and still belongs to its facility',
+  (SELECT object_path !~* 'cathy'
+      AND object_path LIKE facility_id::text || '/%'
+      AND length(object_path) = length(facility_id::text) + 17
+   FROM media_objects LIMIT 1));
 
 SELECT expect('the care note is the length it was, so a layout bug still reproduces',
   (SELECT length(note) FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')

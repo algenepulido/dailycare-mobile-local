@@ -43,7 +43,9 @@ CREATE OR REPLACE FUNCTION expect_refused(label text, stmt text) RETURNS void AS
 BEGIN
   BEGIN
     EXECUTE stmt;
-  EXCEPTION WHEN insufficient_privilege THEN
+  -- The codes that mean the database refused. Not WHEN OTHERS: a typo in a probe should
+  -- fail loudly rather than be reported as the refusal it was testing for.
+  EXCEPTION WHEN insufficient_privilege OR check_violation THEN
     RAISE NOTICE 'PASS  refused: %', label;
     RETURN;
   END;
@@ -76,6 +78,13 @@ SELECT set_config('app.request_id', 'req-0001',  false);
 
 INSERT INTO residents (id, facility_id, display_name) VALUES
   ('e1000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001', 'Cathy');
+
+-- Maria is assigned to Cathy. Without this she is a caregiver at the building who is not
+-- responsible for this resident, and audit_read() now refuses to record a read the access
+-- model would not permit - which is the point of the guard, and was the bug before it.
+INSERT INTO assignments (facility_id, resident_id, facility_member_id) VALUES
+  ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+   'fa000000-0000-0000-0000-00000000000a');
 
 SELECT expect('creating a resident wrote an audit row',
   (SELECT count(*) = 1 FROM audit_events WHERE action = 'residents.insert'));
@@ -168,13 +177,38 @@ SELECT expect('an update that changed nothing wrote nothing',
 \echo ''
 \echo '── reads, which the application has to declare'
 
-SELECT audit_read('e1000000-0000-0000-0000-000000000001', 'care_day',
+SELECT audit_read('e1000000-0000-0000-0000-000000000001', 'care_days',
                   'cd000000-0000-0000-0000-000000000001');
 
 SELECT expect('a declared read is recorded against the resident',
   (SELECT count(*) = 1 FROM audit_events
-   WHERE action = 'care_day.read'
+   WHERE action = 'care_days.read'
      AND resident_id = 'e1000000-0000-0000-0000-000000000001'));
+
+-- The other half, and the reason this function needed a guard at all: it runs as the
+-- definer and is granted to the application, so without these it was a way to write an
+-- audit row by hand - the one thing the revoked privileges below are there to prevent.
+\set QUIET on
+INSERT INTO facilities (id, name, timezone) VALUES
+  ('f2000000-0000-0000-0000-000000000002', 'Birch House', 'America/Chicago');
+INSERT INTO residents (id, facility_id, display_name) VALUES
+  ('e9000000-0000-0000-0000-000000000009', 'f2000000-0000-0000-0000-000000000002', 'Mabel');
+\set QUIET off
+
+SELECT expect_refused('recording a read of a resident this session cannot see', $$
+  SELECT audit_read('e9000000-0000-0000-0000-000000000009', 'care_days')
+$$);
+
+SELECT expect_refused('or putting free text where a table name goes', $$
+  SELECT audit_read('e1000000-0000-0000-0000-000000000001', 'PHI_CANARY_in_subject')
+$$);
+
+-- Creating Mabel wrote an audit row about Mabel, by trigger, which is correct. What must
+-- not exist is a read recorded by a session that could not have read her.
+SELECT expect('so no read reached the trail by either route',
+  (SELECT count(*) = 0 FROM audit_events
+   WHERE action LIKE '%.read'
+     AND (resident_id = 'e9000000-0000-0000-0000-000000000009' OR action ILIKE '%CANARY%')));
 
 
 -- ── coverage ───────────────────────────────────────────────────────────────────

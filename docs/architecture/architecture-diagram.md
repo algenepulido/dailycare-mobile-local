@@ -206,9 +206,13 @@ Cloud Run to Cloud Storage. The database is reached over a private address and i
 published to the internet.
 
 **A photograph is never served from a public URL.** The row in `media_objects` is what
-gates a signed link, and the link is minted after the policy has admitted the caller, never
-before — so possession of a URL is not permission, and a withdrawn grant cannot be replayed
-by keeping an old one.
+gates the *minting* of a signed link, and the link is issued after the policy has admitted
+the caller, never before — so a caller who was never admitted never gets one.
+
+It does not reach into a link already issued. A signed URL works until it expires whatever
+happens to the row afterwards, so withdrawing a grant today does not invalidate a link
+handed out yesterday. The control there is the lifetime, and an authenticated proxy is the
+alternative if a withdrawal has to take effect immediately.
 
 **The retention job is not the API.** Separate identity, separate database role, and the
 application cannot invoke it. A compromised session cannot cause a deletion.

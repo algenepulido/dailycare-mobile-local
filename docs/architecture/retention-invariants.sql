@@ -123,7 +123,7 @@ VALUES ('4e000000-0000-0000-0000-00000000000f',
         'f1000000-0000-0000-0000-000000000001',
         'e4000000-0000-0000-0000-000000000004',
         'cd000000-0000-0000-0000-000000000004',
-        'dailycare-media-prod', 'cedar/2025/frances-garden.jpg',
+        'dailycare-media-prod', 'f1000000-0000-0000-0000-000000000001/2025/frances-garden.jpg',
         'image/jpeg', 184320, 'a0000000-0000-0000-0000-00000000000a');
 
 -- An audit row older than the six-year window, and one from today.

@@ -510,6 +510,12 @@ CREATE TABLE media_objects (
   deleted_at     timestamptz,   -- set when the object has actually been removed from GCS
   UNIQUE (bucket, object_path),
 
+  -- The path begins with the facility the row belongs to. The application generates it;
+  -- this is what stops a caller sending one. A row pointing at another building's object
+  -- would be a read of that building's photograph through a link this row minted.
+  CONSTRAINT object_path_is_under_its_facility
+    CHECK (object_path LIKE facility_id::text || '/%'),
+
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
@@ -539,7 +545,9 @@ CREATE TABLE audit_events (
   facility_id   uuid REFERENCES facilities(id),
 
   action        text NOT NULL,               -- 'care_day.read', 'resident.update', ...
-  subject_type  text NOT NULL,               -- 'resident', 'care_day', 'media_object'
+  -- A table name, not a sentence. audit_read() checks it against the classification; this
+  -- keeps free text out of the trail by any other route, including a future caller.
+  subject_type  text NOT NULL CHECK (subject_type ~ '^[a-z][a-z0-9_]{2,62}$'),
   subject_id    uuid,
   -- Denormalised, because the question is always "who saw this resident's record".
   -- Deliberately not a foreign key: the trail has to outlive the record it describes.
