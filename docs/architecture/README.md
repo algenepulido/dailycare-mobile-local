@@ -63,7 +63,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 412 checks across twelve suites
+./verify.sh                  # 420 checks across twelve suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -172,6 +172,8 @@ SELECT * FROM agreements_expiring_with_residents;  -- the one nothing else notic
 SELECT * FROM notifications_overdue;        -- must be empty
 SELECT * FROM notifications_late;           -- kept on record, not refused
 SELECT * FROM incidents_unassessed;         -- must be empty
+
+SELECT * FROM deidentification_undetermined;  -- expected to have a row, and says why
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -314,6 +316,21 @@ that every one of its services reads and writes directly, so joining the two dat
 a foreign data wrapper, a dblink, or simply a DailyCare schema in that instance — puts nine
 services and their vendors into scope with nothing published to say so. It is the cheapest
 thing to propose, and `boundary_database_joins` must be empty.
+
+**A development copy shares no key with production.** The names in a scrubbed copy were
+synthetic and the dates had moved, and the resident's uuid was the same one the production
+log line carried — so the mood, appetite, meals and medication status deliberately kept for
+developers were one join away from a request, a user and a facility. "Carries no meaning"
+is true of a uuid by itself; a uuid stable across two copies of a record is a code assigned
+to the individual, which is what this package already refuses to send to InkTree for
+exactly that reason. The copy now re-keys residents, care days and the audit columns from a
+salt discarded when the run ends, and every foreign key follows.
+
+**And the copy does not claim to be de-identified.** Dates are shifted rather than removed,
+which keeps the intervals a developer needs and keeps the data a limited data set rather
+than de-identified under Safe Harbor. The route that fits is an expert determination, which
+is a signature and not a constraint — so what is here is its absence, named, the way
+`never_drilled` and `vendor_gaps` are named.
 
 **A resident is admitted into a facility that has an agreement, or not at all.** The
 package modelled every agreement flowing down — the platform, the messaging vendor, the

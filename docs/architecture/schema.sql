@@ -316,7 +316,7 @@ CREATE TABLE assignments (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE INDEX ON assignments (resident_id)        WHERE ended_at IS NULL;
@@ -352,7 +352,7 @@ CREATE TABLE resident_contacts (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE INDEX ON resident_contacts (user_id)     WHERE state = 'active';
@@ -392,7 +392,7 @@ CREATE TABLE care_days (
   -- Set when this row has been superseded by a correction. The superseding row points
   -- back through amends_id below, so the whole chain is readable in either direction.
   superseded_at  timestamptz,
-  amends_id      uuid REFERENCES care_days(id),
+  amends_id      uuid REFERENCES care_days(id) ON UPDATE CASCADE,
 
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
@@ -400,7 +400,7 @@ CREATE TABLE care_days (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- One current row per resident per day. Superseded rows are exempt, which is what makes
@@ -419,7 +419,7 @@ COMMENT ON TABLE care_days IS
 
 
 CREATE TABLE care_day_meals (
-  care_day_id  uuid NOT NULL REFERENCES care_days(id) ON DELETE CASCADE,
+  care_day_id  uuid NOT NULL REFERENCES care_days(id) ON DELETE CASCADE ON UPDATE CASCADE,
   slot         meal_slot NOT NULL,
   happened     boolean NOT NULL DEFAULT false,
   amount       meal_amount,   -- null is "not observed", which is a real answer
@@ -428,7 +428,7 @@ CREATE TABLE care_day_meals (
 );
 
 CREATE TABLE care_day_concerns (
-  care_day_id  uuid NOT NULL REFERENCES care_days(id) ON DELETE CASCADE,
+  care_day_id  uuid NOT NULL REFERENCES care_days(id) ON DELETE CASCADE ON UPDATE CASCADE,
   concern      concern NOT NULL,
   PRIMARY KEY (care_day_id, concern)
 );
@@ -470,7 +470,7 @@ CREATE TABLE medication_events (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- The scheduled slots are one per resident per day. Supplemental doses are not, so they
@@ -497,7 +497,7 @@ CREATE TABLE media_objects (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id    uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
   resident_id    uuid NOT NULL,
-  care_day_id    uuid REFERENCES care_days(id) ON DELETE SET NULL,
+  care_day_id    uuid REFERENCES care_days(id) ON DELETE SET NULL ON UPDATE CASCADE,
 
   bucket         text NOT NULL,
   object_path    text NOT NULL,
@@ -519,7 +519,7 @@ CREATE TABLE media_objects (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE INDEX ON media_objects (resident_id) WHERE deleted_at IS NULL;

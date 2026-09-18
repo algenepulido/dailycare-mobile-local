@@ -115,7 +115,7 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
 -- someone is usually confused is a statement about their health.
 
 INSERT INTO data_classification (table_name, column_name, class, note) VALUES
- ('residents','id','operational','Generated. Carries no meaning, which is why it is safe in a log line.'),
+ ('residents','id','operational','Generated. Carries no meaning, which is why it is safe in a log line - and why a copy of this database re-keys it: the same uuid in a development copy and a production log line is a code assigned to the individual, which is a different thing entirely. See remap_key in environments.sql.'),
  ('residents','facility_id','operational',NULL),
  ('residents','display_name','phi','The resident''s name, held against their care record.'),
  ('residents','external_source','operational',NULL),

@@ -180,6 +180,7 @@ CREATE TYPE scrub_strategy AS ENUM (
   'redact_text',       -- replaced with filler of the same length, so layouts still break
   'hash_token',        -- an opaque digest; keeps uniqueness, keeps nothing else
   'hash_path',         -- the same, keeping the facility prefix the schema requires
+  'remap_key',         -- a uuid rewritten as a digest, so a copy shares no key with production
   'scramble_password', -- a well-formed Argon2id digest of nothing anyone knows
   'scramble_digest',   -- a well-formed SHA-256 digest, likewise
   'shift_days',        -- moved by one offset for the whole database, so intervals survive
@@ -209,6 +210,7 @@ COMMENT ON CONSTRAINT scrub_rules_table_name_column_name_fkey ON scrub_rules IS
 -- is calm and eats well is not one anybody can build a daily summary against.
 
 INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('residents','id','remap_key','A uuid is meaningless on its own. A uuid that is the same in a development copy and in a production log line is a code assigned to the individual, and it is the join key that makes everything kept here attributable again.'),
  ('residents','display_name','synthetic_name',NULL),
  ('residents','external_patient_id','hash_token',NULL),
  ('residents','admitted_on','shift_days',NULL),
@@ -223,6 +225,7 @@ INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
 -- would have found.
 
 INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('care_days','id','remap_key','The same. A care day id in a log line and the same id in a developer''s database is one join away from the note.'),
  ('care_days','note','redact_text',NULL),
  ('care_days','care_date','shift_days',NULL),
  ('care_days','mood','keep','Clinical shape, detached from identity. See residents.baseline_mood.'),
@@ -267,7 +270,8 @@ INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
 -- ── the trail ──────────────────────────────────────────────────────────────────
 
 INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
- ('audit_events','resident_id','keep','A generated uuid pointing at a resident who has been renamed. It is what makes the trail usable in dev.'),
+ ('audit_events','resident_id','remap_key','Not a foreign key, so it does not cascade - and it arrives at the same value by the same digest, which is what keeps the trail joinable to the records it describes.'),
+ ('audit_events','subject_id','remap_key','As above.'),
  ('audit_events','ip_hash','null_out',NULL),
  ('audit_events','occurred_at','shift_days','Operational, but shifted with everything else so the trail and the records it describes stay in step.');
 
@@ -360,6 +364,48 @@ END; $$;
 COMMENT ON FUNCTION phi_residue(text[]) IS
   'Returns nothing when the scrub was complete. Prove it is capable of returning something
    before believing an empty result — the invariants do exactly that.';
+
+
+-- ════════════════════════════════════════════════════════════════════ on what basis
+--
+-- The scrub replaces names, re-keys identifiers and moves every date by one offset. That
+-- last one is deliberate and useful - intervals survive, so a two-week report still has
+-- two weeks in it - and it is also the reason this is not de-identified data under Safe
+-- Harbor, which requires every element of a date related to an individual to be removed
+-- except the year. A shifted date is a date, and the interval between an admission and a
+-- departure is preserved exactly.
+--
+-- So the copy is closer to a limited data set, which is still protected health information
+-- and still needs a data use agreement. The honest route is the other one the rule offers:
+-- an expert determination that the residual risk, after synthetic names, re-keyed
+-- identifiers and shifted dates, is very small. That is a document with a signature on it
+-- and not a constraint, so what is here is the absence of it, named.
+
+CREATE TYPE deidentification_method AS ENUM ('undetermined', 'safe_harbor', 'expert_determination');
+
+CREATE TABLE deidentification_basis (
+  only_row     boolean PRIMARY KEY DEFAULT true CHECK (only_row),
+  method       deidentification_method NOT NULL,
+  determined_by text,
+  determined_on date,
+  note         text,
+
+  -- A determination is somebody's professional judgement, so it has their name on it.
+  CONSTRAINT a_determination_is_signed CHECK (
+    method <> 'expert_determination'
+    OR (determined_by IS NOT NULL AND determined_on IS NOT NULL))
+);
+
+INSERT INTO deidentification_basis (method, note) VALUES
+('undetermined',
+ 'The scrub is not Safe Harbor: dates are shifted rather than removed, which keeps the intervals a developer needs and keeps the data a limited data set rather than de-identified. An expert determination under 164.514(b)(1) is the route that fits what this actually does, and nobody has signed one. Listed here the way never_drilled and vendor_gaps are listed: an honest gap with a name on it, rather than a claim nobody checked.');
+
+CREATE VIEW deidentification_undetermined AS
+SELECT method, note FROM deidentification_basis WHERE method = 'undetermined';
+
+COMMENT ON VIEW deidentification_undetermined IS
+  'Expected to have a row today. Empty before a scrubbed copy is treated as anything other
+   than protected health information - which, until this is signed, it is.';
 
 
 -- ════════════════════════════════════════════════════════════════════ the scrub
@@ -455,6 +501,10 @@ BEGIN
       -- that. A plain digest would be a value the table refuses, so the scrub keeps the
       -- prefix and hashes the rest - which is also what a developer wants to see.
       WHEN 'hash_path'       THEN format('CASE WHEN %s IS NULL THEN NULL ELSE facility_id::text || ''/'' || substr(md5(%L || %s), 1, 16) END', col, salt, col)
+      -- A uuid derived from the salt and the original. Unique because the original was,
+      -- consistent inside the copy so every join still holds, and derived from a salt
+      -- nobody keeps - so the copy and production share no key at all.
+      WHEN 'remap_key'       THEN format('CASE WHEN %s IS NULL THEN NULL ELSE md5(%L || %s::text)::uuid END', col, salt, col)
       -- Shaped correctly and derived from nothing: the schema refuses a credential column
       -- that is not a digest, so a sentinel string would fail the constraint on its way in.
       -- Correct shape is also what a developer needs - a login path that never sees a

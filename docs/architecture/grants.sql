@@ -260,3 +260,22 @@ SELECT a.actor, t.tbl, o.op::access_operation, false, NULL,
 FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
 CROSS JOIN (VALUES ('security_incidents'),('breach_notifications')) AS t(tbl)
 CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;
+
+
+-- ════════════════════════════════════════════════════════════════════ the basis
+
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('deidentification_basis','only_row','operational',NULL),
+ ('deidentification_basis','method','operational',NULL),
+ ('deidentification_basis','determined_by','identifying','The qualified person who signed it.'),
+ ('deidentification_basis','determined_on','operational',NULL),
+ ('deidentification_basis','note','operational',NULL);
+
+INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('deidentification_basis','determined_by','keep','A professional''s name on a determination about the data, which is not data about a resident and is what makes the determination traceable.');
+
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, 'deidentification_basis', o.op::access_operation, false, NULL,
+       'Not application data. A statement about what a copy of this database is, signed by somebody, and nothing a request has business reading or changing.'
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;

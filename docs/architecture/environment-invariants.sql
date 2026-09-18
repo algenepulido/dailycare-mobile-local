@@ -148,6 +148,10 @@ UNION ALL SELECT 'users',             count(*) FROM users
 UNION ALL SELECT 'sessions',          count(*) FROM sessions
 UNION ALL SELECT 'audit_events',      count(*) FROM audit_events;
 
+CREATE TEMP TABLE before_keys AS
+SELECT 'resident' AS kind, id AS key FROM residents
+UNION ALL SELECT 'care_day', id FROM care_days;
+
 CREATE TEMP TABLE before_secrets AS
 SELECT 'password:' || id::text AS k, password_hash AS v FROM users
 UNION ALL SELECT 'refresh:' || id::text, refresh_hash FROM sessions
@@ -162,7 +166,7 @@ SELECT (SELECT count(*) FROM checks.forced_tables) AS forced_before,
        AS first_date,
        (SELECT length(note) FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
        AS note_length,
-       (SELECT string_agg(mood::text, ',' ORDER BY id) FROM care_days) AS moods,
+       (SELECT string_agg(mood::text, ',' ORDER BY care_date) FROM care_days) AS moods,
        (SELECT string_agg(status::text || '/' || slot::text, ',' ORDER BY care_date, slot)
         FROM medication_events) AS med_shape;
 \set QUIET off
@@ -274,6 +278,53 @@ SELECT expect('not one canary survives anywhere in the database',
 SELECT table_name, column_name, pattern, hits
 FROM phi_residue(ARRAY(SELECT pattern FROM canaries));
 
+-- ── on what basis the copy is safe to hold ─────────────────────────────────────
+
+\echo ''
+\echo '── de-identification'
+
+SELECT expect('the copy does not claim to be de-identified under Safe Harbor',
+  (SELECT count(*) = 1 FROM deidentification_undetermined));
+
+SELECT expect_rejected('claiming an expert determination with nobody''s name on it', $$
+  UPDATE deidentification_basis SET method = 'expert_determination'
+$$);
+
+SELECT expect('and a signed one would be accepted, so the gap is the signature and not the design',
+  (SELECT count(*) = 1 FROM deidentification_basis));
+
+
+-- ── and no key survives the copy ───────────────────────────────────────────────
+--
+-- A scrubbed development database and a production log line shared a key. The resident's
+-- name in dev was synthetic; her mood, appetite, meals, medication status and the dates of
+-- all of them were real, and the uuid joining them to a production log - and through it to
+-- a request, a user and a facility - was the same one. "Carries no meaning" is true of a
+-- uuid by itself. A uuid that is stable across two copies of a record is a code assigned
+-- to the individual.
+
+SELECT expect('not one resident key from before the scrub survives it',
+  NOT EXISTS (SELECT 1 FROM residents WHERE id IN (SELECT key FROM before_keys WHERE kind = 'resident')));
+
+SELECT expect('nor one care day key',
+  NOT EXISTS (SELECT 1 FROM care_days WHERE id IN (SELECT key FROM before_keys WHERE kind = 'care_day')));
+
+SELECT expect('nor in the audit trail, which is not a foreign key and arrives by the same digest',
+  NOT EXISTS (SELECT 1 FROM audit_events
+              WHERE resident_id IN (SELECT key FROM before_keys WHERE kind = 'resident')));
+
+SELECT expect('and every join that held before holds after',
+  (SELECT count(*) = 0 FROM care_days c
+   WHERE NOT EXISTS (SELECT 1 FROM residents r WHERE r.id = c.resident_id))
+  AND (SELECT count(*) = 0 FROM care_day_meals m
+       WHERE NOT EXISTS (SELECT 1 FROM care_days c WHERE c.id = m.care_day_id))
+  AND (SELECT count(*) = 0 FROM media_objects o
+       WHERE NOT EXISTS (SELECT 1 FROM residents r WHERE r.id = o.resident_id)));
+
+SELECT expect('the trail still points at residents that exist, by the remapped key',
+  (SELECT count(*) > 0 FROM audit_events a
+   JOIN residents r ON r.id = a.resident_id));
+
 SELECT expect('the operational canary is still there, so the scanner still works',
   EXISTS (SELECT 1 FROM phi_residue(ARRAY['CANARY-OPERATIONAL-9c2e'])));
 
@@ -335,34 +386,35 @@ SELECT expect('the object path no longer carries a name, and still belongs to it
       AND length(object_path) = length(facility_id::text) + 17
    FROM media_objects LIMIT 1));
 
+-- By order rather than by id, because after the scrub the production id finds nothing.
+-- These checks used to look rows up by it, which is the finding in miniature: a key that
+-- still works across the two copies is the thing being removed.
 SELECT expect('the care note is the length it was, so a layout bug still reproduces',
-  (SELECT length(note) FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
+  (SELECT length(note) FROM care_days ORDER BY care_date LIMIT 1)
   = (SELECT note_length FROM before_shape));
 
 SELECT expect('an empty note is still empty rather than filler',
-  (SELECT note = '' FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000002'));
+  (SELECT note = '' FROM care_days ORDER BY care_date DESC LIMIT 1));
 
 SELECT expect('the dates moved',
-  (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
+  (SELECT care_date FROM care_days ORDER BY care_date LIMIT 1)
   <> (SELECT first_date FROM before_shape));
 
 SELECT expect('but the interval between them did not, so a two-week report still works',
-  (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000002')
-  - (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
+  (SELECT max(care_date) - min(care_date) FROM care_days)
   = (SELECT gap_days FROM before_shape));
 
 SELECT expect('a resident still in the building still has no departure date',
-  (SELECT departed_on IS NULL FROM residents WHERE id = 'e1000000-0000-0000-0000-000000000001'));
+  (SELECT count(*) = 1 FROM residents WHERE departed_on IS NULL));
 
 SELECT expect('the clinical shape is untouched, which is the point of keeping it',
-  (SELECT string_agg(mood::text, ',' ORDER BY id) FROM care_days)
+  (SELECT string_agg(mood::text, ',' ORDER BY care_date) FROM care_days)
   = (SELECT moods FROM before_shape)
   AND (SELECT string_agg(status::text || '/' || slot::text, ',' ORDER BY care_date, slot)
        FROM medication_events) = (SELECT med_shape FROM before_shape));
 
 SELECT expect('a meal recorded as not observed is still not observed',
-  (SELECT amount IS NULL AND happened = false FROM care_day_meals
-   WHERE care_day_id = 'cd000000-0000-0000-0000-000000000001' AND slot = 'lunch'));
+  (SELECT amount IS NULL AND happened = false FROM care_day_meals WHERE slot = 'lunch'));
 
 SELECT expect('nothing was orphaned',
   NOT EXISTS (SELECT 1 FROM care_days c WHERE NOT EXISTS

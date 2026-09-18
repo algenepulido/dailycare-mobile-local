@@ -51,12 +51,22 @@ docker run -d --name "$NAME" -e POSTGRES_PASSWORD=review \
   echo "pulled once first: docker pull $IMAGE" >&2
   exit 1; }
 
-# A real query rather than pg_isready. The image starts a temporary server to initialise
-# itself and then restarts it, and pg_isready answers yes to the first one - so the next
-# command lands on a socket that is about to disappear. Waiting for a query to succeed
-# waits for the server that will still be there.
+# The image starts a temporary server to initialise itself and then shuts it down and
+# starts the real one. pg_isready answers yes to the first; so does a query, right up until
+# the moment it stops - which is how this failed twice, once with "no such file or
+# directory" and once with "the database system is shutting down". So: wait for the line
+# the image prints when the init process is finished, and only then for a query.
 ready=0
-for _ in $(seq 1 90); do
+for _ in $(seq 1 120); do
+  if docker logs "$NAME" 2>&1 | grep -q 'PostgreSQL init process complete'; then
+    ready=1; break
+  fi
+  sleep 1
+done
+[ "$ready" = 1 ] || { echo "the database never finished initialising" >&2; exit 1; }
+
+ready=0
+for _ in $(seq 1 60); do
   if docker exec -u postgres "$NAME" psql -q -tAc 'SELECT 1' >/dev/null 2>&1; then
     ready=1; break
   fi

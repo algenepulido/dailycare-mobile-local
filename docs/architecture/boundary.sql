@@ -116,7 +116,7 @@ CREATE TABLE imported_content (
 
   title         text,
   body          text,
-  media_id      uuid REFERENCES media_objects(id) ON DELETE SET NULL,
+  media_id      uuid REFERENCES media_objects(id) ON DELETE SET NULL ON UPDATE CASCADE,
 
   imported_at   timestamptz NOT NULL DEFAULT now(),
   UNIQUE (source, external_ref, resident_id),
@@ -124,7 +124,7 @@ CREATE TABLE imported_content (
   -- The resident and the facility together. See schema.sql: two references each
   -- holding is not the same as the pair agreeing.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE INDEX ON imported_content (resident_id, kind);
@@ -146,7 +146,7 @@ CREATE TABLE content_responses (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id   uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
   resident_id   uuid NOT NULL,
-  content_id    uuid NOT NULL REFERENCES imported_content(id) ON DELETE CASCADE,
+  content_id    uuid NOT NULL REFERENCES imported_content(id) ON DELETE CASCADE ON UPDATE CASCADE,
 
   response      reminiscence_response NOT NULL,
   note          text NOT NULL DEFAULT '',
@@ -156,7 +156,7 @@ CREATE TABLE content_responses (
   -- The resident and the facility together. See schema.sql: two references each
   -- holding is not the same as the pair agreeing.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 CREATE INDEX ON content_responses (resident_id, observed_at DESC);
