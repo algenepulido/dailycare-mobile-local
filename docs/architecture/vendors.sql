@@ -190,7 +190,7 @@ INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
 ('expo','operational','holds',NULL,'Build metadata.'),
 ('appstores','phi','could_receive',
  'Platform crash reporting is left at its default, which sends a stack trace and no application state. No custom crash payload is attached, and nothing that renders a resident record catches an exception into a report.',
- NULL),
+ 'The network half is checked rather than trusted: the shipping build declares no INTERNET permission at all, confirmed against the built artifact and demonstrated by a debug build being unable to reach its own development server. A crash report is the platform''s own channel and is not affected by that, which is why it is listed here.'),
 ('appstores','operational','holds',NULL,NULL),
 ('stripe','phi','none',NULL,NULL),
 ('stripe','identifying','holds',NULL,'A billing contact at the facility, who is staff.'),

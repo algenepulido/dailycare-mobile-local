@@ -154,7 +154,7 @@ INSERT INTO encryption_controls (id, covers, mechanism, key_management, state, n
 ('at_rest_device', 'A care day on a caregiver''s phone, and a photograph waiting to upload',
  'Credentials in the platform keychain; care data not persisted, or persisted encrypted; photographs staged in the cache directory and purged once the upload is acknowledged',
  'Platform keystore, per device', 'planned',
- 'The fourth place a record rests, and the only one that leaves the building. The Milestone 1 client keeps its state in AsyncStorage, which is not encrypted, and stages photographs on the file system - which is correct for synthetic data and is the whole design of that milestone. The moment it holds a real care day it is a store, on a device that goes home in a pocket. revoke_all_sessions() is the lost-phone control for the server; this is the one for what is already on the phone. Milestone 3.',
+ 'The fourth place a record rests, and the only one that leaves the building. Checked on a device rather than assumed: the app was built, installed on an emulator, driven through setup, and its storage pulled off with adb - a plain SQLite file with the names in it as they were typed, no decryption needed. That is what AsyncStorage is, and for milestone one against made-up residents it is the right thing; the moment the client holds a real care day it is a store, on a device that goes home in a pocket. revoke_all_sessions() is the lost-phone control for the server, and this is the one for what is already on the phone. The client work is Milestone 3; what was fixed now is the half that was already wrong - clearing a session left the unsent day and the photographs behind.',
  DATE '2026-09-18'),
 
 ('signed_url_lifetime', 'Links to photographs',
