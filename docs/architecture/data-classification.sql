@@ -245,6 +245,7 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('retention_policies','care_record_days','operational',NULL),
  ('retention_policies','media_days','operational',NULL),
  ('retention_policies','audit_days','operational',NULL),
+ ('retention_policies','care_record_basis','operational','What the number rests on, which is a citation rather than anything about a person.'),
  ('retention_policies','updated_by','operational',NULL),
  ('retention_policies','updated_at','operational',NULL);
 

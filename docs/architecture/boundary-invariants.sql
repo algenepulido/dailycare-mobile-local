@@ -270,8 +270,8 @@ SELECT expect('neither appears in the audit trail in words',
 \echo '── retention'
 
 \set QUIET on
-INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days)
-VALUES ('f1000000-0000-0000-0000-000000000001', 30, 7, 2190);
+INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days, care_record_basis)
+VALUES ('f1000000-0000-0000-0000-000000000001', 30, 7, 2190, 'State long-term-care record retention, fixture value');
 UPDATE residents SET departed_on = current_date - 400
 WHERE id = 'e1000000-0000-0000-0000-000000000001';
 \set QUIET off

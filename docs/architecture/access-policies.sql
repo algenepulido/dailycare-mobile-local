@@ -130,8 +130,12 @@ CREATE POLICY residents_read ON residents FOR SELECT
 -- Found by the access matrix, which compares what the catalogue permits against what the
 -- model claims, and reported a DELETE policy on a table nothing is supposed to be deleted
 -- from. Every write policy below is spelled out for the same reason.
+-- A resident is admitted into a facility that has an executed agreement, or not at all.
+-- Without the second predicate a record could be held for a covered entity with no
+-- contract covering it, which is the finding rather than the paperwork.
 CREATE POLICY residents_insert ON residents FOR INSERT
-  WITH CHECK (app_is_care_manager(facility_id));
+  WITH CHECK (app_is_care_manager(facility_id)
+              AND facility_is_covered(facility_id));
 
 CREATE POLICY residents_update ON residents FOR UPDATE
   USING      (app_is_care_manager(facility_id))

@@ -60,9 +60,9 @@ INSERT INTO facilities (id, name, timezone) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'Cedar House', 'America/Chicago'),
   ('f2000000-0000-0000-0000-000000000002', 'Birch Court', 'America/Chicago');
 
-INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days) VALUES
-  ('f1000000-0000-0000-0000-000000000001', 30, 7, 2190),
-  ('f2000000-0000-0000-0000-000000000002', 30, 7, 2190);
+INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days, care_record_basis) VALUES
+  ('f1000000-0000-0000-0000-000000000001', 30, 7, 2190, 'State long-term-care record retention, fixture value'),
+  ('f2000000-0000-0000-0000-000000000002', 30, 7, 2190, 'State long-term-care record retention, fixture value');
 
 INSERT INTO users (id, email, display_name) VALUES
   ('a0000000-0000-0000-0000-00000000000a', 'maria@example.test',  'Maria'),
@@ -133,6 +133,32 @@ VALUES (now() - interval '10 years', 'f1000000-0000-0000-0000-000000000001',
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_retention;
 \set QUIET off
+
+
+-- ── the floor under the windows ────────────────────────────────────────────────
+--
+-- A facility that decided thirty days got thirty days, and the audit trail is the
+-- accounting of disclosures it owes a resident for six years and the record of security
+-- activity a business associate must keep for the same. Both would have been destroyed on
+-- schedule by a job working exactly as designed.
+
+\echo ''
+\echo '── what a facility may decide, and what it may not'
+
+SELECT expect_refused('an audit window of thirty days', $$
+  INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days,
+                                  care_record_basis)
+  VALUES ('f2000000-0000-0000-0000-000000000002', 365, 365, 30, 'a number')
+$$);
+
+SELECT expect_refused('or a care-record number resting on nothing anybody can name', $$
+  INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days,
+                                  care_record_basis)
+  VALUES ('f3000000-0000-0000-0000-000000000003', 365, 365, 2190, '   ')
+$$);
+
+SELECT expect('but six years exactly is accepted, so the floor is a floor and not a wall',
+  (SELECT count(*) = 2 FROM retention_policies WHERE audit_days = 2190));
 
 
 -- ── what the job thinks is due ─────────────────────────────────────────────────

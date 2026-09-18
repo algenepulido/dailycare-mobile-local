@@ -92,7 +92,8 @@ END; $$ LANGUAGE plpgsql;
 
 INSERT INTO facilities (id, name, timezone) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'Cedar House', 'America/Chicago'),
-  ('f2000000-0000-0000-0000-000000000002', 'Birch House', 'America/Chicago');
+  ('f2000000-0000-0000-0000-000000000002', 'Birch House', 'America/Chicago'),
+  ('f3000000-0000-0000-0000-000000000003', 'Aspen Lodge', 'America/Denver');
 
 INSERT INTO users (id, email, display_name) VALUES
   ('a0000000-0000-0000-0000-00000000000a', 'maria@example.test',   'Maria'),    -- caregiver, Cedar
@@ -302,6 +303,94 @@ SELECT expect_rows('no policy in the access model permits an application role to
   $$SELECT * FROM pg_policies
     WHERE schemaname = 'public' AND cmd IN ('DELETE','ALL')
       AND NOT (roles::text LIKE '%dailycare_retention%')$$);
+
+
+-- ── the agreement that has to be in place first ────────────────────────────────
+--
+-- The package modelled every agreement flowing down and nothing about the one flowing up.
+-- A facility could be created and a resident admitted into it with no business associate
+-- agreement, and the vendor register would have said every downstream agreement was signed
+-- and been right.
+
+\echo ''
+\echo '── admitting a resident'
+
+\set QUIET on
+INSERT INTO facility_agreements (facility_id, executed_on, notification_contact,
+                                 notification_days, counterparty)
+VALUES ('f1000000-0000-0000-0000-000000000001', current_date - 30,
+        'compliance@cedar.example', 30, 'Cedar House Operating Company'),
+       ('f2000000-0000-0000-0000-000000000002', current_date - 30,
+        'compliance@birch.example', 60, 'Birch House Operating Company');
+
+-- Aspen is the building being set up: a manager, no agreement, and nobody admitted. It is
+-- what the gate is for, and it is a separate person and a separate building so that the
+-- checks above about who sees whom keep counting what they were counting.
+INSERT INTO users (id, email, display_name) VALUES
+  ('e0000000-0000-0000-0000-00000000000e', 'sam@aspen.test', 'Sam');
+INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
+  ('fc000000-0000-0000-0000-00000000000c', 'f3000000-0000-0000-0000-000000000003',
+   'e0000000-0000-0000-0000-00000000000e', 'care_manager', 'active');
+\set QUIET off
+
+SELECT expect('the two running buildings are covered and the one being set up is not',
+  facility_is_covered('f1000000-0000-0000-0000-000000000001')
+  AND facility_is_covered('f2000000-0000-0000-0000-000000000002')
+  AND NOT facility_is_covered('f3000000-0000-0000-0000-000000000003'));
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false) \gset
+\set QUIET on
+INSERT INTO residents (facility_id, display_name)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'Admitted under an agreement');
+\set QUIET off
+SELECT expect_rows('a manager admits a resident into a covered facility', 1,
+  $$SELECT id FROM residents WHERE display_name = 'Admitted under an agreement'$$);
+RESET ROLE;
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'e0000000-0000-0000-0000-00000000000e', false) \gset
+SELECT expect_refused('and the manager at the uncovered building is refused one', $$
+  INSERT INTO residents (facility_id, display_name)
+  VALUES ('f3000000-0000-0000-0000-000000000003', 'Admitted under nothing')
+$$);
+RESET ROLE;
+
+\set QUIET on
+INSERT INTO facility_agreements (facility_id, executed_on, notification_contact, counterparty)
+VALUES ('f3000000-0000-0000-0000-000000000003', current_date + 30, 'later@example', 'Signed, starts next month');
+\set QUIET off
+SELECT expect('an agreement dated next month does not cover today',
+  NOT facility_is_covered('f3000000-0000-0000-0000-000000000003'));
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'e0000000-0000-0000-0000-00000000000e', false) \gset
+SELECT expect_refused('so admission is still refused the day before it starts', $$
+  INSERT INTO residents (facility_id, display_name)
+  VALUES ('f3000000-0000-0000-0000-000000000003', 'Admitted a month early')
+$$);
+RESET ROLE;
+
+SELECT expect_rows('no resident is held under no agreement', 0,
+  'SELECT * FROM residents_without_agreement');
+
+-- The situation nothing else would notice: the contract ends and the records stay.
+\set QUIET on
+UPDATE facility_agreements SET terminated_on = current_date
+WHERE facility_id = 'f1000000-0000-0000-0000-000000000001';
+\set QUIET off
+
+SELECT expect_rows('terminating an agreement with residents inside is reported', 1,
+  'SELECT * FROM agreements_expiring_with_residents');
+
+SELECT expect('and those residents now show as held under nothing',
+  (SELECT count(*) > 0 FROM residents_without_agreement));
+
+\set QUIET on
+UPDATE facility_agreements SET terminated_on = NULL
+WHERE facility_id = 'f1000000-0000-0000-0000-000000000001';
+\set QUIET off
+SELECT expect_rows('put back', 0, 'SELECT * FROM residents_without_agreement');
 
 
 -- ── the tables that say who people are ─────────────────────────────────────────

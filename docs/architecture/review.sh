@@ -51,16 +51,24 @@ docker run -d --name "$NAME" -e POSTGRES_PASSWORD=review \
   echo "pulled once first: docker pull $IMAGE" >&2
   exit 1; }
 
-for _ in $(seq 1 60); do
-  docker exec "$NAME" pg_isready -q 2>/dev/null && break
+# A real query rather than pg_isready. The image starts a temporary server to initialise
+# itself and then restarts it, and pg_isready answers yes to the first one - so the next
+# command lands on a socket that is about to disappear. Waiting for a query to succeed
+# waits for the server that will still be there.
+ready=0
+for _ in $(seq 1 90); do
+  if docker exec -u postgres "$NAME" psql -q -tAc 'SELECT 1' >/dev/null 2>&1; then
+    ready=1; break
+  fi
   sleep 1
 done
-docker exec "$NAME" pg_isready -q || { echo "the database never came up" >&2; exit 1; }
+[ "$ready" = 1 ] || { echo "the database never came up" >&2; exit 1; }
 
 # An ordinary user: may create databases and roles, is not a superuser. The same shape as
 # the administrative user on a managed instance.
 docker exec -u postgres "$NAME" psql -q -c \
-  "CREATE ROLE reviewer LOGIN CREATEDB CREATEROLE PASSWORD 'review';" >/dev/null
+  "CREATE ROLE reviewer LOGIN CREATEDB CREATEROLE PASSWORD 'review';" >/dev/null \
+  || { echo "could not create the reviewer role" >&2; exit 1; }
 
 run() {
   docker exec -u postgres -w /sql \

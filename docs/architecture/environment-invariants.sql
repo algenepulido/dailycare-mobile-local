@@ -52,8 +52,8 @@ INSERT INTO deployment (environment, label) VALUES ('production', 'live');
 INSERT INTO facilities (id, name, timezone) VALUES
   ('f1000000-0000-0000-0000-000000000001', 'Cedar House CANARY-OPERATIONAL-9c2e', 'America/Chicago');
 
-INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days)
-VALUES ('f1000000-0000-0000-0000-000000000001', 2555, 2555, 2190);
+INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days, care_record_basis)
+VALUES ('f1000000-0000-0000-0000-000000000001', 2555, 2555, 2190, 'State long-term-care record retention, fixture value');
 
 -- The credential canaries have to be the shape the schema demands, or the row never
 -- lands and the check that follows would be searching an empty table. Base64 for a

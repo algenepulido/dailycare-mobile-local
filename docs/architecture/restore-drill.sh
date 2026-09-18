@@ -66,7 +66,7 @@ CANARY="DRILL-CANARY-$(date +%s)"
 if [ "$BUILD" = 1 ]; then
   say "building $SOURCE"
   createdb "$SOURCE" || exit 1
-  for f in schema.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
+  for f in schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
            retention.sql environments.sql vendors.sql backup-recovery.sql \
            phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql \
            checks-support.sql; do
@@ -84,8 +84,8 @@ GRANT SELECT ON deployment TO dailycare_app;
 INSERT INTO deployment (environment, label) VALUES ('production', 'drill source');
 INSERT INTO facilities (id, name, timezone)
   VALUES ('f1000000-0000-0000-0000-000000000001','Cedar House','America/Chicago');
-INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days)
-  VALUES ('f1000000-0000-0000-0000-000000000001', 2555, 2555, 2190);
+INSERT INTO retention_policies (facility_id, care_record_days, media_days, audit_days, care_record_basis)
+  VALUES ('f1000000-0000-0000-0000-000000000001', 2555, 2555, 2190, 'State long-term-care record retention, fixture value');
 INSERT INTO users (id, email, display_name)
   VALUES ('a0000000-0000-0000-0000-00000000000a','maria@cedar.test','Maria');
 INSERT INTO facility_members (id, facility_id, user_id, role, state)

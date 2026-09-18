@@ -195,3 +195,68 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('app_privileges','privilege','operational',NULL),
  ('app_privileges','columns','operational',NULL),
  ('app_privileges','note','operational',NULL);
+
+
+-- ════════════════════════════════════════════════════════════════════ the agreements
+--
+-- Classified here rather than in agreements.sql, which is applied before the
+-- classification table exists. An agreement is a contract between two companies. The counterparty is a person who
+-- signed on the facility's behalf, and the notification contact is who to call at four in
+-- the morning - both identify somebody, neither is about a resident.
+
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('facility_agreements','id','operational',NULL),
+ ('facility_agreements','facility_id','operational',NULL),
+ ('facility_agreements','executed_on','operational',NULL),
+ ('facility_agreements','terminated_on','operational',NULL),
+ ('facility_agreements','notification_contact','identifying','A person to reach at the facility when a breach has to be reported.'),
+ ('facility_agreements','notification_days','operational',NULL),
+ ('facility_agreements','counterparty','identifying','Who signed, on the facility''s side.'),
+ ('facility_agreements','note','operational',NULL);
+
+INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('facility_agreements','notification_contact','redact_text',NULL),
+ ('facility_agreements','counterparty','synthetic_name',NULL);
+
+-- The matrix: nobody touches the agreements through the application. They are executed by
+-- people and recorded by an operator, and the application only ever asks whether one
+-- exists - through facility_is_covered(), which is a function rather than a grant.
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, 'facility_agreements', o.op::access_operation, false, NULL,
+       'Not application data. The one question a request asks of it - is this facility covered - is answered by a definer function, so the answer is available and the contract is not.'
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;
+
+
+-- ════════════════════════════════════════════════════════════════════ incidents
+--
+-- What happened and who was told. Deliberately says nothing about a resident: the summary
+-- is what happened in words, never what the record said, and the constraint on
+-- carries_phi refuses a row that claims otherwise.
+
+INSERT INTO data_classification (table_name, column_name, class, note)
+SELECT 'security_incidents', c.column_name, 'operational', NULL
+FROM information_schema.columns c
+WHERE c.table_schema = 'public' AND c.table_name = 'security_incidents'
+  AND c.column_name <> 'discovered_by';
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('security_incidents','discovered_by','identifying','Who found it. A person, and staff rather than a patient.');
+
+INSERT INTO data_classification (table_name, column_name, class, note)
+SELECT 'breach_notifications', c.column_name, 'operational', NULL
+FROM information_schema.columns c
+WHERE c.table_schema = 'public' AND c.table_name = 'breach_notifications'
+  AND c.column_name <> 'notified_whom';
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('breach_notifications','notified_whom','identifying','The contact at the facility, as it was at the time.');
+
+INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('security_incidents','discovered_by','synthetic_name',NULL),
+ ('breach_notifications','notified_whom','redact_text',NULL);
+
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, t.tbl, o.op::access_operation, false, NULL,
+       'Not application data. An incident is recorded by the people handling it, and a request has no reason to read the register of what has gone wrong across every customer.'
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (VALUES ('security_incidents'),('breach_notifications')) AS t(tbl)
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;

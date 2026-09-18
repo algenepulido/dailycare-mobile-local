@@ -16,6 +16,9 @@ constraint and a constraint are different things, and only one of them stops a m
 | `architecture-diagram.md` | The four diagrams: what the pieces are, where a resident's record exists, one request end to end, and the one flow that leaves the database. |
 | `authentication.sql` | Sessions, refresh rotation and single-use tokens. What could be moved out of a handler and into the database. |
 | `auth-invariants.sql` | Including the milestone's own acceptance criteria: reinstall and sign back in, and two authorised devices. |
+| `agreements.sql` | The agreement that has to be in place before a resident is admitted, and what happens when one ends with residents inside. |
+| `incidents.sql` | Somewhere to record an incident, the four factors that make a conclusion possible, and a clock that runs. |
+| `incident-invariants.sql` | One incident walked from discovery to notification, with the clock moved back at each step. |
 | `identity-policies.sql` | Row-level security on the tables that say who people are, which nine PHI tables had and twenty-five others did not. |
 | `grants.sql` | What the application is granted, as a table, applied from it and compared to the catalogue both ways. |
 | `access-matrix.sql` | The role and access-control matrix as a table, checked against the catalogue it describes. |
@@ -60,7 +63,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 381 checks across eleven suites
+./verify.sh                  # 412 checks across twelve suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -80,7 +83,7 @@ psql -d postgres -f roles.sql          # once per cluster
 
 createdb dc_check
 for f in schema.sql authentication.sql access-policies.sql data-classification.sql \
-         identity-policies.sql access-matrix.sql \
+         agreements.sql incidents.sql identity-policies.sql access-matrix.sql \
          audit-logging.sql retention.sql environments.sql vendors.sql \
          backup-recovery.sql phi-safe-logging.sql encryption-and-secrets.sql \
          boundary.sql grants.sql \
@@ -163,6 +166,12 @@ SELECT * FROM grant_drift;            -- must be empty, in both directions
 SELECT * FROM app_can_delete;         -- must be empty
 SELECT * FROM app_owns_something;     -- must be empty
 SELECT * FROM app_reaches_the_register;   -- must be empty
+
+SELECT * FROM residents_without_agreement;  -- must be empty
+SELECT * FROM agreements_expiring_with_residents;  -- the one nothing else notices
+SELECT * FROM notifications_overdue;        -- must be empty
+SELECT * FROM notifications_late;           -- kept on record, not refused
+SELECT * FROM incidents_unassessed;         -- must be empty
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -305,6 +314,27 @@ that every one of its services reads and writes directly, so joining the two dat
 a foreign data wrapper, a dblink, or simply a DailyCare schema in that instance — puts nine
 services and their vendors into scope with nothing published to say so. It is the cheapest
 thing to propose, and `boundary_database_joins` must be empty.
+
+**A resident is admitted into a facility that has an agreement, or not at all.** The
+package modelled every agreement flowing down — the platform, the messaging vendor, the
+clinical system — and nothing about the one flowing up. A facility could be created and a
+resident admitted with no business associate agreement, and the vendor register would have
+reported every downstream agreement signed and been right. Admission is now a policy that
+consults the agreement, and the case nothing else would notice — a contract ending while
+residents are still inside — is a view.
+
+**An incident has somewhere to go, and the clock is the agreement's.** The four factors
+must all be filled before a conclusion may be recorded, because a conclusion of "not a
+breach" reached without the assessment is the answer the rule presumes against. The
+deadline is the window the agreement sets or the rule's sixty days, whichever is shorter;
+`notifications_overdue` must be empty and `notifications_late` deliberately need not be —
+a notification sent late is still a notification and the record of it has to survive.
+
+**The audit window has a floor.** Six years, because the trail is the accounting of
+disclosures a facility owes a resident and the record of security activity a business
+associate must retain, and a facility that chose thirty days would have had both destroyed
+on schedule by a job working exactly as designed. The care-record number stays the
+facility's to choose and now has to name what it rests on.
 
 **Row-level security is on the tables that say who people are, too.** Nine PHI tables
 forced it and twenty-five others did not, and those twenty-five included `users`,

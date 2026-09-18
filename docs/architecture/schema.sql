@@ -585,9 +585,23 @@ CREATE TABLE retention_policies (
   care_record_days       integer NOT NULL,   -- after a resident departs
   media_days             integer NOT NULL,
   audit_days             integer NOT NULL,
+
+  -- What the care-record number rests on. A facility that decides a number without being
+  -- able to name the statute or the policy behind it has decided a number, and a licensed
+  -- long-term-care facility is subject to a state minimum measured in years.
+  care_record_basis      text NOT NULL,
+
   updated_by             uuid REFERENCES users(id),
   updated_at             timestamptz NOT NULL DEFAULT now(),
-  CHECK (care_record_days > 0 AND media_days > 0 AND audit_days > 0)
+  CHECK (care_record_days > 0 AND media_days > 0),
+  CHECK (length(btrim(care_record_basis)) > 0),
+
+  -- The floor the rule sets, and the only one of the three that is not the facility's to
+  -- choose. The audit trail is the accounting of disclosures a facility owes a resident
+  -- for six years, and the record of security activity a business associate must retain
+  -- for the same. A facility that set thirty days would have had both destroyed on
+  -- schedule by a job working exactly as designed.
+  CONSTRAINT audit_window_is_at_least_six_years CHECK (audit_days >= 2190)
 );
 
 COMMENT ON TABLE retention_policies IS

@@ -25,14 +25,14 @@ for tool in psql createdb dropdb; do
     exit 1; }
 done
 
-MODEL=(schema.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
+MODEL=(schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql
        retention.sql environments.sql vendors.sql backup-recovery.sql
        phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql
        checks-support.sql)
 SUITES=(schema-invariants.sql access-invariants.sql audit-invariants.sql
         retention-invariants.sql environment-invariants.sql vendor-invariants.sql
         backup-invariants.sql logging-invariants.sql auth-invariants.sql
-        secrets-invariants.sql boundary-invariants.sql)
+        secrets-invariants.sql boundary-invariants.sql incident-invariants.sql)
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
