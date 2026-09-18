@@ -48,25 +48,34 @@ COMMENT ON VIEW never_log IS
 -- The application's logger calls this on the structured line it is about to emit, in
 -- development and in test. It is a guard rather than a filter: the answer is not "we
 -- removed the name", it is "this line should not have been written".
+-- Every descendant, not the first two levels. The first version looked at the keys of the
+-- object and of objects one level down, which meant an array of rows passed, and an object
+-- two levels down passed - and a serialised row nested inside a request context is exactly
+-- where this happens. jsonb_path_query with '$.**' walks the whole document.
 CREATE OR REPLACE FUNCTION log_scan(line jsonb)
 RETURNS TABLE (problem text, field text)
 LANGUAGE sql STABLE
   SET search_path = pg_catalog, public AS $$
-  -- A forbidden field name used as a key.
-  SELECT 'field name', k
-  FROM jsonb_object_keys(line) k
-  WHERE k IN (SELECT field FROM never_log)
-  UNION ALL
-  -- A nested object carrying one.
-  SELECT 'nested field name', k2
-  FROM jsonb_each(line) e, jsonb_object_keys(e.value) k2
-  WHERE jsonb_typeof(e.value) = 'object' AND k2 IN (SELECT field FROM never_log)
+  SELECT DISTINCT
+         CASE WHEN d.obj = line THEN 'field name' ELSE 'nested field name' END,
+         k
+  FROM jsonb_path_query(line, '$.**') AS d(obj)
+  CROSS JOIN LATERAL jsonb_object_keys(d.obj) AS k
+  WHERE jsonb_typeof(d.obj) = 'object'
+    AND k IN (SELECT field FROM never_log)
 $$;
 
 COMMENT ON FUNCTION log_scan(jsonb) IS
-  'Returns nothing for a line that is safe to emit. Catches the shape of the mistake - a
-   field called note, or display_name, appearing in a log line - rather than trying to
-   recognise a resident''s name, which is not a thing a function can do.';
+  'Returns nothing for a line that is safe to emit.
+
+   What it is: a guard against the shape of the mistake - a field called note, or
+   display_name, appearing anywhere in a log line, at any depth, including inside an array
+   of serialised rows.
+
+   What it is not, and should not be described as: a scanner for free text. A sentence
+   containing a resident''s name passes, by design, because recognising that is not
+   something a function can do. The mistake this is built for is a developer serialising a
+   row, and a serialised row carries its column names with it.';
 
 
 -- ════════════════════════════════════════════════════════════════════ what may be sent
@@ -90,8 +99,12 @@ CREATE TABLE notification_templates (
 CREATE OR REPLACE FUNCTION notification_placeholder_allowed(p text)
 RETURNS boolean LANGUAGE sql IMMUTABLE
   SET search_path = pg_catalog, public AS $$
-  SELECT p IN ('facility_name',   -- a business, not a person
-                'app_name',
+  -- facility_name was here, and is not any more. It is a business name, which is why it
+  -- looked harmless; but a building name and a phone number together say that somebody
+  -- connected to that number is in memory care at that building, and an invitation is the
+  -- one message that goes to a number nobody has confirmed yet. It is shown inside the
+  -- app, after the recipient has authenticated, where it is useful and costs nothing.
+  SELECT p IN ('app_name',
                 'code',           -- a sign-in code
                 'link',           -- opens the app, which then authenticates
                 'count')          -- "2 new updates"
@@ -104,10 +117,31 @@ DECLARE used text[];
 BEGIN
   SELECT coalesce(array_agg(m[1]), '{}') INTO used
   FROM regexp_matches(body, '\{([a-z_]+)\}', 'g') m;
+
   -- Every placeholder in the body must be declared, and every declared one allowed.
-  RETURN NOT EXISTS (SELECT 1 FROM unnest(used) u WHERE NOT (u = ANY(declared)))
-     AND NOT EXISTS (SELECT 1 FROM unnest(declared) d WHERE NOT notification_placeholder_allowed(d));
+  IF EXISTS (SELECT 1 FROM unnest(used) u WHERE NOT (u = ANY(declared)))
+     OR EXISTS (SELECT 1 FROM unnest(declared) d
+                WHERE NOT notification_placeholder_allowed(d)) THEN
+    RETURN false;
+  END IF;
+
+  -- And the literal text. The placeholder rule stopped a template interpolating a name
+  -- and accepted any sentence an author typed: "Patient Cathy had a fall" was a valid
+  -- template. A capitalised word outside a placeholder is a name often enough that
+  -- refusing it is cheaper than reviewing it, and a template body has no reason to contain
+  -- one - the only proper noun a notification is allowed is {app_name}.
+  -- A capitalised word that is not starting a sentence. The first attempt at this refused
+  -- every template in the file, because it treated the capital at the start of "There is a
+  -- new update" as a name - which is the failure mode of a heuristic written in one go and
+  -- not run.
+  RETURN NOT (regexp_replace(body, '\{[a-z_]+\}', '', 'g') ~ '[^.!?]\s+[A-Z][a-z]');
 END; $$;
+
+COMMENT ON FUNCTION notification_body_is_safe(text, text[]) IS
+  'Two rules, and the second was missing. The first says a template may only interpolate
+   what it declares and may only declare what is allowed. The second says the fixed text
+   cannot carry a name either, which the first does not cover at all: an author typing a
+   resident''s name straight into the body was a valid template until this was added.';
 
 ALTER TABLE notification_templates
   ADD CONSTRAINT notification_body_carries_nothing_clinical
@@ -117,8 +151,8 @@ ALTER TABLE notification_templates
 COMMENT ON CONSTRAINT notification_body_carries_nothing_clinical ON notification_templates IS
   'The tempting version of this feature is "Cathy had a difficult night", and it puts a
    health fact on a lock screen in a room with other people in it. There is no placeholder
-   for a resident name and none for anything clinical, so the tempting version cannot be
-   written down, let alone sent.';
+   for a resident name and none for anything clinical, and the fixed text cannot carry one
+   either - so the tempting version cannot be written down, let alone sent.';
 
 
 INSERT INTO notification_templates (id, channel, audience, title, body, placeholders, note) VALUES
@@ -131,8 +165,8 @@ INSERT INTO notification_templates (id, channel, audience, title, body, placehol
  'A count is not a clinical fact.'),
 
 ('family_invitation', 'sms', 'family',
- NULL, '{facility_name} has invited you to {app_name}. {link}', ARRAY['facility_name','app_name','link'],
- 'A facility name is a business name. The link opens the app, which then authenticates - it is not a link to a record.'),
+ NULL, 'You have been invited to {app_name}. {link}', ARRAY['app_name','link'],
+ 'No building name. An invitation goes to a number nobody has confirmed, and a building name beside it says somebody connected to that number is in memory care there. Who invited them is shown inside the app once they have signed in, which is where it is useful anyway. The link opens the app, which then authenticates - it is not a link to a record.'),
 
 ('sign_in_code', 'sms', 'any',
  NULL, 'Your {app_name} sign-in code is {code}.', ARRAY['app_name','code'],
@@ -194,6 +228,14 @@ INSERT INTO monitoring_signals (id, watches, why, alert_body, audience) VALUES
 ('media_orphans', 'Objects in storage with no row, and rows with no object',
  'Either direction means the handshake broke, and one of them leaves a photograph in a bucket with nothing that knows whose it was.',
  '{count} orphaned objects in {bucket}', 'engineering'),
+
+('bulk_read', 'Residents read by one session in a short window',
+ 'policy_denials catches somebody reaching for what is not theirs. Nothing caught somebody taking all of what is - a valid session, every resident in a building, in a minute. That is what the read-auditing gap permits, and watching for it is the compensating control while reads are a convention rather than a trigger.',
+ '{user} read {count} residents in {window}, against a usual {baseline}', 'on-call'),
+
+('read_audit_ratio', 'Reads recorded against reads served',
+ 'The read trail is written by the application calling audit_read on the path that serves resident data. If that call is ever skipped the ratio drops, and nothing else would say so - a convention that has stopped being kept looks exactly like a quiet day.',
+ 'recorded reads are {percent} of served reads over {window}', 'engineering'),
 
 ('backup_age', 'Time since the last verified snapshot',
  'A backup nobody checked is a backup nobody has.',

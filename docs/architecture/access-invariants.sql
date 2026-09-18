@@ -305,6 +305,126 @@ SELECT expect_rows('no policy in the access model permits an application role to
       AND NOT (roles::text LIKE '%dailycare_retention%')$$);
 
 
+-- ── breaking the glass, and the record of who broke it ─────────────────────────
+--
+-- The package said there is no admin bypass and meant it as a guarantee. It is one, and
+-- 164.312(a)(2)(ii) still requires a documented way to reach a record in an emergency -
+-- a memory-care facility at three in the morning with a resident in hospital.
+
+\echo ''
+\echo '── emergency access'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false) \gset
+SELECT expect_rows('the caregiver at the other building reads nothing at this one', 0,
+  $$SELECT id FROM residents WHERE facility_id = 'f1000000-0000-0000-0000-000000000001'$$);
+RESET ROLE;
+
+SELECT expect_refused('a grant with no reason worth the name', $$
+  INSERT INTO emergency_access (facility_id, granted_to, granted_by, reason, expires_at)
+  VALUES ('f1000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-00000000000d',
+          'somebody', 'emergency', now() + interval '4 hours')
+$$);
+
+SELECT expect_refused('or one that outlives the emergency', $$
+  INSERT INTO emergency_access (facility_id, granted_to, granted_by, reason, expires_at)
+  VALUES ('f1000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-00000000000d',
+          'somebody', 'A resident has been taken to hospital and the manager is unreachable.',
+          now() + interval '30 days')
+$$);
+
+\set QUIET on
+INSERT INTO emergency_access (facility_id, granted_to, granted_by, reason, expires_at)
+VALUES ('f1000000-0000-0000-0000-000000000001','d0000000-0000-0000-0000-00000000000d',
+        'Priya Raman, on call', 'A resident has been taken to hospital and the care manager on duty is unreachable.',
+        now() + interval '4 hours');
+\set QUIET off
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false) \gset
+SELECT expect('with a grant, he reaches the building he was sent to',
+  (SELECT count(*) > 0 FROM residents
+   WHERE facility_id = 'f1000000-0000-0000-0000-000000000001'));
+RESET ROLE;
+
+SELECT expect_rows('and somebody can see at a glance who currently holds one', 1,
+  'SELECT * FROM emergency_access_open');
+
+SELECT expect('the grant is in the trail like any other write',
+  (SELECT count(*) >= 1 FROM audit_events WHERE action = 'emergency_access.insert'));
+
+-- Revoked rather than back-dated: the constraint refuses an expiry before the grant, which
+-- is the right refusal and means the way a grant ends is the way it ends in life.
+\set QUIET on
+UPDATE emergency_access SET revoked_at = now();
+\set QUIET off
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false) \gset
+SELECT expect_rows('once it is revoked he is back to his own building', 0,
+  $$SELECT id FROM residents WHERE facility_id = 'f1000000-0000-0000-0000-000000000001'$$);
+RESET ROLE;
+
+SELECT expect_rows('and nothing is open', 0, 'SELECT * FROM emergency_access_open');
+
+
+-- ── the safeguards that are sentences ──────────────────────────────────────────
+
+\echo ''
+\echo '── the administrative half'
+
+SELECT expect('every required procedure is on the register',
+  (SELECT count(*) >= 12 FROM administrative_controls));
+
+SELECT expect('none of them is unowned, which is the rule the vendor register set',
+  (SELECT count(*) = 0 FROM administrative_unowned));
+
+SELECT expect('all of them are gaps today, and the register says so plainly',
+  (SELECT count(*) = (SELECT count(*) FROM administrative_controls)
+   FROM administrative_gaps));
+
+SELECT expect_refused('claiming one is in effect with nothing to point at', $$
+  UPDATE administrative_controls SET status = 'in_effect' WHERE id = 'security_official'
+$$);
+
+SELECT expect('but one with evidence is accepted, so the gap is the document and not the model',
+  (WITH _ AS (SELECT 1) SELECT true));
+\set QUIET on
+UPDATE administrative_controls SET status = 'in_effect', evidence = 'docs/policies/security-official.md'
+WHERE id = 'security_official';
+\set QUIET off
+SELECT expect_rows('and it leaves the gap list', 0,
+  $$SELECT * FROM administrative_gaps WHERE id = 'security_official'$$);
+\set QUIET on
+UPDATE administrative_controls SET status = 'absent', evidence = NULL WHERE id = 'security_official';
+\set QUIET off
+
+
+-- ── a resident asking for their record ─────────────────────────────────────────
+
+\echo ''
+\echo '── the export'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false) \gset
+SELECT expect('a caregiver can produce the record of a resident she is responsible for',
+  (SELECT resident_record_export('e1000000-0000-0000-0000-000000000001') ? 'care_days'));
+
+SELECT expect('and it carries no clinical-system key, which is the other system''s and not hers',
+  NOT (resident_record_export('e1000000-0000-0000-0000-000000000001') -> 'resident'
+       ? 'external_patient_id'));
+
+SELECT expect_refused('and cannot produce one for a resident at another facility', $$
+  SELECT resident_record_export('e3000000-0000-0000-0000-000000000003')
+$$);
+RESET ROLE;
+
+SELECT expect('the export is audited as a read, as a consequence rather than a courtesy',
+  (SELECT count(*) >= 1 FROM audit_events
+   WHERE action = 'residents.read'
+     AND resident_id = 'e1000000-0000-0000-0000-000000000001'));
+
+
 -- ── the agreement that has to be in place first ────────────────────────────────
 --
 -- The package modelled every agreement flowing down and nothing about the one flowing up.

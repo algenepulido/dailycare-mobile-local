@@ -445,6 +445,7 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
 -- anybody's grandmother.
 
 INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('imported_content','imported_at','shift_days','Every timestamp on a table that holds a resident''s record moves with everything else. This one lives here because the table does.'),
  ('imported_content','title','redact_text',NULL),
  ('imported_content','body','redact_text',NULL),
  ('imported_content','resident_id','keep','A generated uuid pointing at a resident who has been renamed.'),

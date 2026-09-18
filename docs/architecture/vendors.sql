@@ -160,8 +160,8 @@ INSERT INTO vendors (id, name, purpose, role, live, baa, gap_owner, gap_required
 
 INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
 ('twilio','phi','could_receive',
- 'A message body is a fixed string with no resident name, no facility name and nothing clinical: "You have a new update in DailyCare." The variable part is a link and a code.',
- 'The tempting version of this feature - "Cathy had a difficult night" - is the one that puts a health fact on a lock screen.'),
+ 'A message body is a fixed string with no resident name, no facility name and nothing clinical: "You have a new update in DailyCare." The variable part is a link and a code. Enforced rather than agreed: there is no placeholder for either, and the fixed text of a template is checked too.',
+ 'This note and the invitation template disagreed for a while - the note said no facility name and the template interpolated one. Decided rather than reconciled: a building name beside a phone number says somebody connected to that number is in memory care there, so it is shown inside the app after sign-in instead.'),
 ('twilio','identifying','transits','Phone number and message body only. No account is created on their side.',NULL);
 
 

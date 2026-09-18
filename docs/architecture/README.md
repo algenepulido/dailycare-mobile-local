@@ -18,6 +18,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | `auth-invariants.sql` | Including the milestone's own acceptance criteria: reinstall and sign back in, and two authorised devices. |
 | `agreements.sql` | The agreement that has to be in place before a resident is admitted, and what happens when one ends with residents inside. |
 | `incidents.sql` | Somewhere to record an incident, the four factors that make a conclusion possible, and a clock that runs. |
+| `emergency-and-program.sql` | Break-glass access, and the required procedures that are sentences — each with an owner, a date and a state. |
 | `incident-invariants.sql` | One incident walked from discovery to notification, with the clock moved back at each step. |
 | `identity-policies.sql` | Row-level security on the tables that say who people are, which nine PHI tables had and twenty-five others did not. |
 | `grants.sql` | What the application is granted, as a table, applied from it and compared to the catalogue both ways. |
@@ -63,7 +64,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 420 checks across twelve suites
+./verify.sh                  # 450 checks across twelve suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -83,7 +84,8 @@ psql -d postgres -f roles.sql          # once per cluster
 
 createdb dc_check
 for f in schema.sql authentication.sql access-policies.sql data-classification.sql \
-         agreements.sql incidents.sql identity-policies.sql access-matrix.sql \
+         agreements.sql incidents.sql identity-policies.sql emergency-and-program.sql \
+         access-matrix.sql \
          audit-logging.sql retention.sql environments.sql vendors.sql \
          backup-recovery.sql phi-safe-logging.sql encryption-and-secrets.sql \
          boundary.sql grants.sql \
@@ -174,6 +176,11 @@ SELECT * FROM notifications_late;           -- kept on record, not refused
 SELECT * FROM incidents_unassessed;         -- must be empty
 
 SELECT * FROM deidentification_undetermined;  -- expected to have a row, and says why
+
+SELECT * FROM administrative_gaps;    -- every required procedure, with an owner and a date
+SELECT * FROM administrative_unowned; -- must be empty
+SELECT * FROM emergency_access_open;  -- who can currently see more than their job gives them
+SELECT * FROM phi_stores_encryption_planned;  -- a plan is not a control
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -435,6 +442,19 @@ agreement.
 **An unidentified request sees nothing.** Access resolves from a session variable the
 application sets per request. Unset compares false everywhere, so the failure mode of
 forgetting to set it is an empty result rather than an open door.
+
+## What is required and is not here
+
+`administrative_controls` is thirteen rows, all of them gaps, each with an owner and what it
+blocks: the risk analysis, a named security official, workforce and training procedures, a
+sanction policy, incident response, emergency-mode operation, criticality analysis, an
+evaluation cadence, a workstation policy, a lost-device procedure, media disposal.
+
+None of them is a constraint and every one is required. What this package can do with a
+procedure it does not have is what it does with an agreement it does not hold — give it an
+owner, a date and a state, so that "not written yet" is a row rather than a silence. A
+control claimed as in effect has to point at the document, which is the whole of what that
+table enforces.
 
 ## Open questions for the reviewer
 

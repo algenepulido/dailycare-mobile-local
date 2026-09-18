@@ -117,6 +117,18 @@ SELECT expect('and so is one nested inside a serialised row, which is how it rea
     '{"request_id":"req-1","row":{"id":"e1","display_name":"Cathy","mood":"agitated"}}'::jsonb)
    WHERE field = 'display_name' AND problem = 'nested field name'));
 
+-- The two an independent review got past the first version, which looked at the top level
+-- and one below it and no further.
+SELECT expect('two levels down is caught',
+  (SELECT count(*) = 1 FROM log_scan('{"ctx":{"request":{"note":"she was frightened"}}}'::jsonb)));
+
+SELECT expect('and so is a row inside an array, which is what a list endpoint logs',
+  (SELECT count(*) = 1 FROM log_scan(
+    '{"rows":[{"id":"e1","display_name":"Cathy"},{"id":"e2","display_name":"Robert"}]}'::jsonb)));
+
+SELECT expect('a sentence containing a name still passes, and the comment says so',
+  (SELECT count(*) = 0 FROM log_scan('{"message":"Cathy was unsettled tonight"}'::jsonb)));
+
 SELECT expect('an empty line is not reported as a problem',
   (SELECT count(*) = 0 FROM log_scan('{}'::jsonb)));
 
@@ -156,6 +168,26 @@ SELECT expect_rejected('a declared placeholder that is not on the allowed list',
   INSERT INTO notification_templates (id, channel, audience, body, placeholders)
   VALUES ('sneaky2', 'sms', 'family', 'Hello {note}.', ARRAY['note'])
 $$);
+
+-- The placeholder rule stopped a template interpolating a name and accepted any sentence
+-- an author typed. "Patient Cathy had a fall" was a valid template until the fixed text
+-- was checked too.
+SELECT expect_rejected('a name typed straight into the body', $$
+  INSERT INTO notification_templates (id, channel, audience, body, placeholders)
+  VALUES ('typed', 'push', 'family', 'Patient Cathy had a fall.', ARRAY['app_name'])
+$$);
+
+SELECT expect_rejected('or a building name in the fixed text', $$
+  INSERT INTO notification_templates (id, channel, audience, body, placeholders)
+  VALUES ('building', 'sms', 'family', 'Cedar House has an update for you.', ARRAY['app_name'])
+$$);
+
+SELECT expect('and the invitation no longer names the building either',
+  (SELECT body NOT ILIKE '%facility%' FROM notification_templates WHERE id = 'family_invitation'));
+
+SELECT expect('which the vendor register and the template now agree on',
+  (SELECT count(*) = 0 FROM notification_templates
+   WHERE body ILIKE '%{facility_name}%'));
 
 SELECT expect_rejected('a title that says what the body is not allowed to', $$
   INSERT INTO notification_templates (id, channel, audience, title, body, placeholders)
@@ -208,6 +240,15 @@ SELECT expect('the audit trail failing quietly is one of the things watched',
 
 SELECT expect('and so is a restored copy nobody scrubbed',
   (SELECT count(*) = 1 FROM monitoring_signals WHERE id = 'unscrubbed_restore'));
+
+-- The gap the package names as its weakest, and the compensating control for it. Denials
+-- catch somebody reaching for what is not theirs; nothing caught somebody taking all of
+-- what is.
+SELECT expect('somebody taking every resident they are allowed to see is watched for',
+  (SELECT count(*) = 1 FROM monitoring_signals WHERE id = 'bulk_read'));
+
+SELECT expect('and so is the read trail quietly stopping',
+  (SELECT count(*) = 1 FROM monitoring_signals WHERE id = 'read_audit_ratio'));
 
 \echo ''
 \echo '   what is watched:'

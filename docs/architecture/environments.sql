@@ -228,6 +228,15 @@ INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
  ('care_days','id','remap_key','The same. A care day id in a log line and the same id in a developer''s database is one join away from the note.'),
  ('care_days','note','redact_text',NULL),
  ('care_days','care_date','shift_days',NULL),
+ ('care_days','filed_at','shift_days','A timestamp on a care record is as much a date as care_date is, and was classified operational and therefore left alone. Every timestamp on a table that holds a resident''s record moves with everything else.'),
+ ('care_days','created_at','shift_days',NULL),
+ ('care_days','updated_at','shift_days',NULL),
+ ('care_days','superseded_at','shift_days',NULL),
+ ('residents','created_at','shift_days',NULL),
+ ('residents','updated_at','shift_days',NULL),
+ ('medication_events','recorded_at','shift_days',NULL),
+ ('medication_events','created_at','shift_days',NULL),
+ ('media_objects','created_at','shift_days',NULL),
  ('care_days','mood','keep','Clinical shape, detached from identity. See residents.baseline_mood.'),
  ('care_days','appetite','keep','As above.'),
  ('care_days','sleep','keep','As above.'),
@@ -263,6 +272,7 @@ INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
  ('users','display_name','synthetic_name',NULL),
  ('users','password_hash','scramble_password',NULL),
  ('sessions','device_label','redact_text',NULL),
+ ('sessions','idle_expires_at','shift_days',NULL),
  ('sessions','refresh_hash','scramble_digest',NULL),
  ('user_tokens','token_hash','scramble_digest',NULL),
  ('resident_contacts','relation','keep','A relationship type with both parties anonymised. The access model is built on it and cannot be tested without it.');
@@ -285,6 +295,11 @@ WHERE dc.class IN ('phi', 'identifying', 'secret')
   AND sr.column_name IS NULL
 ORDER BY dc.table_name, dc.column_name;
 
+-- Operational columns are not scrubbed, by design: a copy with no created_at is a copy
+-- nobody can debug. phi_residue() exists to find what leaked into one, and the thing worth
+-- running before a copy leaves the building is that scan with the facility's real name and
+-- its staff names as the patterns - which no rule here can do for you, because nobody but
+-- the facility knows what those are.
 COMMENT ON VIEW unscrubbed_columns IS
   'Must be empty. A column holding PHI with no scrub rule is a column that would travel
    into a developer''s laptop the next time somebody restores a snapshot.';

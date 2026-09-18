@@ -279,3 +279,40 @@ SELECT a.actor, 'deidentification_basis', o.op::access_operation, false, NULL,
        'Not application data. A statement about what a copy of this database is, signed by somebody, and nothing a request has business reading or changing.'
 FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
 CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;
+
+
+-- ════════════════════════════════════════════════════════════════════ emergency and program
+
+INSERT INTO data_classification (table_name, column_name, class, note)
+SELECT 'emergency_access', c.column_name,
+       CASE WHEN c.column_name IN ('granted_to','granted_by') THEN 'identifying'
+            WHEN c.column_name = 'reason' THEN 'phi' ELSE 'operational' END::data_class,
+       CASE WHEN c.column_name = 'reason'
+            THEN 'Why somebody needed to see more than their job gives them, at three in the morning. It will name a resident, because that is what the reason is.' END
+FROM information_schema.columns c
+WHERE c.table_schema = 'public' AND c.table_name = 'emergency_access';
+
+INSERT INTO data_classification (table_name, column_name, class, note)
+SELECT 'administrative_controls', c.column_name, 'operational', NULL
+FROM information_schema.columns c
+WHERE c.table_schema = 'public' AND c.table_name = 'administrative_controls';
+
+INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('emergency_access','granted_to','keep','A uuid pointing at a staff account that has been renamed.'),
+ ('emergency_access','granted_by','synthetic_name',NULL),
+ ('emergency_access','reason','redact_text',NULL);
+
+-- The matrix. A break-glass grant is issued by an operator, not composed by a request; what
+-- the application does with it is ask app_is_care_manager, which already consults it.
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, t.tbl, o.op::access_operation, false, NULL,
+       'Not application data. A grant is made by a person who authorises it and recorded here; the application only ever feels its effect, through the manager predicate.'
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (VALUES ('emergency_access'),('administrative_controls')) AS t(tbl)
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;
+
+-- And the trail has to cover it, because a PHI column on a table with no audit trigger is
+-- what audit_gaps exists to find.
+CREATE TRIGGER audit_emergency_access
+  AFTER INSERT OR UPDATE ON emergency_access
+  FOR EACH ROW EXECUTE FUNCTION audit_phi_write('none');

@@ -158,7 +158,9 @@ UNION ALL SELECT 'refresh:' || id::text, refresh_hash FROM sessions
 UNION ALL SELECT 'token:'   || id::text, token_hash   FROM user_tokens;
 
 CREATE TEMP TABLE before_shape AS
-SELECT (SELECT count(*) FROM checks.forced_tables) AS forced_before,
+SELECT (SELECT filed_at::date - care_date FROM care_days ORDER BY care_date LIMIT 1) AS filed_gap,
+       (SELECT min(filed_at)::date FROM care_days) AS first_filed,
+       (SELECT count(*) FROM checks.forced_tables) AS forced_before,
        (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000002')
      - (SELECT care_date FROM care_days WHERE id = 'cd000000-0000-0000-0000-000000000001')
        AS gap_days,
@@ -403,6 +405,13 @@ SELECT expect('the dates moved',
 SELECT expect('but the interval between them did not, so a two-week report still works',
   (SELECT max(care_date) - min(care_date) FROM care_days)
   = (SELECT gap_days FROM before_shape));
+
+-- filed_at was classified operational and therefore left alone, which meant a timestamp on
+-- a care record survived a scrub that moved the care date beside it.
+SELECT expect('the timestamp a day was filed at moved with the date it describes',
+  (SELECT filed_at::date - care_date FROM care_days ORDER BY care_date LIMIT 1)
+  = (SELECT filed_gap FROM before_shape)
+  AND (SELECT min(filed_at)::date FROM care_days) <> (SELECT first_filed FROM before_shape));
 
 SELECT expect('a resident still in the building still has no departure date',
   (SELECT count(*) = 1 FROM residents WHERE departed_on IS NULL));

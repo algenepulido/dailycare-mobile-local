@@ -128,6 +128,13 @@ SELECT expect('and every credential column is classified as a secret, so none ca
 SELECT expect('every place a record rests at rest has a control that is not declined',
   (SELECT count(*) = 0 FROM phi_stores_without_encryption));
 
+SELECT expect('the phone is one of the places, which it was not',
+  (SELECT count(*) = 1 FROM encryption_controls WHERE id = 'at_rest_device'));
+
+-- Counting a plan as coverage is how a package tells itself it is finished.
+SELECT expect('and what is only planned is counted separately from what exists',
+  (SELECT count(*) > 0 FROM phi_stores_encryption_planned));
+
 SELECT expect('in transit is covered in both directions',
   (SELECT count(*) = 2 FROM encryption_controls WHERE id LIKE 'in_transit_%'));
 

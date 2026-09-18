@@ -122,6 +122,12 @@ LANGUAGE sql IMMUTABLE
   SELECT candidate ~ '^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]{16,}\$[A-Za-z0-9+/]{16,}$'
 $$;
 
+-- Worth saying plainly, because this package says "refuses anything but a digest" in
+-- several places and that is a claim about shape. A constraint can see that a value looks
+-- like an Argon2id string; it cannot see that it is the digest of anything, and a caller
+-- determined to store a password could store a well-formed digest of it. What this buys is
+-- that the ordinary mistake - writing the password straight through - is impossible, and
+-- the deliberate one is visible in a code review rather than in a column.
 CREATE OR REPLACE FUNCTION is_sha256_hex(candidate text) RETURNS boolean
 LANGUAGE sql IMMUTABLE
   SET search_path = pg_catalog, public AS $$
@@ -162,6 +168,12 @@ CREATE TABLE users (
   password_hash      text,          -- null while an invitation is outstanding
   display_name       text NOT NULL,
   email_verified_at  timestamptz,
+
+  -- A care manager reads every resident in a building with a password. A second factor is
+  -- not named by the rule either, and is the reasonable safeguard for that - so the column
+  -- is here and app_is_care_manager() can require it when there is an enrolment flow to
+  -- require it through. Recorded now so the decision is visible rather than deferred.
+  second_factor_enrolled_at timestamptz,
   last_seen_at       timestamptz,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now(),
@@ -209,6 +221,12 @@ CREATE TABLE sessions (
   issued_at       timestamptz NOT NULL DEFAULT now(),
   last_used_at    timestamptz NOT NULL DEFAULT now(),
   expires_at      timestamptz NOT NULL,
+
+  -- Separate from expires_at, because they answer different questions. A thirty-day
+  -- refresh token is how long somebody may stay signed in; this is how long a phone left
+  -- on a med cart in a corridor stays useful. Neither specification names an idle timeout
+  -- in so many words, and it is the reasonable safeguard for that situation.
+  idle_expires_at timestamptz,
   revoked_at      timestamptz
 );
 

@@ -39,6 +39,9 @@ RETURNS boolean LANGUAGE sql STABLE
     WHERE s.refresh_hash = candidate_hash
       AND s.revoked_at IS NULL
       AND s.expires_at > now()
+      -- Idle as well as absolute. A session nobody has used since the shift before is not
+      -- a session somebody is still in.
+      AND (s.idle_expires_at IS NULL OR s.idle_expires_at > now())
       -- The person, not only the session. Without this, deactivating an account left the
       -- phone in somebody's pocket working until the refresh token expired - thirty days
       -- after a termination the procedure believed it had completed.
@@ -131,6 +134,21 @@ END; $$;
 CREATE TRIGGER deactivation_ends_sessions
   AFTER UPDATE OF deactivated_at ON users
   FOR EACH ROW EXECUTE FUNCTION end_sessions_on_deactivation();
+
+
+-- Called on every authenticated request. One statement, so a session that is being used
+-- stays alive and one that is not does not.
+CREATE OR REPLACE FUNCTION touch_session(candidate_hash text, idle_for interval DEFAULT interval '12 hours')
+RETURNS void LANGUAGE sql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+  UPDATE sessions SET last_used_at = now(), idle_expires_at = now() + idle_for
+  WHERE refresh_hash = candidate_hash AND revoked_at IS NULL
+$$;
+
+COMMENT ON FUNCTION touch_session(text, interval) IS
+  'Twelve hours by default, which is a shift and a bit. Long enough that a caregiver coming
+   back after a break does not sign in again, short enough that a phone left on a med cart
+   overnight is not a way in.';
 
 
 -- ════════════════════════════════════════════════════════════════════ single-use tokens

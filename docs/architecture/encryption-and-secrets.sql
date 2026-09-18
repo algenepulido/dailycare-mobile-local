@@ -151,6 +151,12 @@ INSERT INTO encryption_controls (id, covers, mechanism, key_management, state, n
  'Declined for now, and the reason is worth recording. The threat it addresses is the platform reading the data, which the agreement already addresses contractually. The threat it creates is losing the key, after which nobody reads the data - including the facility whose records they are. Revisit if a facility asks for it.',
  DATE '2026-09-15'),
 
+('at_rest_device', 'A care day on a caregiver''s phone, and a photograph waiting to upload',
+ 'Credentials in the platform keychain; care data not persisted, or persisted encrypted; photographs staged in the cache directory and purged once the upload is acknowledged',
+ 'Platform keystore, per device', 'planned',
+ 'The fourth place a record rests, and the only one that leaves the building. The Milestone 1 client keeps its state in AsyncStorage, which is not encrypted, and stages photographs on the file system - which is correct for synthetic data and is the whole design of that milestone. The moment it holds a real care day it is a store, on a device that goes home in a pocket. revoke_all_sessions() is the lost-phone control for the server; this is the one for what is already on the phone. Milestone 3.',
+ DATE '2026-09-18'),
+
 ('signed_url_lifetime', 'Links to photographs',
  'Signed URLs minted per request with a short expiry, currently fifteen minutes',
  'Platform-managed signing key; the application never holds it', 'planned',
@@ -192,17 +198,31 @@ SELECT id, covers, state FROM encryption_controls WHERE state <> 'in_effect';
 
 CREATE VIEW phi_stores_without_encryption AS
 -- Every place a resident's record rests, against the controls that claim to cover it.
+-- The device is the fourth, and was missing: the inventory knew about the database, the
+-- bucket and the backups, and not about the phone that goes home in a pocket.
 SELECT s.place
-FROM (VALUES ('database'), ('storage'), ('backups')) AS s(place)
+FROM (VALUES ('database'), ('storage'), ('backups'), ('device')) AS s(place)
 WHERE NOT EXISTS (
   SELECT 1 FROM encryption_controls c
   WHERE c.id LIKE 'at_rest_%' AND c.id LIKE ('%' || s.place)
     AND c.state <> 'declined');
 
 COMMENT ON VIEW phi_stores_without_encryption IS
-  'Must be empty. Three places hold a resident''s record at rest and each needs a control
-   that is not declined. A fourth place appearing later and having none is what this
-   catches.';
+  'Must be empty. Four places hold a resident''s record at rest and each needs a control
+   that is not declined. It was three until an independent review pointed at the phone.';
+
+-- Counting a plan as coverage is how a package tells itself it is finished. Separate view,
+-- expected to have rows today and empty before the first real record - the way
+-- never_drilled is.
+CREATE VIEW phi_stores_encryption_planned AS
+SELECT c.id, c.covers, c.state
+FROM encryption_controls c
+WHERE c.id LIKE 'at_rest_%' AND c.state = 'planned';
+
+COMMENT ON VIEW phi_stores_encryption_planned IS
+  'Expected to have rows while nothing is deployed. The view above asks whether a place has
+   a control at all; this one asks whether the control exists yet, and the difference is
+   the difference between a plan and a thing.';
 
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN

@@ -58,6 +58,7 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('users','password_hash','secret','Argon2id. Never returned, never logged.'),
  ('users','display_name','identifying','Staff or family name. Appears in a care record as the author, which does not make it the resident''s information.'),
  ('users','email_verified_at','operational',NULL),
+ ('users','second_factor_enrolled_at','operational','When, not what. The factor itself is held by the platform that verifies it.'),
  ('users','last_seen_at','operational',NULL),
  ('users','created_at','operational',NULL),
  ('users','updated_at','operational',NULL),
@@ -80,6 +81,7 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('sessions','issued_at','operational',NULL),
  ('sessions','last_used_at','operational',NULL),
  ('sessions','expires_at','operational',NULL),
+ ('sessions','idle_expires_at','operational','How long a phone left on a med cart stays useful, which is a different question from how long somebody may stay signed in.'),
  ('sessions','revoked_at','operational',NULL);
 
 

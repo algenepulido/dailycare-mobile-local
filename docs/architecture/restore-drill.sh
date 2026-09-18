@@ -66,7 +66,8 @@ CANARY="DRILL-CANARY-$(date +%s)"
 if [ "$BUILD" = 1 ]; then
   say "building $SOURCE"
   createdb "$SOURCE" || exit 1
-  for f in schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql data-classification.sql access-matrix.sql audit-logging.sql \
+  for f in schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql \
+           emergency-and-program.sql data-classification.sql access-matrix.sql audit-logging.sql \
            retention.sql environments.sql vendors.sql backup-recovery.sql \
            phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql \
            checks-support.sql; do

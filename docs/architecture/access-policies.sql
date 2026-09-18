@@ -222,6 +222,57 @@ CREATE POLICY medication_integration_read ON medication_events FOR SELECT
   -- status, and not a caregiver's row: column privileges below decide that.
   USING (source <> 'caregiver');
 
+-- ── the third right the facility owes its resident ─────────────────────────────
+--
+-- A resident, or their representative, may ask the facility for a copy of the record, and
+-- the facility has thirty days. Amendment is served by amend-by-adding and accounting by
+-- the audit trail; this is the one that had no path at all. A definer function so that the
+-- read is audited as a consequence rather than by the caller remembering, which is the
+-- shape the whole read-auditing gap wants and is worth having in one place first.
+
+CREATE OR REPLACE FUNCTION resident_record_export(target_resident uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+DECLARE
+  target_facility uuid;
+  document jsonb;
+BEGIN
+  SELECT r.facility_id INTO target_facility FROM residents r WHERE r.id = target_resident;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no such resident' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF NOT app_may_read_resident(target_resident, target_facility) THEN
+    RAISE EXCEPTION 'not this session''s to export'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  SELECT jsonb_build_object(
+    'resident', (SELECT to_jsonb(r) - 'external_patient_id' - 'external_source'
+                 FROM residents r WHERE r.id = target_resident),
+    'care_days', coalesce((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.care_date)
+                           FROM care_days c WHERE c.resident_id = target_resident), '[]'::jsonb),
+    'medication', coalesce((SELECT jsonb_agg(to_jsonb(m) ORDER BY m.care_date, m.slot)
+                            FROM medication_events m WHERE m.resident_id = target_resident), '[]'::jsonb),
+    'photographs', coalesce((SELECT jsonb_agg(jsonb_build_object('id', o.id, 'taken', o.created_at))
+                             FROM media_objects o
+                             WHERE o.resident_id = target_resident AND o.deleted_at IS NULL), '[]'::jsonb),
+    'exported_at', now()
+  ) INTO document;
+
+  -- Audited as a consequence of the export, not by whoever called it.
+  PERFORM audit_read(target_resident, 'residents', target_resident);
+  RETURN document;
+END; $$;
+
+COMMENT ON FUNCTION resident_record_export(uuid) IS
+  'What the facility hands over when a resident asks for their record. Superseded care days
+   are included on purpose: the amendment history is part of what was recorded about them,
+   and leaving it out would make the copy a version of the record rather than the record.
+   The clinical-system identifiers are left out - they are the other system''s key, not
+   this resident''s information.';
+
+
 -- The feed needs to turn a clinical-system patient id into a resident id without being
 -- able to read a resident. One function, one answer, nothing else reachable.
 CREATE OR REPLACE FUNCTION resident_for_external(src medication_source, patient_id text)
