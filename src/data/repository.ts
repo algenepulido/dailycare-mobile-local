@@ -13,13 +13,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Caregiver, CheckIn, ID, Resident } from '@/domain/types';
 
-const KEY = {
+export const STORAGE_KEYS = {
   residents: 'dailycare.residents.v1',
   caregivers: 'dailycare.caregivers.v1',
   checkIns: 'dailycare.checkins.v1',
   activeCaregiver: 'dailycare.active.caregiver.v1',
   activeResident: 'dailycare.active.resident.v1',
+  /**
+   * The unsent day. It lives here rather than beside the code that writes it, because
+   * reset() removes what is in this object and nothing else — and a storage key defined
+   * somewhere else is a key reset() does not know about. This one was in the theme tokens,
+   * which is the last place anybody would look for one, and a cleared session left the
+   * half-written day on the device.
+   */
+  draft: 'inktree_caregiver_draft_v1',
 } as const;
+
+/** The old name, kept so the rest of this file reads as it did. */
+const KEY = STORAGE_KEYS;
 
 export interface Repository {
   listResidents(): Promise<Resident[]>;
@@ -142,6 +153,10 @@ export const repository: Repository = {
     await Promise.all(writes);
   },
 
+  /**
+   * Everything this app has written, including the unsent day. Photographs are separate:
+   * they are files rather than storage entries, and clearing them is photos.clearAll().
+   */
   async reset() {
     await AsyncStorage.multiRemove(Object.values(KEY));
   },

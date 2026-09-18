@@ -128,6 +128,21 @@ export async function pickPhoto(source: PhotoSource): Promise<PickResult> {
   }
 }
 
+/**
+ * Removes every stored photograph.
+ *
+ * Separate from repository.reset(), which clears storage entries — a photograph is a file
+ * in the document directory, and clearing the records without clearing the files leaves
+ * pictures of a resident on the device with nothing left that says whose they are. Both
+ * are called together wherever a session is cleared.
+ */
+export function clearAll(): void {
+  const directory = new Directory(Paths.document, PHOTO_DIRECTORY);
+  if (directory.exists) {
+    directory.delete();
+  }
+}
+
 /** Removes a stored photo. Missing files are ignored — the record is what matters. */
 export function deletePhoto(uri: string): void {
   const file = new File(uri);

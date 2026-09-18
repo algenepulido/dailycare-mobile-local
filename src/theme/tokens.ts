@@ -165,6 +165,8 @@ export const app = {
   displayName: 'DailyCare',
   /** Same keys as the web app, so the shapes stay recognisable across the two. */
   storeKey: 'inktree_caregiver_v1',
+  /** Defined in data/repository.ts, where reset() can see it. Re-exported here so the
+   *  code that reads and writes the draft keeps the name it had. */
   draftKey: 'inktree_caregiver_draft_v1',
   backdateLimitDays: 14,
   /** For the send milestone. Milestone 1 keeps photos at full resolution. */

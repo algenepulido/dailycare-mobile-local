@@ -11,6 +11,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 
 import { newId, nowIso } from '@/data/ids';
+import { clearAll as clearAllPhotos } from '@/data/photos';
 import { repository } from '@/data/repository';
 import type { Baseline, Caregiver, Resident } from '@/domain/types';
 
@@ -113,7 +114,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const clear = useCallback<SessionValue['clear']>(async () => {
+    // Storage and files both. Clearing one without the other leaves photographs of a
+    // resident on the device with no record saying whose they are.
     await repository.reset();
+    clearAllPhotos();
     setCaregiver(null);
     setResident(null);
   }, []);
