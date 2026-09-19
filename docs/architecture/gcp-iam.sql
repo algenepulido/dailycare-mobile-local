@@ -123,8 +123,8 @@ SELECT * FROM (VALUES
 
 
 -- ── the commands ───────────────────────────────────────────────────────────────
--- Run the output. Project-scoped ones are exact; the resource-scoped ones need the
--- resource name filling in, which is why they come out commented.
+-- Set the four variables below and run the output. Every line is a command, including
+-- the resource-scoped ones.
 
 CREATE OR REPLACE FUNCTION iam_member(p text, k iam_principal_kind) RETURNS text
 LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, public AS $$
