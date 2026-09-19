@@ -69,7 +69,7 @@ if [ "$BUILD" = 1 ]; then
   for f in schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql \
            emergency-and-program.sql data-classification.sql access-matrix.sql audit-logging.sql \
            retention.sql environments.sql vendors.sql backup-recovery.sql \
-           phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql \
+           phi-safe-logging.sql encryption-and-secrets.sql boundary.sql gcp-iam.sql grants.sql \
            checks-support.sql; do
     psql -q -v ON_ERROR_STOP=1 -d "$SOURCE" -f "$HERE/$f" >/dev/null || {
       echo "could not apply $f" >&2; exit 1; }

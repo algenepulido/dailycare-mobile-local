@@ -316,3 +316,22 @@ CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;
 CREATE TRIGGER audit_emergency_access
   AFTER INSERT OR UPDATE ON emergency_access
   FOR EACH ROW EXECUTE FUNCTION audit_phi_write('none');
+
+
+-- ════════════════════════════════════════════════════════════════════ the IAM list
+
+INSERT INTO data_classification (table_name, column_name, class, note)
+SELECT 'gcp_iam', c.column_name,
+       CASE WHEN c.column_name = 'principal' THEN 'identifying' ELSE 'operational' END::data_class,
+       CASE WHEN c.column_name = 'principal' THEN 'A person or a service account.' END
+FROM information_schema.columns c
+WHERE c.table_schema = 'public' AND c.table_name = 'gcp_iam';
+
+INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
+ ('gcp_iam','principal','keep','Service account names, and one engineer. Not a resident, and the list is no use with the names taken out.');
+
+INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
+SELECT a.actor, 'gcp_iam', o.op::access_operation, false, NULL,
+       'Not application data. A list of who holds which cloud role is a map of the system, and the application has no reason to hold one.'
+FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;

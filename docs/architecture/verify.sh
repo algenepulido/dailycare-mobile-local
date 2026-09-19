@@ -28,12 +28,13 @@ done
 MODEL=(schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql
        emergency-and-program.sql data-classification.sql access-matrix.sql audit-logging.sql
        retention.sql environments.sql vendors.sql backup-recovery.sql
-       phi-safe-logging.sql encryption-and-secrets.sql boundary.sql grants.sql
+       phi-safe-logging.sql encryption-and-secrets.sql boundary.sql gcp-iam.sql grants.sql
        checks-support.sql)
 SUITES=(schema-invariants.sql access-invariants.sql audit-invariants.sql
         retention-invariants.sql environment-invariants.sql vendor-invariants.sql
         backup-invariants.sql logging-invariants.sql auth-invariants.sql
-        secrets-invariants.sql boundary-invariants.sql incident-invariants.sql)
+        secrets-invariants.sql boundary-invariants.sql incident-invariants.sql
+        iam-invariants.sql)
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
