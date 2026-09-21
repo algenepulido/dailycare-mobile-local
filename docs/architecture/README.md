@@ -20,6 +20,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | `incidents.sql` | Somewhere to record an incident, the four factors that make a conclusion possible, and a clock that runs. |
 | `gcp-iam.sql` | The cloud roles, per principal, and the gcloud commands that grant them. |
 | `iam-invariants.sql` | Mostly the separations: CI cannot read a secret, the API cannot delete a photograph. |
+| `migration-invariants.sql` | That the model went in whole, and that nothing running the application can edit the record of what went in. |
 | `emergency-and-program.sql` | Break-glass access, and the required procedures that are sentences — each with an owner, a date and a state. |
 | `incident-invariants.sql` | One incident walked from discovery to notification, with the clock moved back at each step. |
 | `identity-policies.sql` | Row-level security on the tables that say who people are, which nine PHI tables had and twenty-five others did not. |
@@ -45,6 +46,8 @@ constraint and a constraint are different things, and only one of them stops a m
 | `checks-support.sql` | Not part of the model. What lets a suite give the same answers to a superuser and to a managed-instance owner. |
 | `review.sh` | The whole thing in one command, in a throwaway container, for a reviewer with nothing installed but Docker. |
 | `verify.sh` | Runs every suite, each in its own database, and exits non-zero if anything failed. |
+| `migrate.sh` | Applies the model to a database once each and records what went in. What deploys, and what builds the database every check runs against. |
+| `model.list` | The model in the order it has to be applied. One list, read by both scripts. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
 | `inktree-alignment.md` | Where this model meets the InkTree field guide and where it does not, and the one difference that is a boundary rather than a preference. |
 
@@ -66,13 +69,28 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 460 checks across thirteen suites
+./verify.sh                  # 472 checks across fourteen suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
-`verify.sh` is the whole thing: it creates the three application roles once, then builds a
-separate database per suite, applies the model, runs the suite and drops the database. It
-exits non-zero if a single check failed.
+`verify.sh` is the whole thing: it creates the application roles once, then builds a
+separate database per suite, runs the suite and drops the database. It exits non-zero if a
+single check failed.
+
+It builds those databases with `migrate.sh` — the same script that applies the model to a
+real one. Two ways of assembling a database would agree right up until the day they didn't,
+and then the checks would be passing against something that is not what got deployed.
+
+`migrate.sh` applies each file in `model.list` at most once and records it with the sha256
+of the file as applied. A file edited after it has gone into a database stops the run and
+names both digests, because editing an applied file is precisely how a database stops being
+the one the checks passed against. A `.sql` file sitting in this directory that nobody added
+to the list stops it too — otherwise it would never be applied and never be checked, which
+is worse than an error.
+
+`roles.sql` is the one part that needs a login able to create roles, so it sits behind
+`--with-roles` rather than happening as a side effect, and the run says to rotate that login
+afterwards if it was borrowed for the occasion.
 
 A suite needs a database of its own because each one seeds its own fixtures and then tries
 to violate them — running two against the same database fails on the first one's seed data

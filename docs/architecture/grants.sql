@@ -197,6 +197,20 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('app_privileges','note','operational',NULL);
 
 
+-- ──────────────────────────────────────────────────────────────── the migration record
+--
+-- schema_migrations is created by migrate.sh before any of the model, so it cannot be
+-- classified where it is made. Nothing in it is about a person: the sha256 is of a file
+-- that is in the repository anyway, and applied_by is a database role rather than a name.
+
+INSERT INTO data_classification (table_name, column_name, class, note) VALUES
+ ('schema_migrations','position','operational',NULL),
+ ('schema_migrations','filename','operational',NULL),
+ ('schema_migrations','sha256','operational','Of the file as applied. Not a secret - the file is in the repository.'),
+ ('schema_migrations','applied_at','operational',NULL),
+ ('schema_migrations','applied_by','operational','A database role, not a person.');
+
+
 -- ════════════════════════════════════════════════════════════════════ the agreements
 --
 -- Classified here rather than in agreements.sql, which is applied before the

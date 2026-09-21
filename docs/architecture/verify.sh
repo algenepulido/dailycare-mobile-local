@@ -25,16 +25,11 @@ for tool in psql createdb dropdb; do
     exit 1; }
 done
 
-MODEL=(schema.sql agreements.sql incidents.sql authentication.sql access-policies.sql identity-policies.sql
-       emergency-and-program.sql data-classification.sql access-matrix.sql audit-logging.sql
-       retention.sql environments.sql vendors.sql backup-recovery.sql
-       phi-safe-logging.sql encryption-and-secrets.sql boundary.sql gcp-iam.sql grants.sql
-       checks-support.sql)
 SUITES=(schema-invariants.sql access-invariants.sql audit-invariants.sql
         retention-invariants.sql environment-invariants.sql vendor-invariants.sql
         backup-invariants.sql logging-invariants.sql auth-invariants.sql
         secrets-invariants.sql boundary-invariants.sql incident-invariants.sql
-        iam-invariants.sql)
+        iam-invariants.sql migration-invariants.sql)
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
@@ -55,12 +50,17 @@ for suite in "${SUITES[@]}"; do
   dropdb --if-exists "$db" >/dev/null 2>&1
   createdb "$db" >/dev/null 2>&1 || { echo "could not create $db" >&2; exit 1; }
 
+  # Built by the same script that deploys, so a check cannot pass against a database that
+  # was assembled differently from the real one. checks-support.sql is not model - it is
+  # the scaffolding the suites need - so it goes on afterwards.
   ok=1
-  for f in "${MODEL[@]}"; do
-    psql -q -v ON_ERROR_STOP=1 -d "$db" -f "$HERE/$f" >/dev/null 2>"$ERRLOG" || {
-      printf '%-32s could not apply %s\n' "$suite" "$f"
-      grep -E 'ERROR|HINT' "$ERRLOG" | sed 's/^/    /'; ok=0; break; }
-  done
+  if ! "$HERE/migrate.sh" -d "$db" >/dev/null 2>"$ERRLOG"; then
+    printf '%-32s could not migrate\n' "$suite"
+    grep -E 'ERROR|HINT|has changed|not in model.list' "$ERRLOG" | head -4 | sed 's/^/    /'; ok=0
+  elif ! psql -q -v ON_ERROR_STOP=1 -d "$db" -f "$HERE/checks-support.sql" >/dev/null 2>"$ERRLOG"; then
+    printf '%-32s could not apply checks-support.sql\n' "$suite"
+    grep -E 'ERROR|HINT' "$ERRLOG" | sed 's/^/    /'; ok=0
+  fi
   [ "$ok" = 1 ] || { dropdb --if-exists "$db" >/dev/null 2>&1; TOTAL_ERR=$((TOTAL_ERR+1)); continue; }
 
   out="$(psql -d "$db" -f "$HERE/$suite" 2>&1)"

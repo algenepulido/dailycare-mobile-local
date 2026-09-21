@@ -1,0 +1,28 @@
+# The model, in the order it has to be applied.
+#
+# One list, read by migrate.sh and by verify.sh, so that the database a check runs against
+# and the database that gets deployed are built from the same thing in the same order. Two
+# lists would agree right up until the day they didn't.
+#
+# roles.sql is not here. It needs a role that may create roles and the rest of this does
+# not, so it is a separate, deliberate step - see migrate.sh --with-roles.
+
+schema.sql
+agreements.sql
+incidents.sql
+authentication.sql
+access-policies.sql
+identity-policies.sql
+emergency-and-program.sql
+data-classification.sql
+access-matrix.sql
+audit-logging.sql
+retention.sql
+environments.sql
+vendors.sql
+backup-recovery.sql
+phi-safe-logging.sql
+encryption-and-secrets.sql
+boundary.sql
+gcp-iam.sql
+grants.sql
