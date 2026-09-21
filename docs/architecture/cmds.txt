@@ -1,0 +1,38 @@
+gcloud artifacts repositories add-iam-policy-binding dailycare --location=$REGION --member=user:$ALGENE_EMAIL --role=roles/artifactregistry.writer
+gcloud projects add-iam-policy-binding $PROJECT --member=user:$ALGENE_EMAIL --role=roles/cloudsql.client
+gcloud projects add-iam-policy-binding $PROJECT --member=user:$ALGENE_EMAIL --role=roles/cloudsql.instanceUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-api@$PROJECT.iam.gserviceaccount.com --member=user:$ALGENE_EMAIL --role=roles/iam.serviceAccountUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-backup@$PROJECT.iam.gserviceaccount.com --member=user:$ALGENE_EMAIL --role=roles/iam.serviceAccountUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-integration@$PROJECT.iam.gserviceaccount.com --member=user:$ALGENE_EMAIL --role=roles/iam.serviceAccountUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-retention@$PROJECT.iam.gserviceaccount.com --member=user:$ALGENE_EMAIL --role=roles/iam.serviceAccountUser
+gcloud projects add-iam-policy-binding $PROJECT --member=user:$ALGENE_EMAIL --role=roles/logging.viewer
+gcloud projects add-iam-policy-binding $PROJECT --member=user:$ALGENE_EMAIL --role=roles/monitoring.viewer
+gcloud projects add-iam-policy-binding $PROJECT --member=user:$ALGENE_EMAIL --role=roles/run.developer
+gcloud secrets add-iam-policy-binding dailycare-db-password --project=$PROJECT --member=user:$ALGENE_EMAIL --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding dailycare-jwt-key --project=$PROJECT --member=user:$ALGENE_EMAIL --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding dailycare-pointclickcare --project=$PROJECT --member=user:$ALGENE_EMAIL --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding dailycare-twilio --project=$PROJECT --member=user:$ALGENE_EMAIL --role=roles/secretmanager.secretAccessor
+gcloud storage buckets add-iam-policy-binding gs://dailycare-media-$ENV --member=user:$ALGENE_EMAIL --role=roles/storage.objectAdmin
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/cloudsql.client
+gcloud iam service-accounts add-iam-policy-binding dailycare-api@$PROJECT.iam.gserviceaccount.com --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/logging.logWriter
+gcloud secrets add-iam-policy-binding dailycare-db-password --project=$PROJECT --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding dailycare-jwt-key --project=$PROJECT --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding dailycare-twilio --project=$PROJECT --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud storage buckets add-iam-policy-binding gs://dailycare-media-$ENV --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/storage.objectCreator
+gcloud storage buckets add-iam-policy-binding gs://dailycare-media-$ENV --member=serviceAccount:dailycare-api@$PROJECT.iam.gserviceaccount.com --role=roles/storage.objectViewer
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-backup@$PROJECT.iam.gserviceaccount.com --role=roles/cloudsql.client
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-backup@$PROJECT.iam.gserviceaccount.com --role=roles/logging.logWriter
+gcloud storage buckets add-iam-policy-binding gs://dailycare-backup-$ENV --member=serviceAccount:dailycare-backup@$PROJECT.iam.gserviceaccount.com --role=roles/storage.objectAdmin
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-integration@$PROJECT.iam.gserviceaccount.com --role=roles/cloudsql.client
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-integration@$PROJECT.iam.gserviceaccount.com --role=roles/logging.logWriter
+gcloud secrets add-iam-policy-binding dailycare-pointclickcare --project=$PROJECT --member=serviceAccount:dailycare-integration@$PROJECT.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-retention@$PROJECT.iam.gserviceaccount.com --role=roles/cloudsql.client
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:dailycare-retention@$PROJECT.iam.gserviceaccount.com --role=roles/logging.logWriter
+gcloud storage buckets add-iam-policy-binding gs://dailycare-media-$ENV --member=serviceAccount:dailycare-retention@$PROJECT.iam.gserviceaccount.com --role=roles/storage.objectAdmin
+gcloud artifacts repositories add-iam-policy-binding dailycare --location=$REGION --member=serviceAccount:github-deploy@$PROJECT.iam.gserviceaccount.com --role=roles/artifactregistry.writer
+gcloud iam service-accounts add-iam-policy-binding dailycare-api@$PROJECT.iam.gserviceaccount.com --member=serviceAccount:github-deploy@$PROJECT.iam.gserviceaccount.com --role=roles/iam.serviceAccountUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-backup@$PROJECT.iam.gserviceaccount.com --member=serviceAccount:github-deploy@$PROJECT.iam.gserviceaccount.com --role=roles/iam.serviceAccountUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-integration@$PROJECT.iam.gserviceaccount.com --member=serviceAccount:github-deploy@$PROJECT.iam.gserviceaccount.com --role=roles/iam.serviceAccountUser
+gcloud iam service-accounts add-iam-policy-binding dailycare-retention@$PROJECT.iam.gserviceaccount.com --member=serviceAccount:github-deploy@$PROJECT.iam.gserviceaccount.com --role=roles/iam.serviceAccountUser
+gcloud projects add-iam-policy-binding $PROJECT --member=serviceAccount:github-deploy@$PROJECT.iam.gserviceaccount.com --role=roles/run.developer

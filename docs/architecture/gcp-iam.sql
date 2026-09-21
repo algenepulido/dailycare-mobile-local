@@ -81,6 +81,9 @@ INSERT INTO gcp_iam (principal, kind, role, scope_kind, scope_refs, why) VALUES
 -- Not objectAdmin: it includes objects.delete, and the whole point of the retention
 -- handshake is that the API never removes an object. Caught by the check below, which is
 -- the second time that role has been more than it looked.
+-- objectCreator also forbids overwriting, not just deleting, which is the behaviour we
+-- want: a photograph attached to a care record is evidence, and re-uploading to the same
+-- path would replace it with no trace. Verified against the role reference, not assumed.
 ('dailycare-api','service_account','roles/storage.objectCreator','bucket',ARRAY['dailycare-media'],NULL),
 ('dailycare-api','service_account','roles/storage.objectViewer','bucket',ARRAY['dailycare-media'],NULL),
 ('dailycare-api','service_account','roles/iam.serviceAccountTokenCreator','service_account',
