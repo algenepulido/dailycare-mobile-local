@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is off everywhere, which is Android's default and the correct one: the API is
+  HTTPS and a build that would speak plain HTTP to an arbitrary host can be pointed at a
+  proxy on a ward's wifi.
+
+  The exception is 10.0.2.2, which is not a real address. It exists only inside the Android
+  emulator as an alias for the machine running it, so a build carrying this exception still
+  cannot be talked into a cleartext conversation with anything that exists.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false" />
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">10.0.2.2</domain>
+  </domain-config>
+</network-security-config>

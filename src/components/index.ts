@@ -15,3 +15,4 @@ export { Screen } from './Screen';
 export { SectionHeading } from './SectionHeading';
 export { SetupSheet } from './SetupSheet';
 export { Sheet } from './Sheet';
+export { SignInSheet } from './SignInSheet';

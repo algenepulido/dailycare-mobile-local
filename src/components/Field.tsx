@@ -14,6 +14,14 @@ interface FieldProps {
   sheet?: boolean;
   autoCapitalize?: 'none' | 'words' | 'sentences';
   keyboardType?: 'default' | 'email-address';
+  /**
+   * Dots instead of characters. For the one field that needs it: a ward tablet is held at
+   * arm's length in a corridor, and a password typed in the clear on it is a password
+   * somebody else has read.
+   */
+  secureTextEntry?: boolean;
+  /** So a password manager offers the right thing rather than the last thing. */
+  autoComplete?: 'email' | 'current-password' | 'off';
 }
 
 export function Field({
@@ -26,6 +34,8 @@ export function Field({
   sheet = false,
   autoCapitalize = 'sentences',
   keyboardType = 'default',
+  secureTextEntry = false,
+  autoComplete = 'off',
 }: FieldProps) {
   return (
     <TextInput
@@ -36,6 +46,8 @@ export function Field({
       multiline={multiline}
       autoCapitalize={autoCapitalize}
       keyboardType={keyboardType}
+      secureTextEntry={secureTextEntry}
+      autoComplete={autoComplete}
       accessibilityLabel={accessibilityLabel}
       style={[
         styles.input,

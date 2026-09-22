@@ -10,6 +10,7 @@ import {
   MealRow,
   SetupSheet,
   ReviewSheet,
+  SignInSheet,
   Field,
   ObservationRow,
   PhotoSourceSheet,
@@ -80,8 +81,9 @@ function CareReport({
   namesOpen: boolean;
   setNamesOpen: (open: boolean) => void;
 }) {
-  const { caregiver, resident, updateSetup } = useSession();
+  const { caregiver, resident, updateSetup, account, signOut } = useSession();
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -167,6 +169,20 @@ function CareReport({
           <Text style={styles.badgeText}>Caregiver</Text>
         </View>
         <View style={styles.headerSpacer} />
+        {/*
+          Whether this device is signed in, where a caregiver can see it without going
+          looking. It is deliberately quiet: not being signed in is a normal state for
+          this app, not a warning - the day gets filed either way and the only thing an
+          account changes is whether it travels.
+        */}
+        <Pressable
+          onPress={() => (account ? void signOut() : setSignInOpen(true))}
+          accessibilityRole="button"
+          accessibilityLabel={account ? 'Sign out' : 'Sign in'}
+          style={({ pressed }) => [styles.account, pressed && styles.pressed]}
+        >
+          <Text style={styles.accountText}>{account ? 'Signed in' : 'Sign in'}</Text>
+        </Pressable>
       </View>
 
       <View>
@@ -312,6 +328,8 @@ function CareReport({
         }}
       />
 
+      <SignInSheet open={signInOpen} onClose={() => setSignInOpen(false)} />
+
       <ReviewSheet
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}
@@ -412,6 +430,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarLargeText: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 16, color: color.ink2 },
+  account: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: color.line2,
+  },
+  accountText: { ...type.badge, color: color.ink3 },
   headerSpacer: { width: sizes.avatarLarge },
   badge: {
     flexDirection: 'row',
