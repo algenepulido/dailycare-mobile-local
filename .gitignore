@@ -41,3 +41,10 @@ example
 # generated native folders
 /ios
 /android
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
