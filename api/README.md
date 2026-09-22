@@ -34,3 +34,31 @@ here, to 193 checks, and it is the reason `verify.sh` runs as an ordinary role.
 
 Confirmed the check fails both ways it should: as `postgres` it reports the superuser, and
 as another non-superuser role it reports the wrong name.
+
+## Reads
+
+`audit-logging.sql` calls reads the honest gap in the design: PostgreSQL has no `SELECT`
+trigger, so a read is in the audit trail only if the application says so. It calls that
+"a convention the code has to keep rather than a guarantee the database enforces, and the
+one place where a forgetful handler still produces a gap."
+
+That gap lives here, so this is where it gets closed as far as it can be.
+
+`internal/records` is the only package that reads resident data. Its unexported `read`
+calls `audit_read` first, in the same transaction as the query, so a read missing from the
+trail is a read that did not commit. `audit_read` also refuses to record a read of a
+resident the session cannot see, which makes the access check happen before any row is
+fetched rather than after.
+
+Two tests hold the line, because a comment saying "only read through here" is a comment:
+
+- Nothing outside the package names a PHI table in a query. The list of tables comes from
+  `data_classification`, so a table added to the model next month is covered without anyone
+  remembering — the same reason the completeness views are queries rather than checklists.
+- Inside the package, any query that does not go through `read` has to be named in the test
+  with a reason. There is one: listing residents, because the list is exactly the
+  assignment and a row per resident on every app launch is the event that carries no
+  information, in the volume that makes the rest unreadable.
+
+Both were confirmed to fail: a handler with `FROM care_days` in it, and an undeclared
+method that queries without auditing.

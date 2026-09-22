@@ -32,5 +32,16 @@ docker exec -u postgres -w /sql "$NAME" ./migrate.sh -d dailycare --with-roles >
 docker exec -u postgres "$NAME" psql -q -d dailycare \
   -c "ALTER ROLE dailycare_app LOGIN PASSWORD 'test'" || exit 1
 
+# What the application connects as. Everything that tests behaviour uses this, because a
+# test run as anything else is testing a system nobody deploys.
 export DAILYCARE_TEST_DSN="postgres://dailycare_app:test@127.0.0.1:55432/dailycare?sslmode=disable"
+
+# And a second one for the handful of tests that read the model's own metadata rather than
+# its data - which table holds PHI, what the classification says. The application is
+# deliberately refused that: the access matrix says a list of where the sensitive columns
+# are is not application data, and dailycare_app reading it would be the thing to fix
+# rather than the thing to allow. Source-level guards are not the application, so they get
+# their own connection and say so.
+export DAILYCARE_TEST_ADMIN_DSN="postgres://postgres:postgres@127.0.0.1:55432/dailycare?sslmode=disable"
+
 cd "$HERE" && go test ./... "$@"
