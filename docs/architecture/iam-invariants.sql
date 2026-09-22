@@ -42,10 +42,23 @@ SELECT expect('and CI can act as all four identities, since two of the jobs depl
      AND role = 'roles/iam.serviceAccountUser'
      AND array_length(scope_refs, 1) = 4));
 
-SELECT expect('token creation is on the account itself, never the project',
+SELECT expect('a service account''s token creation is on itself, never the project',
   (SELECT bool_and(scope_kind = 'service_account' AND array_length(scope_refs,1) = 1
                    AND scope_refs[1] = principal)
-   FROM gcp_iam WHERE role = 'roles/iam.serviceAccountTokenCreator'));
+   FROM gcp_iam
+   WHERE role = 'roles/iam.serviceAccountTokenCreator' AND kind = 'service_account'));
+
+-- A person holds it project-wide in dev, which the handover's own argument about the api
+-- account points at. That is a question for Inktree rather than a thing to assert away, so
+-- what is checked is that it is written down with an owner.
+SELECT expect('and where a person holds it project-wide, that is recorded as a question',
+  NOT EXISTS (
+    SELECT 1 FROM gcp_iam g
+    WHERE g.role = 'roles/iam.serviceAccountTokenCreator'
+      AND g.kind = 'person' AND g.scope_kind = 'project'
+      AND NOT EXISTS (SELECT 1 FROM iam_open_questions q
+                      WHERE q.principal = g.principal AND q.role = g.role
+                        AND q.environment = g.environment)));
 
 \echo ''
 \echo '── the media bucket'
@@ -68,10 +81,18 @@ SELECT expect('and the api account can put one there and read it back, and nothi
 SELECT expect('production grants nobody anything',
   (SELECT count(*) = 0 FROM gcp_iam WHERE environment = 'prod'));
 
-SELECT expect('no owner or editor anywhere, and no ability to grant IAM',
+-- We hold none of these. Inktree owning their own projects is correct and is recorded
+-- rather than excluded, so the check names whose access it is about instead of pretending
+-- the binding is not there.
+SELECT expect('we hold no owner or editor anywhere, and cannot grant IAM',
   (SELECT count(*) = 0 FROM gcp_iam
-   WHERE role IN ('roles/owner','roles/editor')
-      OR role LIKE '%projectIamAdmin%' OR role LIKE '%securityAdmin%'));
+   WHERE principal = 'jenith.dev1202@gmail.com'
+     AND (role IN ('roles/owner','roles/editor')
+          OR role LIKE '%projectIamAdmin%' OR role LIKE '%securityAdmin%')));
+
+SELECT expect('and the only owner recorded is Inktree',
+  (SELECT array_agg(DISTINCT principal) = ARRAY['production@inktree.ai']
+   FROM gcp_iam WHERE role = 'roles/owner'));
 
 -- Dev holds admin roles deliberately. The argument only holds while dev has no real data
 -- in it, so the check is the asymmetry rather than a flat ban that would be wrong here.
@@ -137,6 +158,21 @@ END;
 SELECT expect('nothing broad in staging or production, asked of the real policy',
   (SELECT count(*) = 0 FROM iam_broad_in_practice WHERE environment <> 'dev'));
 
+-- Not a failure, a list. Dev is meant to be wide and the argument for it is in gcp-iam.sql;
+-- what is not wanted is for it to widen further without anybody saying so, and a drift of
+-- zero against a policy that was actually read is what says it has not.
+SELECT 'NOTE  ' || count(*)::text || ' broad roles in dev, all declared and argued for'
+FROM iam_broad_in_practice WHERE environment = 'dev';
+
+-- Basic roles are the thing the whole exercise was to avoid. The handover names owner and
+-- editor as deliberately absent; viewer is the third of the three and reads everything in
+-- the project including whatever is added later.
+SELECT expect('no basic role is held by anything that is not a person',
+  (SELECT count(*) = 0 FROM gcp_iam_observed
+   WHERE role IN ('roles/owner','roles/editor','roles/viewer')
+     AND NOT google_managed
+     AND principal NOT LIKE '%@%'));
+
 SELECT expect('nothing is granted that was never declared',
   (SELECT count(*) = 0 FROM gcp_iam_drift WHERE direction = 'granted, not declared'));
 
@@ -146,9 +182,22 @@ SELECT expect('nothing is granted that was never declared',
 SELECT expect('the four org policies and the audit config are written down',
   (SELECT count(*) >= 5 FROM gcp_guardrails));
 
+-- Confirmed against the real project on 22 September with
+--   gcloud resource-manager org-policies describe <constraint> --project=inktree-dailycare-dev
+-- All four enforced. Recorded as a date rather than a claim, because "we checked once" and
+-- "it is still true" are different statements and only one of them ages.
+SELECT expect('and each one says when it was last confirmed against a project',
+  (SELECT bool_and(confirmed_on IS NOT NULL) FROM gcp_guardrails));
+
 SELECT expect('including the one that removes the key nobody should be downloading',
   EXISTS (SELECT 1 FROM gcp_guardrails
           WHERE constraint_name = 'iam.disableServiceAccountKeyCreation'));
+
+SELECT expect('every open question has an owner and a date',
+  (SELECT bool_and(owner <> '' AND raised_on IS NOT NULL) FROM iam_open_questions));
+
+SELECT 'NOTE  ' || count(*)::text || ' IAM questions outstanding with Inktree'
+FROM iam_questions_outstanding;
 
 SELECT expect('and every guardrail says what it is for',
   (SELECT bool_and(why IS NOT NULL AND length(why) > 20) FROM gcp_guardrails));

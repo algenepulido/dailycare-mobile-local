@@ -95,14 +95,58 @@ COMMENT ON COLUMN gcp_iam.expires_on IS
 -- guessed at here. gcp_iam_drift will report them as observed-and-not-declared the first
 -- time it sees a real policy, and then they can be written down from what is actually
 -- granted rather than from what a document says in prose.
+-- These twenty are what the policy actually grants, read with
+-- ./load-iam-policy.sh inktree-dailycare-dev dev rather than transcribed from prose. The
+-- handover described most of them by service - "named admin roles across Cloud Run, Cloud
+-- SQL, Storage, Secret Manager, Artifact Registry, VPC, Service Networking, Cloud
+-- Scheduler, and Service Usage" - and guessing the exact strings from that would have
+-- produced a list that agreed with itself and not with the project.
+--
+-- Three are marked below as worth a question rather than silently written down.
 INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why, temporary) VALUES
 ('dev','jenith.dev1202@gmail.com','person','roles/cloudsql.admin','project',NULL,
- 'Creates the instance. Broader than the proposal asked for, on purpose - see above.',false),
+ 'Creates the instance. Broader than the proposal asked for, on purpose: dev holds synthetic data only and has no path to production, so waiting on somebody for every resource costs more than it protects.',false),
 ('dev','jenith.dev1202@gmail.com','person','roles/storage.admin','project',NULL,
- 'Creates the media and backup buckets, and sets the object roles on them.',false),
+ 'Creates the media and backup buckets and sets the object roles on them.',false),
 ('dev','jenith.dev1202@gmail.com','person','roles/secretmanager.admin','project',NULL,
- 'Adds secret values in dev. In staging this is read-only and Inktree sets values.',false),
-('dev','jenith.dev1202@gmail.com','person','roles/artifactregistry.admin','project',NULL,NULL,false);
+ 'Adds secret values in dev. In staging this is read-only and Inktree sets them.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/artifactregistry.admin','project',NULL,NULL,false),
+('dev','jenith.dev1202@gmail.com','person','roles/run.admin','project',NULL,NULL,false),
+('dev','jenith.dev1202@gmail.com','person','roles/cloudscheduler.admin','project',NULL,
+ 'The retention job runs on a schedule.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/compute.networkAdmin','project',NULL,
+ 'The VPC the instance sits behind, since sql.restrictPublicIp leaves no other way to reach it.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/servicenetworking.networksAdmin','project',NULL,
+ 'Private services access, which is what a private Cloud SQL address needs.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/vpcaccess.admin','project',NULL,
+ 'The connector Cloud Run reaches the instance through.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/serviceusage.serviceUsageAdmin','project',NULL,
+ 'Turning an API on. Enabling one is the first step of most of the above.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/cloudsql.client','project',NULL,NULL,false),
+('dev','jenith.dev1202@gmail.com','person','roles/cloudsql.instanceUser','project',NULL,
+ 'IAM database auth, so there is no password for a person to lose.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountUser','project',NULL,
+ 'Deploying a revision that runs as one of the four.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/logging.viewer','project',NULL,NULL,false),
+('dev','jenith.dev1202@gmail.com','person','roles/logging.configWriter','project',NULL,
+ 'Log sinks and retention.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/monitoring.editor','project',NULL,NULL,false),
+('dev','jenith.dev1202@gmail.com','person','roles/orgpolicy.policyViewer','project',NULL,
+ 'Read the four guardrails. Viewing them, not changing them.',false),
+
+-- The three worth a question. All read as ordinary parts of a self-serve sandbox and all
+-- three are wider than the sentence in the handover that justified the sandbox.
+('dev','jenith.dev1202@gmail.com','person','roles/viewer','project',NULL,
+ 'A basic role. The handover says owner and editor are deliberately absent; viewer is the third of the three and it reads everything in the project, including anything added later. Probably wanted broad read and this was the quick way to it. Worth asking whether it can come off, since the named roles above already carry the reads that are used.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountAdmin','project',NULL,
+ 'Creates and deletes service accounts. Not needed to use the four that exist.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountTokenCreator','project',NULL,
+ 'At project level this is impersonation of every service account in the project. The handover makes exactly this argument about the api account, where it is scoped to the account rather than the project - so the same reasoning points at this one. Impersonation is also how deploys work here, since the no-keys policy leaves no alternative, so the answer may be to scope it to the four rather than remove it.',false);
+
+-- Theirs, recorded so the policy reads the same as this file rather than nearly the same.
+INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why) VALUES
+('dev','production@inktree.ai','person','roles/owner','project',NULL,
+ 'Inktree. Ours to record, not ours to hold.');
 
 -- Staging: exactly the list from the handover, every binding expiring on the same day.
 INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why, temporary, expires_on) VALUES
@@ -211,30 +255,37 @@ CREATE TABLE gcp_guardrails (
   constraint_name text PRIMARY KEY,
   what            text NOT NULL,
   why             text,
-  applies_to      text NOT NULL
+  applies_to      text NOT NULL,
+
+  -- When somebody last asked the project rather than the document. "We checked once" and
+  -- "it is still true" are different statements and only one of them ages.
+  confirmed_on    date
 );
 
-INSERT INTO gcp_guardrails VALUES
+-- Every row below was confirmed on 22 September against inktree-dailycare-dev with
+--   gcloud resource-manager org-policies describe <constraint> --project=<id>
+-- The three boolean ones came back enforced and resourceLocations came back in:us-locations.
+INSERT INTO gcp_guardrails (constraint_name, what, why, applies_to, confirmed_on) VALUES
 ('iam.disableServiceAccountKeyCreation',
  'No service-account JSON keys can be created, for us or for CI.',
  'encryption-and-secrets.sql calls a downloaded key the classic breach vector. This makes it structural rather than a rule: deploys impersonate, and CI authenticates through Workload Identity Federation with nothing stored.',
- 'all three projects'),
+ 'all three projects', DATE '2026-09-22'),
 ('sql.restrictPublicIp',
  'Cloud SQL cannot be given a public address.',
  'The design said the instance has no public address. This makes that unskippable rather than a setting somebody could change in a hurry.',
- 'all three projects'),
+ 'all three projects', DATE '2026-09-22'),
 ('storage.publicAccessPrevention',
  'Buckets cannot be made public.',
  'Signed URLs still work; this only forecloses allUsers.',
- 'all three projects'),
+ 'all three projects', DATE '2026-09-22'),
 ('gcp.resourceLocations',
  'Resources must be created in US locations. The value is in:us-locations.',
  'A BAA covers the processing, not the geography, and the facilities are US ones. Picking us-central1 everywhere means this is never noticed, which is the point of a guardrail.',
- 'all three projects'),
+ 'all three projects', DATE '2026-09-22'),
 ('dataAccessAuditLogs',
  'Data Access audit logging is on for all services: ADMIN_READ, DATA_READ, DATA_WRITE.',
  'Off by default in a new project. This is the who-looked-at-which-resource trail, and it is the infrastructure half of the read-auditing gap audit-logging.sql flags on the database side.',
- 'dev and staging');
+ 'dev and staging', DATE '2026-09-22');
 
 
 -- ── what is still Inktree's ────────────────────────────────────────────────────
@@ -328,6 +379,13 @@ CREATE TABLE gcp_iam_observed (
   scope_ref    text NOT NULL DEFAULT '',
 
   has_condition boolean NOT NULL DEFAULT false,
+
+  -- Google creates these when an API is enabled and maintains them itself. Nobody granted
+  -- them and nobody can meaningfully remove them, so they are recorded and marked rather
+  -- than filtered out: a reviewer should see the whole policy, and reporting thirty of
+  -- them as undeclared over-grants would bury the two lines that matter.
+  google_managed boolean NOT NULL DEFAULT false,
+
   observed_at  timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (environment, principal, role, scope_kind, scope_ref)
 );
@@ -377,7 +435,7 @@ FROM gcp_iam_observed o
 LEFT JOIN declared d
   ON d.environment = o.environment AND d.principal = o.principal AND d.role = o.role
  AND d.scope_kind = o.scope_kind AND coalesce(d.scope_ref,'') = o.scope_ref
-WHERE d.principal IS NULL;
+WHERE d.principal IS NULL AND NOT o.google_managed;
 
 COMMENT ON VIEW gcp_iam_drift IS
   'Both directions. "Granted, not declared" is the half that finds an over-grant nobody wrote
@@ -387,12 +445,17 @@ COMMENT ON VIEW gcp_iam_drift IS
 -- The question the first version of this file could not answer. Asked of the real policy,
 -- not of the table above.
 CREATE VIEW iam_broad_in_practice AS
-SELECT environment, principal, role
+SELECT environment, principal, role, google_managed
 FROM gcp_iam_observed
-WHERE role IN ('roles/owner','roles/editor','roles/viewer')
+WHERE (role IN ('roles/owner','roles/editor','roles/viewer')
    OR role LIKE '%.admin'
    OR role LIKE '%projectIamAdmin%'
-   OR role LIKE '%securityAdmin%';
+   OR role LIKE '%securityAdmin%'
+   -- Project-level token creation is impersonation of everything in the project. The
+   -- handover makes this argument itself about the api account, where it is scoped to
+   -- the account rather than the project.
+   OR (role = 'roles/iam.serviceAccountTokenCreator' AND scope_kind = 'project'))
+  AND NOT google_managed;
 
 COMMENT ON VIEW iam_broad_in_practice IS
   'Dev will appear here and that is expected and argued for in this file. Staging or
@@ -409,3 +472,52 @@ GROUP BY 1, 2 ORDER BY 1, 2;
 COMMENT ON VIEW gcp_iam_unobserved IS
   'Declared and never checked against anything. The honest half of a drift report: silence
    here is the only silence that means agreement.';
+
+
+-- ── the things that are wider than we would have chosen ────────────────────────
+--
+-- Found by reading the real policy rather than by reading the handover, which described
+-- dev's grants by service rather than by role. None of them is a mistake; all three are
+-- ordinary parts of a self-serve sandbox and all three are wider than the sentence that
+-- justified the sandbox. Recorded the way administrative_controls records a gap: with an
+-- owner and what it needs, so it is a question waiting for an answer rather than a silence.
+--
+-- The checks assert these are recorded and owned. They do not assert they are resolved,
+-- because a suite that fails until somebody else answers a question is a suite people
+-- learn to run with one known failure - and then with two.
+
+CREATE TABLE iam_open_questions (
+  id           text PRIMARY KEY,
+  environment  gcp_environment NOT NULL REFERENCES gcp_projects(environment),
+  principal    text NOT NULL,
+  role         text NOT NULL,
+  question     text NOT NULL,
+  owner        text NOT NULL,
+  raised_on    date NOT NULL,
+  answered_on  date,
+  answer       text,
+  CHECK ((answered_on IS NULL) = (answer IS NULL))
+);
+
+INSERT INTO iam_open_questions (id, environment, principal, role, question, owner, raised_on) VALUES
+('viewer_is_a_basic_role','dev','jenith.dev1202@gmail.com','roles/viewer',
+ 'The handover names owner and editor as deliberately absent. viewer is the third basic role and reads everything in the project, including whatever is added to it later. The named roles already carry the reads that get used, so this may be removable - worth asking rather than assuming it was deliberate.',
+ 'Inktree', DATE '2026-09-22'),
+
+('project_wide_impersonation','dev','jenith.dev1202@gmail.com','roles/iam.serviceAccountTokenCreator',
+ 'At project level this is impersonation of every service account in the project. The handover makes exactly this argument about the api account, where it is scoped to the account rather than the project. Removing it outright is probably wrong - the no-keys policy means deploys run by impersonation - so the likely answer is scoping it to the four rather than the project.',
+ 'Inktree', DATE '2026-09-22'),
+
+('service_account_admin','dev','jenith.dev1202@gmail.com','roles/iam.serviceAccountAdmin',
+ 'Creates and deletes service accounts. Using the four that exist does not need it. May have come along with the impersonation grant.',
+ 'Inktree', DATE '2026-09-22'),
+
+('staging_cannot_be_checked','staging','jenith.dev1202@gmail.com','roles/resourcemanager.projects.getIamPolicy',
+ 'Reading a project policy needs getIamPolicy, which the deploy-only set does not carry - so gcp_iam_drift can say nothing about staging. Either a read role goes on, or Inktree runs load-iam-policy.sh there. Not urgent while staging is empty; it stops being fine the moment something is deployed to it.',
+ 'Inktree', DATE '2026-09-22');
+
+CREATE VIEW iam_questions_outstanding AS
+SELECT id, environment, principal, role, owner, raised_on,
+       current_date - raised_on AS days_open
+FROM iam_open_questions WHERE answered_on IS NULL
+ORDER BY raised_on, id;

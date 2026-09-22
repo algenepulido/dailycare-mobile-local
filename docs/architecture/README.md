@@ -48,6 +48,7 @@ constraint and a constraint are different things, and only one of them stops a m
 | `verify.sh` | Runs every suite, each in its own database, and exits non-zero if anything failed. |
 | `migrate.sh` | Applies the model to a database once each and records what went in. What deploys, and what builds the database every check runs against. |
 | `model.list` | The model in the order it has to be applied. One list, read by both scripts. |
+| `load-iam-policy.sh` | Reads a real GCP policy and prints the SQL that records it. Prints; it does not write, and nothing here calls Google. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
 | `inktree-alignment.md` | Where this model meets the InkTree field guide and where it does not, and the one difference that is a boundary rather than a preference. |
 
@@ -69,7 +70,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 484 checks across fourteen suites
+./verify.sh                  # 489 checks across fourteen suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -207,6 +208,8 @@ SELECT * FROM iam_expiring;           -- staging closes on its own, on 20 Decemb
 SELECT * FROM iam_theirs;             -- what stays with Inktree
 SELECT * FROM gcp_iam_drift;          -- declared against a loaded policy, both directions
 SELECT * FROM iam_broad_in_practice;  -- and what the real policy actually hands out
+SELECT * FROM gcp_iam_unobserved;     -- and what has never been checked against anything
+SELECT * FROM iam_questions_outstanding;
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
