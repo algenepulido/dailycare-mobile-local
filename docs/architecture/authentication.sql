@@ -106,6 +106,31 @@ COMMENT ON FUNCTION session_is_valid(text) IS
    nowhere else.';
 
 
+-- Whose session this is. Definer for the same reason session_is_valid is: it answers a
+-- question asked before there is an identity, which is the question that produces one.
+--
+-- It returns nothing for a session that is not currently usable, so a revoked or expired
+-- token cannot be turned back into a name. Knowing the digest is the authorisation, and
+-- what comes back is a uuid - not an address, not a display name.
+
+CREATE OR REPLACE FUNCTION session_owner(candidate_hash text)
+RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+  SELECT s.user_id FROM sessions s
+  JOIN users u ON u.id = s.user_id
+  WHERE s.refresh_hash = candidate_hash
+    AND s.revoked_at IS NULL
+    AND s.expires_at > now()
+    AND (s.idle_expires_at IS NULL OR s.idle_expires_at > now())
+    AND u.deactivated_at IS NULL
+$$;
+
+COMMENT ON FUNCTION session_owner(text) IS
+  'The other half of session_is_valid: the same conditions, answering who rather than
+   whether. Without it the API can rotate a session and then not know whose it was, because
+   every policy on sessions needs the identity this is being asked for.';
+
+
 -- Handing out the first session. New, because there was nowhere for one to come from:
 -- the application holds no INSERT on sessions, deliberately - with it, a compromised
 -- handler could mint a session for any user id it liked - so the row has to be written by
@@ -333,6 +358,7 @@ DO $$ BEGIN
     -- an invitation all failed with permission denied on a real database. The functions
     -- are definers now, each with the check that makes handing it out safe.
     GRANT EXECUTE ON FUNCTION start_session(uuid, text, text, interval, interval) TO dailycare_app;
+    GRANT EXECUTE ON FUNCTION session_owner(text)                       TO dailycare_app;
     GRANT EXECUTE ON FUNCTION session_is_valid(text)                    TO dailycare_app;
     GRANT EXECUTE ON FUNCTION rotate_session(text, text, interval)      TO dailycare_app;
     GRANT EXECUTE ON FUNCTION revoke_session(text)                      TO dailycare_app;

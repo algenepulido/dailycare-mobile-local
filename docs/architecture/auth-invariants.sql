@@ -344,15 +344,15 @@ SELECT expect('and the identity is put back afterwards',
 SELECT expect('every function the API needs runs as its definer',
   (SELECT count(*) = 0 FROM pg_proc p
    JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
-   WHERE p.proname IN ('session_is_valid','start_session','rotate_session',
+   WHERE p.proname IN ('session_is_valid','session_owner','start_session','rotate_session',
                        'revoke_session','revoke_all_sessions','touch_session',
                        'consume_token','credential_for_sign_in')
      AND NOT p.prosecdef));
 
 SELECT expect('and the application may call each of them',
-  (SELECT count(*) = 8 FROM pg_proc p
+  (SELECT count(*) = 9 FROM pg_proc p
    JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
-   WHERE p.proname IN ('session_is_valid','start_session','rotate_session',
+   WHERE p.proname IN ('session_is_valid','session_owner','start_session','rotate_session',
                        'revoke_session','revoke_all_sessions','touch_session',
                        'consume_token','credential_for_sign_in')
      AND has_function_privilege('dailycare_app', p.oid, 'EXECUTE')));
@@ -377,6 +377,16 @@ SELECT expect('but a person may sign themselves out everywhere',
 \set QUIET on
 SELECT set_config('app.user_id', '', false);
 \set QUIET off
+
+-- session_owner is how a refresh token becomes a name, so a token that should no longer
+-- work must not produce one. Same conditions as session_is_valid, and a check that the two
+-- cannot drift apart.
+SELECT expect('a revoked session has no owner to find',
+  (SELECT session_owner(h('her_phone')) IS NULL));
+
+SELECT expect('and whether a session is valid and whether it has an owner agree',
+  (SELECT bool_and(session_is_valid(refresh_hash) = (session_owner(refresh_hash) IS NOT NULL))
+   FROM sessions));
 
 \echo ''
 \echo '── and the digest is not reachable any other way'
