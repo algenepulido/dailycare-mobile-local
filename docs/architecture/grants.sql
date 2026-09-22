@@ -343,7 +343,7 @@ INSERT INTO data_classification (table_name, column_name, class, note)
 SELECT t, c.column_name,
        CASE WHEN c.column_name = 'principal' THEN 'identifying' ELSE 'operational' END::data_class,
        CASE WHEN c.column_name = 'principal' THEN 'A person or a service account.' END
-FROM unnest(ARRAY['gcp_iam','gcp_iam_observed','gcp_projects','gcp_guardrails']) t
+FROM unnest(ARRAY['gcp_iam','gcp_iam_observed','gcp_iam_observations','gcp_projects','gcp_guardrails']) t
 JOIN information_schema.columns c
   ON c.table_schema = 'public' AND c.table_name = t;
 
@@ -355,6 +355,6 @@ FROM unnest(ARRAY['gcp_iam','gcp_iam_observed']) t;
 INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
 SELECT a.actor, t, o.op::access_operation, false, NULL,
        'Not application data. A list of who holds which cloud role is a map of the system, and the application has no reason to hold one.'
-FROM unnest(ARRAY['gcp_iam','gcp_iam_observed','gcp_projects','gcp_guardrails']) t
+FROM unnest(ARRAY['gcp_iam','gcp_iam_observed','gcp_iam_observations','gcp_projects','gcp_guardrails']) t
 CROSS JOIN (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
 CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;

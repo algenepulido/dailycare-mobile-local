@@ -141,6 +141,15 @@ INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs,
  ARRAY['dc-dev-api'],
  'Signs photo URLs through signBlob without ever holding a key. On itself: at project level this role is impersonation of everything. This is the mechanism behind the platform_managed row for media_signing_key in secrets_inventory.'),
 ('dev','dc-dev-api','service_account','roles/logging.logWriter','project',NULL,NULL),
+-- These two were not designed, they were found. The handover said the api account holds
+-- "logging, trace, metrics" and the exact role strings were deliberately not guessed at;
+-- the first drift run against the real console reported them as granted and not declared,
+-- which is the mechanism doing its job in the direction that matters. Both are write-only
+-- telemetry and neither reads anything, so they are declared rather than questioned.
+('dev','dc-dev-api','service_account','roles/cloudtrace.agent','project',NULL,
+ 'Found by drift, not designed. Writes spans, reads nothing.'),
+('dev','dc-dev-api','service_account','roles/monitoring.metricWriter','project',NULL,
+ 'Found by drift, not designed. Writes metrics, reads nothing.'),
 
 ('dev','dc-dev-retention','service_account','roles/cloudsql.client','project',NULL,NULL),
 ('dev','dc-dev-retention','service_account','roles/cloudsql.instanceUser','project',NULL,NULL),
@@ -324,14 +333,36 @@ CREATE TABLE gcp_iam_observed (
 );
 
 COMMENT ON TABLE gcp_iam_observed IS
-  'What a real policy actually says, loaded from a gcloud dump. Empty until somebody loads
-   one, and gcp_iam_drift says so rather than reporting agreement.';
+  'What a real policy actually says, loaded from a gcloud dump or read off the console.
+   Empty until somebody loads one, and gcp_iam_drift says so rather than reporting
+   agreement.';
+
+-- What a load actually looked at. get-iam-policy on a project returns project-level
+-- bindings and nothing else - a secret, a bucket and a service account each carry their own
+-- policy and have to be asked separately. Without this, the first real load reports every
+-- secret binding as missing, and a drift report that cries wolf on its first outing is a
+-- drift report nobody opens again.
+CREATE TABLE gcp_iam_observations (
+  environment gcp_environment NOT NULL REFERENCES gcp_projects(environment),
+  scope_kind  iam_scope_kind NOT NULL,
+  scope_ref   text NOT NULL DEFAULT '',
+  source      text NOT NULL,
+  observed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (environment, scope_kind, scope_ref)
+);
+
+COMMENT ON TABLE gcp_iam_observations IS
+  'One row per policy actually read. Drift only compares scopes that appear here.';
 
 CREATE VIEW gcp_iam_drift AS
 WITH declared AS (
   SELECT g.environment, g.principal, g.role, g.scope_kind,
          unnest(coalesce(g.scope_refs, ARRAY[NULL::text])) AS scope_ref
   FROM gcp_iam g
+  -- Only where a policy of that shape was actually read. A binding on a bucket nobody
+  -- looked at is unknown, and unknown is not the same as missing.
+  WHERE EXISTS (SELECT 1 FROM gcp_iam_observations o
+                WHERE o.environment = g.environment AND o.scope_kind = g.scope_kind)
 )
 SELECT 'declared, not granted' AS direction, d.environment, d.principal, d.role,
        d.scope_kind, d.scope_ref
@@ -366,3 +397,15 @@ WHERE role IN ('roles/owner','roles/editor','roles/viewer')
 COMMENT ON VIEW iam_broad_in_practice IS
   'Dev will appear here and that is expected and argued for in this file. Staging or
    production appearing here is not.';
+
+
+CREATE VIEW gcp_iam_unobserved AS
+SELECT g.environment, g.scope_kind, count(*) AS declared_bindings
+FROM gcp_iam g
+WHERE NOT EXISTS (SELECT 1 FROM gcp_iam_observations o
+                  WHERE o.environment = g.environment AND o.scope_kind = g.scope_kind)
+GROUP BY 1, 2 ORDER BY 1, 2;
+
+COMMENT ON VIEW gcp_iam_unobserved IS
+  'Declared and never checked against anything. The honest half of a drift report: silence
+   here is the only silence that means agreement.';
