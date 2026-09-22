@@ -28,6 +28,50 @@
 -- only the refresh token has a row, and only as a digest.
 
 
+-- ════════════════════════════════════════════════════════════════════ signing in
+--
+-- The step before a session exists, and the one the access model cannot help with: every
+-- read policy on users is predicated on app_user_id(), and at sign-in there is no such
+-- thing yet. Without something here the application sees zero rows for any email and
+-- nobody can ever sign in - which is what a real database said when it was asked.
+--
+-- So one definer function, and it is deliberately narrow.
+--
+-- It refuses to run once anybody is identified. An authenticated request has no business
+-- asking for a credential, so the one path to a password digest is open only in the
+-- moment before there is a session, which is the only moment it is needed. Without that
+-- line this function is a hash-extraction tool for whoever gets a session first.
+--
+-- It says nothing different about an unknown address than about a known one with a wrong
+-- password: the caller gets a row or it does not, and the API answers the same either way.
+-- Deactivated accounts return nothing, so a termination closes the door rather than
+-- leaving it to a handler to check afterwards.
+
+CREATE OR REPLACE FUNCTION credential_for_sign_in(candidate_email citext)
+RETURNS TABLE (user_id uuid, password_hash text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF nullif(current_setting('app.user_id', true), '') IS NOT NULL THEN
+    RAISE EXCEPTION 'credential_for_sign_in is for the step before a session'
+      USING ERRCODE = 'insufficient_privilege',
+            HINT = 'An identified request does not need a password digest.';
+  END IF;
+
+  RETURN QUERY
+    SELECT u.id, u.password_hash
+    FROM users u
+    WHERE u.email = candidate_email
+      AND u.deactivated_at IS NULL
+      AND u.password_hash IS NOT NULL;   -- an invitation that has not been accepted
+END; $$;
+
+COMMENT ON FUNCTION credential_for_sign_in(citext) IS
+  'The only route to a password digest, and only before anybody is identified. Verifying
+   it is the API''s job - argon2id is not something PostgreSQL can do - and that is the
+   whole of what the API decides about authentication.';
+
+
 -- ════════════════════════════════════════════════════════════════════ sessions
 
 CREATE OR REPLACE FUNCTION session_is_valid(candidate_hash text)

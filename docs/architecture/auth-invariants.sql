@@ -264,6 +264,84 @@ SELECT expect('losing the second device does not sign her out of the first',
   session_is_valid(h('reinstalled')) AND NOT session_is_valid(h('second_device')));
 
 \echo ''
+\echo '── signing in, which is the step the policies cannot help with'
+
+-- Every read policy on users needs app_user_id(), and sign-in is what produces one. Before
+-- credential_for_sign_in existed the application saw zero rows for any address, which a
+-- real database confirmed when it was asked: nobody could sign in at all.
+--
+-- The fixtures above carry no digests, because nothing until now needed one.
+--
+-- And the identity is cleared first: earlier checks in this file set one session-wide, and
+-- credential_for_sign_in refuses while anybody is identified - which is the point of it.
+-- Arriving here still identified made four of these read as errors rather than answers.
+\set QUIET on
+SELECT set_config('app.user_id', '', false);
+INSERT INTO users (id, email, display_name, password_hash) VALUES
+  ('b0000000-0000-0000-0000-00000000000b', 'signing@example.test', 'Sandra',
+   '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhcw'),
+  ('b1000000-0000-0000-0000-00000000001b', 'fired@example.test', 'Frank',
+   '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhcw');
+UPDATE users SET deactivated_at = now() WHERE id = 'b1000000-0000-0000-0000-00000000001b';
+\set QUIET off
+
+SELECT expect('the application can find a credential with nobody identified',
+  (SELECT count(*) = 1 FROM credential_for_sign_in('signing@example.test')));
+
+SELECT expect('and an address nobody has answers the same way an absent one does',
+  (SELECT count(*) = 0 FROM credential_for_sign_in('nobody@example.test')));
+
+-- A termination closes the door here rather than leaving it to a handler afterwards.
+SELECT expect('a deactivated account has no credential to find',
+  (SELECT count(*) = 0 FROM credential_for_sign_in('fired@example.test')));
+
+-- An invitation that was sent and never accepted has no digest, and must not be a way in.
+SELECT expect('and neither does an invitation nobody accepted',
+  (SELECT count(*) = 0 FROM credential_for_sign_in('maria@example.test')));
+
+-- The narrowing that makes the function safe to grant at all. An identified request has no
+-- business asking for a digest, so the route to one is open only in the moment before there
+-- is a session. Without this line the function is a hash-extraction tool for whoever gets a
+-- session first.
+\set QUIET on
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+\set QUIET off
+
+SELECT expect_rejected('and it refuses once anybody is identified',
+  $$SELECT * FROM credential_for_sign_in('signing@example.test')$$);
+
+\set QUIET on
+SELECT set_config('app.user_id', '', false);
+\set QUIET off
+
+-- And the identity really is gone again, so nothing below is answering as Sandra.
+SELECT expect('and the identity is put back afterwards',
+  nullif(current_setting('app.user_id', true), '') IS NULL);
+
+\echo ''
+\echo '── and the digest is not reachable any other way'
+
+-- data_classification has said "Never returned, never logged" about password_hash since the
+-- beginning, and until the grant was narrowed that was a property of whichever handler last
+-- touched it: a session could read its own digest through users_self.
+SELECT expect('the application is not granted the password column',
+  (SELECT count(*) = 0 FROM information_schema.role_column_grants
+   WHERE grantee = 'dailycare_app' AND table_name = 'users'
+     AND column_name = 'password_hash'));
+
+SELECT expect('but is granted the rest of the row',
+  (SELECT count(*) >= 8 FROM information_schema.role_column_grants
+   WHERE grantee = 'dailycare_app' AND table_name = 'users'
+     AND privilege_type = 'SELECT'));
+
+-- A table-level grant is every column, and revoking one afterwards does not narrow it. So
+-- the absence of that grant is the thing that makes the column grant mean anything.
+SELECT expect('and no table-level grant on users quietly puts it back',
+  (SELECT count(*) = 0 FROM information_schema.role_table_grants
+   WHERE grantee = 'dailycare_app' AND table_name = 'users'
+     AND privilege_type = 'SELECT'));
+
+\echo ''
 \echo '   sessions on record:'
 SELECT email, active, revoked, expired FROM session_inventory ORDER BY email;
 

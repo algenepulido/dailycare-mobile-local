@@ -43,12 +43,29 @@ SELECT 'dailycare_app', t, 'SELECT', NULL, NULL
 FROM unnest(ARRAY[
   'residents','care_days','care_day_meals','care_day_concerns','medication_events',
   'media_objects','resident_contacts','imported_content','content_responses',
-  'users','facility_members','assignments','facilities','sessions',
+  'facility_members','assignments','facilities','sessions',
   'retention_policies','audit_events','deployment','boundary_channels',
   'notification_templates','monitoring_signals',
   -- Views. never_log is a list of field names and holds nothing about anybody.
   'never_log'
 ]) AS t;
+
+-- users is named column by column, which is the only way to leave one out: PostgreSQL
+-- treats a table-level grant as every column, and revoking a single column afterwards does
+-- not narrow it.
+--
+-- The column left out is password_hash. data_classification has said "Never returned,
+-- never logged" about it since the beginning, and that was a property of whichever handler
+-- last touched it rather than of the system - a session could read its own digest, which a
+-- real database confirmed when it was asked. Now the only route to one is
+-- credential_for_sign_in, which refuses to run for anybody who is already identified.
+INSERT INTO app_privileges (grantee, table_name, privilege, columns, note)
+SELECT 'dailycare_app', 'users', 'SELECT',
+       array_agg(c.column_name::text ORDER BY c.ordinal_position),
+       'Every column but password_hash. See credential_for_sign_in.'
+FROM information_schema.columns c
+WHERE c.table_schema = 'public' AND c.table_name = 'users'
+  AND c.column_name <> 'password_hash';
 
 -- ── and what it may write ──────────────────────────────────────────────────────
 
@@ -81,6 +98,13 @@ INSERT INTO app_privileges (grantee, table_name, privilege, columns, note) VALUE
 -- Nothing anywhere grants the application DELETE. That is not an omission, and the check
 -- below is what keeps it from becoming one.
 
+
+-- ── the definer functions the application is allowed to call ───────────────────
+--
+-- EXECUTE on a SECURITY DEFINER function is a privilege like any other, and this one is
+-- the single route to a password digest.
+
+GRANT EXECUTE ON FUNCTION credential_for_sign_in(citext) TO dailycare_app;
 
 -- ════════════════════════════════════════════════════════════════════ applying it
 
