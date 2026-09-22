@@ -153,21 +153,35 @@ func TestSignOutEndsThisDeviceAndLeavesOthers(t *testing.T) {
 	}
 }
 
-func TestNobodySignsAnybodyElseOutOfEverything(t *testing.T) {
-	s, _, mine := store(t)
+// Two layers, and they are different claims.
+//
+// The API cannot express the attack: SignOutEverywhere takes a Caller and uses its UserID
+// as the target, so there is no parameter for somebody else. The first version of this
+// test passed a different uuid and expected a refusal, which could never happen - it was
+// asserting something it had no way to reach.
+//
+// The database refuses it independently, and that is worth its own check because the API
+// is not the only thing that will ever call these functions.
+func TestSigningOutEverywhereOnlyEverEndsYourOwn(t *testing.T) {
+	s, d, mine := store(t)
 	ctx := context.Background()
-
-	// The database refuses to end sessions for anybody but the caller.
-	_, err := s.SignOutEverywhere(ctx, db.Caller{UserID: uuid.New(), Role: "caregiver"})
-	if err == nil {
-		t.Fatal("signed somebody else out of everything")
-	}
 
 	if _, err := s.SignIn(ctx, knownEmail, knownPass, "a test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SignOutEverywhere(ctx, db.Caller{UserID: mine, Role: "caregiver"}); err != nil {
 		t.Fatalf("a person could not sign themselves out everywhere: %v", err)
+	}
+
+	// The same function, asked directly with an identity that is not the target. This is
+	// the shape the API has no way to produce, and the database still has to refuse it.
+	stranger := uuid.New()
+	err := d.InSession(ctx, db.Caller{UserID: stranger, Role: "caregiver"}, func(tx pgx.Tx) error {
+		var n int
+		return tx.QueryRow(ctx, `SELECT revoke_all_sessions($1)`, mine).Scan(&n)
+	})
+	if err == nil {
+		t.Fatal("the database let one person end another's sessions")
 	}
 }
 

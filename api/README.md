@@ -62,3 +62,53 @@ Two tests hold the line, because a comment saying "only read through here" is a 
 
 Both were confirmed to fail: a handler with `FROM care_days` in it, and an undeclared
 method that queries without auditing.
+
+## The surface
+
+    POST   /v1/sessions            sign in
+    POST   /v1/sessions/refresh    rotate
+    DELETE /v1/sessions            sign out this device
+    DELETE /v1/sessions/all        sign out everywhere (identified)
+    GET    /v1/residents           (identified)
+    GET    /v1/residents/{id}/days/{date}   (identified)
+    GET    /healthz
+
+Three of those are unauthenticated and nothing else is. `identified` refuses anything
+without a verifiable access token before the handler runs, because a handler that has to
+remember to check is a handler that one day will not.
+
+The access token is not a JWT. A JWT carries the algorithm inside the token, so the
+verifier is told how to verify by the thing it is verifying — that is `alg=none` and the
+RS256-to-HS256 confusion, and libraries have shipped both for a decade. One algorithm here,
+not negotiable, not in the token. It carries a user and an expiry and nothing else: a role
+or a facility in there would be a copy of the access model made at sign-in and stale the
+moment somebody's shift changed.
+
+## What the caller is not told
+
+A resident you may not see and a resident who does not exist are the same 404 with the same
+sentence. Otherwise a caregiver can enumerate the building by asking about uuids until the
+answer changes.
+
+An expired token and a forged one are the same 401. The client's next move is identical,
+and telling the difference to somebody holding a forgery tells them the forgery was
+well-formed.
+
+Sign-in has one failure for four causes. "This address exists" is worth having if the next
+step is a mail to a caregiver about a resident they know by name — so the password is
+verified against a decoy digest when there is no account, and the answer takes about as
+long either way.
+
+The database's error goes to the log with the request id, never to the caller. A handler
+that returns it says which table exists, which constraint was tripped, and often the value
+that tripped it.
+
+## Logging
+
+`never_log` is computed from the classification — every phi, identifying or secret column,
+minus the identifiers a log line exists to carry. The process reads it at start-up and
+refuses to start if the query fails or comes back empty, because a logger that quietly fell
+back to an empty list would be a logger with no rules at the moment nobody was watching.
+
+A forbidden field keeps its name and loses its value. Dropping it entirely would leave a
+line that reads as though nothing was there.
