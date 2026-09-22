@@ -60,6 +60,17 @@ SELECT expect('and where a person holds it project-wide, that is recorded as a q
                       WHERE q.principal = g.principal AND q.role = g.role
                         AND q.environment = g.environment)));
 
+-- Keyless CI is only as narrow as the attribute the trust is pinned to. An unpinned pool
+-- - or one pinned on something an outsider controls - means any GitHub workflow anywhere
+-- can deploy to this project, which is the supply-chain shape of leaving a key on a laptop.
+SELECT expect('CI''s federated trust is pinned to the organisation that owns the code',
+  (SELECT bool_and(principal LIKE '%/attribute.repository_owner/dailycare-hq')
+   FROM gcp_iam WHERE role = 'roles/iam.workloadIdentityUser'));
+
+SELECT expect('and it only lets them be the deploy account, nothing else',
+  (SELECT bool_and(scope_kind = 'service_account' AND scope_refs = ARRAY['dc-dev-github-actions'])
+   FROM gcp_iam WHERE role = 'roles/iam.workloadIdentityUser'));
+
 \echo ''
 \echo '── the media bucket'
 
@@ -68,7 +79,7 @@ SELECT expect('and where a person holds it project-wide, that is recorded as a q
 -- with the retention handshake never happening.
 SELECT expect('only retention may delete from a media bucket',
   (SELECT array_agg(DISTINCT principal) = ARRAY['dc-dev-retention'] FROM gcp_iam
-   WHERE scope_kind = 'bucket' AND scope_refs && ARRAY['dc-dev-media']
+   WHERE scope_kind = 'bucket' AND scope_refs && ARRAY['inktree-dailycare-dev-media']
      AND role = 'roles/storage.objectAdmin'));
 
 SELECT expect('and the api account can put one there and read it back, and nothing else',

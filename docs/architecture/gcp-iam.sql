@@ -24,7 +24,11 @@
 -- often than off it, but not never.
 
 CREATE TYPE gcp_environment AS ENUM ('dev', 'staging', 'prod');
-CREATE TYPE iam_principal_kind AS ENUM ('person', 'service_account');
+-- Three, because a federated principal set is neither of the other two. It is not an
+-- identity at all: it is a rule that says which external tokens may act as one, and
+-- checks written for accounts ask the wrong questions about it - it has no environment
+-- prefix in its name and no counterpart in the other project.
+CREATE TYPE iam_principal_kind AS ENUM ('person', 'service_account', 'federated');
 CREATE TYPE iam_scope_kind AS ENUM
   ('project', 'secret', 'bucket', 'service_account', 'repository');
 
@@ -215,6 +219,24 @@ INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs,
  ARRAY['dc-dev-api','dc-dev-retention','dc-dev-integration','dc-dev-backup'],
  'Deploys as them. No secret and no database reach - CI needs neither, and has been the way into plenty of systems that gave it both. Inktree had this on api and retention only and widened it to match: the integration and backup jobs have to deploy somehow.');
 
+-- ── how CI signs in without a key ─────────────────────────────────────────────
+--
+-- Found by drift rather than written down: the binding that makes keyless CI work. A
+-- GitHub Actions run presents an OIDC token, and this lets a token whose
+-- repository_owner claim is dailycare-hq act as the deploy account. No JSON key exists
+-- anywhere, which is the point of iam.disableServiceAccountKeyCreation.
+--
+-- The principal is a set rather than an identity, and the attribute it is pinned on is
+-- the whole of the trust. Pinned to the owner, any repository in that org can deploy -
+-- which is what Inktree intended and says so, since splitting the backend out of
+-- dailycare-mobile should not need an IAM change. Pinned wider than that, or to nothing,
+-- and any GitHub repository in the world could.
+
+INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why) VALUES
+('dev','//iam.googleapis.com/projects/144065101336/locations/global/workloadIdentityPools/dc-dev-github-pool/attribute.repository_owner/dailycare-hq',
+ 'federated','roles/iam.workloadIdentityUser','service_account',ARRAY['dc-dev-github-actions'],
+ 'Keyless CI. The trust is the attribute in the principal: repository_owner = dailycare-hq, so any repository in that org deploys and nothing outside it can.');
+
 -- Staging mirrors dev with dc-stg names. Same shape, so the differences between the two
 -- environments are the ones above rather than ones nobody meant.
 INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why)
@@ -223,10 +245,21 @@ SELECT 'staging', replace(principal,'dc-dev-','dc-stg-'), kind, role, scope_kind
             THEN (SELECT array_agg(replace(r,'dc-dev-','dc-stg-')) FROM unnest(scope_refs) r)
             ELSE scope_refs END,
        why
-FROM gcp_iam WHERE environment = 'dev' AND kind = 'service_account';
+FROM gcp_iam WHERE environment = 'dev' AND kind = 'service_account'
+  -- Not the federated principal: staging has a pool of its own, with its own project
+  -- number in the name, so copying dev's would name a pool that does not exist there.
+  -- The federated principal is excluded by its kind: staging has a pool of its own, with
+  -- its own project number in the name, so copying dev's would name one that is not there.
+  AND kind = 'service_account';
 
 
--- ── the buckets, which do not exist yet ────────────────────────────────────────
+-- ── the buckets ───────────────────────────────────────────────────────────────
+--
+-- Named after the project, which is the convention Inktree's own state bucket already
+-- uses. This file first said dc-dev-media, matching the service accounts, while the
+-- Terraform that made them said inktree-dailycare-dev-media - two files of mine
+-- disagreeing, found by loading the real bucket policies and seeing the same four
+-- bindings reported in both directions at once.
 --
 -- Creating them is ours, in dev. These rows are declared and not granted, and
 -- gcp_iam_drift will say so until the buckets are made - which is the correct report, not
@@ -238,12 +271,12 @@ FROM gcp_iam WHERE environment = 'dev' AND kind = 'service_account';
 -- The first version of this file gave the api objectAdmin and the checks caught it.
 
 INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why) VALUES
-('dev','dc-dev-api','service_account','roles/storage.objectCreator','bucket',ARRAY['dc-dev-media'],
+('dev','dc-dev-api','service_account','roles/storage.objectCreator','bucket',ARRAY['inktree-dailycare-dev-media'],
  'Create and never replace. An overwrite to the same path would replace evidence with no trace.'),
-('dev','dc-dev-api','service_account','roles/storage.objectViewer','bucket',ARRAY['dc-dev-media'],NULL),
-('dev','dc-dev-retention','service_account','roles/storage.objectAdmin','bucket',ARRAY['dc-dev-media'],
+('dev','dc-dev-api','service_account','roles/storage.objectViewer','bucket',ARRAY['inktree-dailycare-dev-media'],NULL),
+('dev','dc-dev-retention','service_account','roles/storage.objectAdmin','bucket',ARRAY['inktree-dailycare-dev-media'],
  'objectAdmin here on purpose: it is the delete half of the retention handshake, and this is the only principal that gets it.'),
-('dev','dc-dev-backup','service_account','roles/storage.objectAdmin','bucket',ARRAY['dc-dev-backup'],NULL);
+('dev','dc-dev-backup','service_account','roles/storage.objectAdmin','bucket',ARRAY['inktree-dailycare-dev-backup'],NULL);
 
 
 -- ── the guardrails ─────────────────────────────────────────────────────────────

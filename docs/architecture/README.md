@@ -48,7 +48,9 @@ constraint and a constraint are different things, and only one of them stops a m
 | `verify.sh` | Runs every suite, each in its own database, and exits non-zero if anything failed. |
 | `migrate.sh` | Applies the model to a database once each and records what went in. What deploys, and what builds the database every check runs against. |
 | `model.list` | The model in the order it has to be applied. One list, read by both scripts. |
-| `load-iam-policy.sh` | Reads a real GCP policy and prints the SQL that records it. Prints; it does not write, and nothing here calls Google. |
+| `load-iam-policy.sh` | Reads a real project policy and prints the SQL that records it. Prints; it does not write, and nothing here calls Google. |
+| `load-bucket-policy.sh` | The same for buckets. A project policy says nothing about one, so without this the retention handshake is declared and never checked. |
+| `load-resource-policies.sh` | The same for secrets and service accounts — which secret the api may read, and whose token it may mint. |
 | `restore-drill.sh` | The drill itself. Dumps a database, restores it under another name, and checks both halves — that the records came back, and that the copy refuses to hand them out. |
 | `inktree-alignment.md` | Where this model meets the InkTree field guide and where it does not, and the one difference that is a boundary rather than a preference. |
 
@@ -70,7 +72,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 498 checks across fourteen suites
+./verify.sh                  # 500 checks across fourteen suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
