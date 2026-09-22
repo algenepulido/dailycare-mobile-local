@@ -2,7 +2,7 @@
 
 **For:** Algene Pulido
 **From:** Inktree (Trevor / production@inktree.ai)
-**Date:** 21 September 2026
+**Date:** 21 September 2026, revised 22 September after your reply
 
 ---
 
@@ -44,14 +44,15 @@ gcloud projects describe inktree-dailycare-dev    # should work
 
 | | dev | staging | prod |
 |---|---|---|---|
-| Access | Self-serve admin | Deploy and read only | None |
-| Expires | No expiry | **2026-12-20** | — |
+| Access | Self-serve build | **Same as dev** | None |
 
 **Dev** is yours to build in. You hold named admin roles across Cloud Run, Cloud SQL, Storage, Secret Manager, Artifact Registry, VPC, Service Networking, Cloud Scheduler, and Service Usage — enough to stand up everything in your architecture diagram without asking us for anything.
 
-Two things you deliberately do not have, in any project: `roles/owner` / `roles/editor`, and `resourcemanager.projectIamAdmin`. So you cannot grant project-level IAM. If you need a role that is not on the list, ask and we will add it — that is a two-minute change, not a negotiation.
+What you deliberately do not have, in any project: `roles/owner`, `roles/editor`, `resourcemanager.projectIamAdmin`, and — since 22 September, at your request — `roles/viewer`, `roles/iam.serviceAccountAdmin`, and project-level `roles/iam.serviceAccountTokenCreator`. Impersonation is now per account: `serviceAccountUser` and `serviceAccountTokenCreator` on each of the four workload accounts, in both environments. If you need a role that is not on the list, ask and we will add it — that is a two-minute change, not a negotiation.
 
-**Staging** is the nine deploy-only roles from your handover — `run.developer`, `cloudsql.client`, `cloudsql.instanceUser`, `artifactregistry.writer`, `logging.viewer`, `monitoring.viewer`, plus read on the four secrets — with one addition you will need: `iam.serviceAccountUser` on `dc-stg-api` only, because `gcloud run deploy --service-account=` fails without actAs. Scoped to that one account, so you cannot deploy as the retention, integration or backup identities.
+You also hold a custom role, `dailycareIamReader`, in both projects. Ten permissions: `get` and `getIamPolicy` on the project, `list` and `getIamPolicy` on service accounts, secrets, buckets and repositories. That is what your checker needs to read every scope in `gcp_iam`, and it is what replaced `viewer`. We chose it over `roles/browser` because browser only reads project scope — it would miss the bucket bindings, which is where the photo-delete control lives — and it reaches folders and the organisation, which nobody needs.
+
+**Staging** was the nine deploy-only roles from your handover. As of 22 September it is the same set as dev, so you can stand staging up — instance, VPC, connector, buckets — the way you did dev, without waiting on us for each piece. Staging holds synthetic data only until M6, which is the same reasoning Trevor applied to dev. Your point that the deploy-only set could not read its own policy is what prompted it; a read role alone would have left you filing a request for every bucket.
 
 Every staging binding carries an IAM condition expiring **2026-12-20T00:00:00Z**. That is 90 days, sized for M2 at 40 hours. It is enforced by Google, not by anyone remembering — if M2 runs long, say so and we extend it. It is not a deadline, just a default that fails closed.
 
@@ -213,13 +214,15 @@ We have read it, plus `iam-invariants.sql` and today's `objectCreator` note. The
 
 So **`cmds.txt` will not run as-is against these projects.** The principals and secrets are already there under the names on the right, and the two buckets do not exist. Say which naming you want and we will converge on it; ours has nothing depending on it yet.
 
-**Where dev grants more than your list.** In dev you hold `cloudsql.admin`, `storage.admin`, `secretmanager.admin` and `artifactregistry.admin` — three of which your file puts under *not asked for*, with "instance creation is yours" and "bucket creation and lifecycle are yours" beside them. Worth stating plainly that you were proposing rather than responding: you wrote that file without having seen any of this. Trevor's reasoning for the wider grant is that dev holds synthetic data only and has no path to production, so self-serve beats you waiting on us for every bucket. **Staging is exactly your list.** If you would still rather dev matched your file, say so and we will narrow it.
+**Dev's breadth** — kept, as you said. The three you named are gone: `viewer`, `serviceAccountAdmin`, and project-level `tokenCreator`. Staging now matches.
 
-Against your own checks, though: `iam-invariants.sql` asserts "nothing broad" over `roles/viewer` and `%.admin`, and dev currently holds five roles that would match. That check reads your `gcp_iam` table rather than live IAM today, so it passes — but point it at the real policy the way `grant_drift` points at the catalogue and dev lights up. That is a better argument for narrowing than any we have for keeping it.
+**Your checker, now that it reads a real policy.** You counted 46 bindings and 9 service agents; the live policy has 47 and 10. The one your classifier misses is `144065101336@cloudservices.gserviceaccount.com`, which holds `roles/editor`. It is Google's own API service agent, present on every project, and its name has no `service-` prefix — every other agent's does, which is almost certainly the pattern. It is benign, but your "nothing broad" assertion covers `roles/editor`, and right now it passes while that binding exists. Worth classifying explicitly as an expected agent rather than letting it fall through.
 
-**`github-deploy` actAs** now covers all four service accounts, matching your file. It was `api` and `retention` only; your version is right, since CI already acts as the api account and the integration and backup jobs have to deploy somehow. CI still holds no secret and no database role — `run.developer` and `artifactregistry.writer`, nothing else.
+**Your register will show drift after this change.** Three bindings you documented on 22 September are gone (`viewer`, `serviceAccountAdmin`, project `tokenCreator`), and there are new ones: the custom role in both projects, `serviceAccountUser` + `serviceAccountTokenCreator` on each of the four accounts in both projects, and staging's eleven new project roles. All of it is in this document; that drift is ours, not something to chase.
 
-**`cloudsql.instanceUser`.** You gave it to yourself and not to the service accounts, which pairs with the API reading `db_password`. We additionally granted it to all four. It is inert until the instance carries `cloudsql.iam_authentication=on` and a `CLOUD_IAM_SERVICE_ACCOUNT` user exists, so it changes nothing today; it only leaves the option open to drop the password later. Use it or ignore it.
+**`github-deploy` actAs** covers all four service accounts, matching your file. CI still holds no secret and no database role — `run.developer` and `artifactregistry.writer`, nothing else.
+
+**`cloudsql.instanceUser`** on the four service accounts is live: you set `cloudsql.iam_authentication=on` and created the four `CLOUD_IAM_SERVICE_ACCOUNT` users on `dc-dev-pg`, so it is the connection path now rather than a dormant grant.
 
 **Your `CREATE ROLE` question** is Trevor's and he has it. Worth noting that `migrate.sh --with-roles` already handles the version where you get an elevated login for one run: it prints the `gcloud sql users set-password` rotation as the next step. In dev you hold `cloudsql.admin`, so you can run that rotation yourself; in staging we would run it. That makes the looser option meaningfully less loose than it first reads.
 
@@ -227,9 +230,10 @@ One thing your invariants already say better than we did: a person holding `obje
 
 ## What we need back
 
-1. **Confirm `jenith.dev1202@gmail.com`** is the account you will sign in with.
-2. **Tell us which naming wins** (see the reconciliation above) — yours or ours. Ours is three days old and nothing depends on it.
-3. **Tell us if the role list is short.** You will find out faster than we will.
+Nothing blocking. Two things when convenient:
+
+1. Update `gcp_iam` for the change above so your drift check is clean again — the removals, the custom role, the per-account impersonation, and staging's wider set.
+2. Push your application Terraform. We can see from the audit log that it runs (1.9.8, provider 6.50.0, state under `application/dev`, our accounts as data sources — all as we asked), but we cannot read it, and two Terraform states over one project is worth being able to review from both sides.
 
 ## Quick check
 
