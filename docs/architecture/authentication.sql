@@ -74,8 +74,15 @@ COMMENT ON FUNCTION credential_for_sign_in(citext) IS
 
 -- ════════════════════════════════════════════════════════════════════ sessions
 
+-- Definer, and it has to be. Every policy on sessions is predicated on app_user_id(),
+-- and this is what runs before there is one: a request arrives with a refresh token and
+-- this is the question that turns it into an identity. Running as the caller it saw no
+-- rows and answered false for a session created a moment earlier, which reads as an
+-- expired token and sends a caregiver back to the sign-in screen mid-shift.
+--
+-- Knowing the digest is the authorisation. It returns a boolean and nothing about who.
 CREATE OR REPLACE FUNCTION session_is_valid(candidate_hash text)
-RETURNS boolean LANGUAGE sql STABLE
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1 FROM sessions s
@@ -99,13 +106,61 @@ COMMENT ON FUNCTION session_is_valid(text) IS
    nowhere else.';
 
 
+-- Handing out the first session. New, because there was nowhere for one to come from:
+-- the application holds no INSERT on sessions, deliberately - with it, a compromised
+-- handler could mint a session for any user id it liked - so the row has to be written by
+-- something that checks first.
+--
+-- The check is the same one credential_for_sign_in makes, and for the same reason: this is
+-- only reachable in the moment before anybody is identified. An authenticated request
+-- asking to be issued a session for somebody else is the shape of the attack, and it is
+-- refused rather than audited.
+--
+-- It does not verify the password. That happens in the API, because argon2id is not
+-- something PostgreSQL can do, and it is the whole of what the API decides here.
+
+CREATE OR REPLACE FUNCTION start_session(
+  for_user     uuid,
+  new_hash     text,
+  device       text DEFAULT NULL,
+  valid_for    interval DEFAULT interval '30 days',
+  idle_for     interval DEFAULT interval '12 hours'
+) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+DECLARE new_id uuid;
+BEGIN
+  IF nullif(current_setting('app.user_id', true), '') IS NOT NULL THEN
+    RAISE EXCEPTION 'start_session is for the step before a session'
+      USING ERRCODE = 'insufficient_privilege',
+            HINT = 'An identified request asking to be issued a session is not signing in.';
+  END IF;
+
+  -- A deactivated account does not get a new session however convincing the password was.
+  -- end_sessions_on_deactivation closes the ones that exist; this closes the door behind
+  -- them.
+  IF NOT EXISTS (SELECT 1 FROM users WHERE id = for_user AND deactivated_at IS NULL) THEN
+    RAISE EXCEPTION 'no such user' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at, idle_expires_at)
+  VALUES (for_user, new_hash, device, now() + valid_for, now() + idle_for)
+  RETURNING id INTO new_id;
+  RETURN new_id;
+END; $$;
+
+COMMENT ON FUNCTION start_session(uuid, text, text, interval, interval) IS
+  'The only way a session comes into being. Definer, because the application holds no
+   INSERT on sessions and should not: the row it would write is an assertion about who
+   somebody is.';
+
+
 -- Refresh rotation. The old session is revoked in the same statement that issues the new
 -- one, so a stolen refresh token stops working the moment the real client uses theirs.
 CREATE OR REPLACE FUNCTION rotate_session(
   old_hash    text,
   new_hash    text,
   valid_for   interval DEFAULT interval '30 days'
-) RETURNS uuid LANGUAGE plpgsql
+) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
 DECLARE
   owner   uuid;
@@ -133,8 +188,10 @@ COMMENT ON FUNCTION rotate_session(text, text, interval) IS
    screen rather than an error page.';
 
 
+-- Definer, and the authorisation is knowing the digest: a caller who has it either holds
+-- the token or has the database, and in the second case a revocation is not the problem.
 CREATE OR REPLACE FUNCTION revoke_session(target_hash text)
-RETURNS integer LANGUAGE plpgsql
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
 DECLARE n integer;
 BEGIN
@@ -149,11 +206,24 @@ END; $$;
 
 -- Sign out everywhere. Used when a password changes, and when somebody reports a lost
 -- phone, which is the case it exists for.
+-- Definer, and this one takes a user id rather than a digest - so without a check it
+-- would let the application sign anybody out, which is a denial of service against a
+-- caregiver mid-shift and a way to force somebody onto a phishing page at the same time.
+--
+-- Signing out everywhere is a thing a person does to themselves. Ending somebody else's
+-- access is a workforce act and goes through users.deactivated_at, where a trigger closes
+-- the sessions and the audit trail records who did it.
 CREATE OR REPLACE FUNCTION revoke_all_sessions(target_user uuid)
-RETURNS integer LANGUAGE plpgsql
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
 DECLARE n integer;
 BEGIN
+  IF nullif(current_setting('app.user_id', true), '')::uuid IS DISTINCT FROM target_user THEN
+    RAISE EXCEPTION 'a session can only be ended everywhere by the person in it'
+      USING ERRCODE = 'insufficient_privilege',
+            HINT = 'Ending somebody else''s access is users.deactivated_at.';
+  END IF;
+
   UPDATE sessions SET revoked_at = now()
   WHERE user_id = target_user AND revoked_at IS NULL AND expires_at > now();
   GET DIAGNOSTICS n = ROW_COUNT;
@@ -201,8 +271,10 @@ COMMENT ON FUNCTION touch_session(text, interval) IS
 -- that arrive in an inbox, so all three are stored as digests and all three are consumed
 -- exactly once.
 
+-- Definer. Knowing the digest is the authorisation, and the UPDATE is what makes it
+-- single-use, so a second caller with the same token gets nothing rather than a race.
 CREATE OR REPLACE FUNCTION consume_token(candidate_hash text, for_purpose text)
-RETURNS uuid LANGUAGE plpgsql
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public AS $$
 DECLARE owner uuid;
 BEGIN
@@ -255,6 +327,12 @@ COMMENT ON VIEW stale_invitations IS
 
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_app') THEN
+    -- EXECUTE on a function that is not a definer buys nothing: the body still runs as
+    -- the caller, and the application holds no write on sessions. These grants were here
+    -- and every one of them was inert - signing in, refreshing, signing out and accepting
+    -- an invitation all failed with permission denied on a real database. The functions
+    -- are definers now, each with the check that makes handing it out safe.
+    GRANT EXECUTE ON FUNCTION start_session(uuid, text, text, interval, interval) TO dailycare_app;
     GRANT EXECUTE ON FUNCTION session_is_valid(text)                    TO dailycare_app;
     GRANT EXECUTE ON FUNCTION rotate_session(text, text, interval)      TO dailycare_app;
     GRANT EXECUTE ON FUNCTION revoke_session(text)                      TO dailycare_app;

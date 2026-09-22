@@ -85,6 +85,13 @@ INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at)
 VALUES ('a0000000-0000-0000-0000-00000000000a', h('phone2'), 'iPhone 15', now() + interval '30 days');
 \set QUIET off
 
+-- Maria signs herself out, because that is now the only way this happens: the function
+-- refuses to end anybody else's sessions, and ending somebody else's access is
+-- users.deactivated_at instead.
+\set QUIET on
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+\set QUIET off
+
 SELECT expect('signing out everywhere takes both live sessions and leaves the expired one alone',
   (SELECT revoke_all_sessions('a0000000-0000-0000-0000-00000000000a') = 2));
 
@@ -94,6 +101,10 @@ SELECT expect('so a session that timed out still reads as expired rather than re
 SELECT expect('and leaves nothing active',
   (SELECT active = 0 FROM session_inventory
    WHERE user_id = 'a0000000-0000-0000-0000-00000000000a'));
+
+\set QUIET on
+SELECT set_config('app.user_id', '', false);
+\set QUIET off
 
 
 -- ── rotation ───────────────────────────────────────────────────────────────────
@@ -219,7 +230,9 @@ GRANT USAGE ON SCHEMA public TO dailycare_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dailycare_app;
 
 -- Maria reinstalls. Everything local is gone; she signs in and gets a new session.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
 SELECT revoke_all_sessions('a0000000-0000-0000-0000-00000000000a');
+SELECT set_config('app.user_id', '', false);
 INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at)
 VALUES ('a0000000-0000-0000-0000-00000000000a', h('reinstalled'), 'iPhone 15 (new)',
         now() + interval '30 days');
@@ -317,6 +330,53 @@ SELECT set_config('app.user_id', '', false);
 -- And the identity really is gone again, so nothing below is answering as Sandra.
 SELECT expect('and the identity is put back afterwards',
   nullif(current_setting('app.user_id', true), '') IS NULL);
+
+\echo ''
+\echo '── and the application can actually do all of it'
+
+-- The functions were all here and every one of them was inert: EXECUTE on a function that
+-- is not a definer buys nothing, because the body still runs as the caller and the
+-- application holds no write on sessions. Signing in, refreshing, signing out and
+-- accepting an invitation each failed with permission denied on a real database. So the
+-- checks are run as the application rather than as the owner, which is the only way this
+-- particular gap is visible at all.
+
+SELECT expect('every function the API needs runs as its definer',
+  (SELECT count(*) = 0 FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+   WHERE p.proname IN ('session_is_valid','start_session','rotate_session',
+                       'revoke_session','revoke_all_sessions','touch_session',
+                       'consume_token','credential_for_sign_in')
+     AND NOT p.prosecdef));
+
+SELECT expect('and the application may call each of them',
+  (SELECT count(*) = 8 FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'public'
+   WHERE p.proname IN ('session_is_valid','start_session','rotate_session',
+                       'revoke_session','revoke_all_sessions','touch_session',
+                       'consume_token','credential_for_sign_in')
+     AND has_function_privilege('dailycare_app', p.oid, 'EXECUTE')));
+
+-- The one that is dangerous to hand out. start_session takes a user id, so without the
+-- pre-identity check an authenticated request could be issued a session as anybody.
+\set QUIET on
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+\set QUIET off
+SELECT expect_rejected('and a session cannot be minted for somebody else mid-request',
+  $$SELECT start_session('a0000000-0000-0000-0000-00000000000a', repeat('e',64))$$);
+
+-- Signing out everywhere takes a user id too. Ending somebody else's access is a workforce
+-- act and goes through users.deactivated_at, where a trigger closes the sessions and the
+-- trail records who did it.
+SELECT expect_rejected('and nobody signs anybody else out of everything',
+  $$SELECT revoke_all_sessions('a0000000-0000-0000-0000-00000000000a')$$);
+
+SELECT expect('but a person may sign themselves out everywhere',
+  revoke_all_sessions('b0000000-0000-0000-0000-00000000000b') >= 0);
+
+\set QUIET on
+SELECT set_config('app.user_id', '', false);
+\set QUIET off
 
 \echo ''
 \echo '── and the digest is not reachable any other way'
