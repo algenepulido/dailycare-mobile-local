@@ -48,3 +48,4 @@ example
 *.tfstate
 *.tfstate.*
 *.tfplan
+infra/migrate/architecture/
