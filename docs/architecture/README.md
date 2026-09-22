@@ -18,8 +18,8 @@ constraint and a constraint are different things, and only one of them stops a m
 | `auth-invariants.sql` | Including the milestone's own acceptance criteria: reinstall and sign back in, and two authorised devices. |
 | `agreements.sql` | The agreement that has to be in place before a resident is admitted, and what happens when one ends with residents inside. |
 | `incidents.sql` | Somewhere to record an incident, the four factors that make a conclusion possible, and a clock that runs. |
-| `gcp-iam.sql` | The cloud roles, per principal, and the gcloud commands that grant them. |
-| `iam-invariants.sql` | Mostly the separations: CI cannot read a secret, the API cannot delete a photograph. |
+| `gcp-iam.sql` | The cloud roles per environment, the guardrails, the commands, and the drift view that compares all of it against a real policy. |
+| `iam-invariants.sql` | The separations - CI cannot read a secret, the API cannot delete a photograph - and the ones asked of a loaded policy rather than of our own list. |
 | `migration-invariants.sql` | That the model went in whole, and that nothing running the application can edit the record of what went in. |
 | `emergency-and-program.sql` | Break-glass access, and the required procedures that are sentences — each with an owner, a date and a state. |
 | `incident-invariants.sql` | One incident walked from discovery to notification, with the clock moved back at each step. |
@@ -69,7 +69,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 472 checks across fourteen suites
+./verify.sh                  # 484 checks across fourteen suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
@@ -202,9 +202,11 @@ SELECT * FROM administrative_unowned; -- must be empty
 SELECT * FROM emergency_access_open;  -- who can currently see more than their job gives them
 SELECT * FROM phi_stores_encryption_planned;  -- a plan is not a control
 
-SELECT * FROM iam_grant_commands;     -- set PROJECT, REGION, ENV, ALGENE_EMAIL and run it
-SELECT * FROM iam_temporary;          -- what comes off when M2 closes
-SELECT * FROM iam_yours;              -- what stays with the project owner
+SELECT * FROM iam_grant_commands;     -- real commands, with the real project ids
+SELECT * FROM iam_expiring;           -- staging closes on its own, on 20 December
+SELECT * FROM iam_theirs;             -- what stays with Inktree
+SELECT * FROM gcp_iam_drift;          -- declared against a loaded policy, both directions
+SELECT * FROM iam_broad_in_practice;  -- and what the real policy actually hands out
 
 SELECT * FROM phi_vendors;            -- who else touches a resident record
 SELECT * FROM vendor_gaps;            -- what is not agreed yet, and who owns closing it
@@ -222,6 +224,14 @@ SELECT * FROM rto_missed;             -- must be empty
 A column added in a later migration arrives unclassified and appears in the first query.
 That is deliberate: the inventory is generated from the database rather than maintained
 beside it, so it cannot quietly stop being true.
+
+The last two are empty until a policy is loaded, and they say so rather than reporting
+agreement. That distinction is the point: the first version of `iam-invariants.sql` asked
+"is anything too broad" of our own list, which could only ever answer yes to a typo. Load a
+real one per project with `gcloud projects get-iam-policy <id> --format=json` and insert a
+row per binding member into `gcp_iam_observed`. Nothing here reaches out to Google on its
+own — a database that can call a cloud API is a different and worse thing than one that
+cannot.
 
 ## Against the InkTree field guide
 
@@ -259,9 +269,14 @@ it says "checked" a failing suite is what drift looks like.
 | Assumptions, open questions, reviewer confirmations | this file, below | — |
 
 The other half of Milestone 2 — the backend running on GCP, accounts in use, data moving
-between real devices — is not here and is not claimed. It waits on the project, the billing
-account and IAM. What is here is the model those will be built on, and it is the part that
-can be reviewed before rather than after.
+between real devices — is not here and is not claimed. What is here is the model it will be
+built on, and it is the part that can be reviewed before rather than after.
+
+The projects it will be built in exist. Three of them, created on 10 September 2026 with the
+Google Cloud BAA accepted the same day; dev and staging are provisioned and access is
+granted. `../gcp-as-built.md` is Inktree's handover and is the authority on what is actually
+there. This file said for a while that the project was not created, which was true when it
+was written and had stopped being true without anybody here knowing.
 
 ## What the model assumes
 
@@ -508,7 +523,8 @@ These are judgements rather than facts, and worth confirming rather than assumin
   health information; what it is attached to is. That may be stricter than required.
 - Project-level separation — one GCP project per environment, no shared service account,
   no path from a dev workload to a production bucket — is infrastructure rather than
-  schema, and waits on the project and billing setup.
+  schema. It is built: three separate projects, separate from the Inktree platform
+  projects, with production holding guardrails and nothing else until the M6 gate.
 - Reads are the weak half of the audit design and deliberately flagged as such.
   PostgreSQL cannot trigger on `SELECT`, so a read is recorded by the application calling
   `audit_read()` on the single path that serves resident data. That is a convention the

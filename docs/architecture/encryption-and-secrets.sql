@@ -140,10 +140,10 @@ INSERT INTO encryption_controls (id, covers, mechanism, key_management, state, n
  'Pinning was considered and declined: it breaks a client that has not been updated when a certificate rotates, and the failure mode is a caregiver who cannot file a day.',
  DATE '2026-09-15'),
 
-('in_transit_database', 'API to PostgreSQL', 'TLS over a private address',
+('in_transit_database', 'API to PostgreSQL', 'TLS over a private address, ssl_mode = ENCRYPTED_ONLY on the instance',
  'Platform-managed', 'planned',
- 'The instance has no public address, so this is not the only thing standing between the database and the internet.',
- DATE '2026-09-15'),
+ 'Still planned because the instance does not exist yet; the setting goes on when it is created. The private address is enforced by the sql.restrictPublicIp org policy rather than by remembering, so this is not the only thing between the database and the internet - but it is the thing that stops a connection inside the VPC being in the clear. Inktree flagged that their own platform database module does not set ssl_mode and their scanner reports it, and said explicitly this is the one place not to copy them.',
+ DATE '2026-09-22'),
 
 ('customer_managed_keys', 'Database and storage at rest',
  'Cloud KMS keys held by InkTree rather than the platform',

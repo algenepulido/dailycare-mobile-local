@@ -24,6 +24,13 @@ SET client_min_messages TO notice;
 -- check that tests one does it by becoming the role it is about.
 SELECT checks_begin();
 
+-- Which vendors were live before this suite touched anything. The last check compares
+-- against this rather than against a number: the probes below set a vendor live on purpose
+-- and put it back, and a literal count would also have to be edited every time a vendor
+-- genuinely goes live - which teaches whoever is editing it to change numbers until the
+-- suite is quiet again.
+CREATE TEMP TABLE live_at_start AS SELECT id FROM vendors WHERE live;
+
 CREATE OR REPLACE FUNCTION expect(label text, condition boolean) RETURNS void AS $$
 BEGIN
   IF condition THEN RAISE NOTICE 'PASS  %', label;
@@ -182,7 +189,8 @@ SELECT expect('the three answers are zero again',
   AND (SELECT count(*) = 0 FROM uncontrolled_exposure));
 
 SELECT expect('and nothing became live while the checks were running',
-  (SELECT count(*) = 2 FROM vendors WHERE live));
+  NOT EXISTS (SELECT id FROM vendors WHERE live
+              EXCEPT SELECT id FROM live_at_start));
 
 
 -- ── who may read it ────────────────────────────────────────────────────────────

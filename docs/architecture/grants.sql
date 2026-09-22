@@ -334,18 +334,27 @@ CREATE TRIGGER audit_emergency_access
 
 -- ════════════════════════════════════════════════════════════════════ the IAM list
 
+-- Four tables rather than one since the file was reconciled against what Inktree built.
+-- Driven off information_schema so that adding a column to any of them does not also need
+-- an edit here - the completeness check would catch the omission, but catching it later is
+-- worse than not having it.
+
 INSERT INTO data_classification (table_name, column_name, class, note)
-SELECT 'gcp_iam', c.column_name,
+SELECT t, c.column_name,
        CASE WHEN c.column_name = 'principal' THEN 'identifying' ELSE 'operational' END::data_class,
        CASE WHEN c.column_name = 'principal' THEN 'A person or a service account.' END
-FROM information_schema.columns c
-WHERE c.table_schema = 'public' AND c.table_name = 'gcp_iam';
+FROM unnest(ARRAY['gcp_iam','gcp_iam_observed','gcp_projects','gcp_guardrails']) t
+JOIN information_schema.columns c
+  ON c.table_schema = 'public' AND c.table_name = t;
 
-INSERT INTO scrub_rules (table_name, column_name, strategy, reason) VALUES
- ('gcp_iam','principal','keep','Service account names, and one engineer. Not a resident, and the list is no use with the names taken out.');
+INSERT INTO scrub_rules (table_name, column_name, strategy, reason)
+SELECT t, 'principal', 'keep',
+       'Service account names, and one engineer. Not a resident, and the list is no use with the names taken out.'
+FROM unnest(ARRAY['gcp_iam','gcp_iam_observed']) t;
 
 INSERT INTO access_matrix (actor, table_name, operation, allowed, condition, note)
-SELECT a.actor, 'gcp_iam', o.op::access_operation, false, NULL,
+SELECT a.actor, t, o.op::access_operation, false, NULL,
        'Not application data. A list of who holds which cloud role is a map of the system, and the application has no reason to hold one.'
-FROM (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
+FROM unnest(ARRAY['gcp_iam','gcp_iam_observed','gcp_projects','gcp_guardrails']) t
+CROSS JOIN (SELECT unnest(enum_range(NULL::access_actor)) AS actor) a
 CROSS JOIN (SELECT unnest(ARRAY['select','insert','update','delete']) AS op) o;

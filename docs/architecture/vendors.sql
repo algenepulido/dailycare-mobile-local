@@ -94,10 +94,10 @@ INSERT INTO vendors (id, name, purpose, role, live, baa, baa_signed_on, covered_
                      note, reviewed_on) VALUES
 ('gcp', 'Google Cloud Platform',
  'Cloud Run for the API, Cloud SQL for PostgreSQL, Cloud Storage for photographs, Secret Manager for credentials, Cloud Logging, Artifact Registry.',
- 'processor', false, 'signed', DATE '2026-09-10',
+ 'processor', true, 'signed', DATE '2026-09-10',
  'Only the products on Google''s HIPAA Included Products list are in scope. Anything used outside that list is outside the agreement, whatever else the contract says, and the list is worth rereading when a new service is adopted.',
- 'Accepted in the console by the billing account owner. Signed before the project exists, which is the right order: the alternative is a window where something is deployed and not covered.',
- DATE '2026-09-15');
+ 'Accepted in the console by the billing account owner on the day the three projects were created, which is the right order: the alternative is a window where something is deployed and not covered. Live since then. This register said otherwise until 22 September because nobody here had been told the projects existed - a reminder that a register is only as good as what reaches it.',
+ DATE '2026-09-22');
 
 INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
 ('gcp','phi','holds',NULL,'Cloud SQL and Cloud Storage. This is where the record lives.'),
@@ -111,11 +111,11 @@ INSERT INTO vendors (id, name, purpose, role, live, baa, covered_scope,
                      baa_signed_on) VALUES
 ('gcp-logging', 'Google Cloud Logging',
  'Application and request logs.',
- 'subprocessor', false, 'signed',
+ 'subprocessor', true, 'signed',
  'Covered by the same agreement as the platform.',
  NULL, NULL, NULL,
- 'Listed separately because the agreement is not the control. A log line is written by our code, and no contract stops one from containing a resident name.',
- DATE '2026-09-15', DATE '2026-09-10');
+ 'Listed separately because the agreement is not the control. A log line is written by our code, and no contract stops one from containing a resident name. Live, and Data Access audit logging is on for all services in dev and staging - ADMIN_READ, DATA_READ and DATA_WRITE - which is off by default in a new project.',
+ DATE '2026-09-22', DATE '2026-09-10');
 
 INSERT INTO vendor_exposure (vendor_id, class, exposure, control, note) VALUES
 ('gcp-logging','phi','could_receive',

@@ -5,8 +5,9 @@ record exists and where it does not, which is the one a reviewer is actually ask
 the third follows a single request so that the identity check and the audit row have a
 place rather than a paragraph; the fourth is the only flow that leaves the database.
 
-Everything below is the target architecture. Nothing is deployed yet — the platform
-agreement is signed, the project is not created. What exists today is the model in this
+Everything below is the target architecture. Nothing is deployed yet, but the ground it
+goes on is there: the platform agreement is signed and the three projects exist, with dev
+and staging provisioned — see `../gcp-as-built.md`. What exists today is the model in this
 directory and the mobile client from Milestone 1.
 
 ---
