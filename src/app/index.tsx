@@ -18,8 +18,10 @@ import {
   Screen,
   SectionHeading,
 } from '@/components';
+import { fileDay } from '@/data/api';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
+import { toWire } from '@/data/wire';
 import { buildChanges, buildChecklist } from '@/domain/rules';
 import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS } from '@/domain/rules';
 import type { CheckIn, Meal } from '@/domain/types';
@@ -339,6 +341,18 @@ function CareReport({
         checklist={buildChecklist(asCheckIn(draft))}
         note={draft.note}
         photoUri={draft.photoUri}
+        // Only when there is an account for it to go to. Without one the sheet is what it
+        // has always been: the day read back before it is finished with.
+        // The server's id, not the device's. A day addressed to a uuid the phone invented
+        // is refused with "no such resident", which is correct and reads on screen like
+        // something else entirely.
+        onSend={
+          account && resident.remoteId
+            ? async () => {
+                await fileDay(resident.remoteId!, draft.careDate, toWire(asCheckIn(draft)));
+              }
+            : undefined
+        }
       />
     </Screen>
   );

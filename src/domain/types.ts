@@ -84,6 +84,16 @@ export const DEFAULT_BASELINE: Baseline = {
 };
 
 export interface Resident {
+  /**
+   * Who this resident is on the server, once somebody has signed in.
+   *
+   * Null until then, and null is the normal state: the app has worked without an account
+   * since milestone one and the id it makes for itself is the one everything local is
+   * keyed by. This is the second name for the same person, and it is what a filed day is
+   * addressed to - without it the server answers "no such resident", correctly, because
+   * a uuid a phone invented is not a resident it has ever heard of.
+   */
+  remoteId?: string | null;
   id: ID;
   displayName: string;
   baseline: Baseline;

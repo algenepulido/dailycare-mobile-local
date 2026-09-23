@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Image } from 'expo-image';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { ApiError } from '@/data/api';
 import type { Change, ChecklistGroup } from '@/domain/rules';
 import { color, radii, type } from '@/theme/tokens';
 
@@ -11,6 +13,11 @@ import { Sheet } from './Sheet';
 interface ReviewSheetProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Send the day to the server. Absent when nobody is signed in, which is a normal state:
+   * the day is already on the device either way and an account is what lets it travel.
+   */
+  onSend?: () => Promise<void>;
   clientName: string;
   dateLabel: string;
   changes: Change[];
@@ -36,9 +43,52 @@ export function ReviewSheet({
   checklist,
   note,
   photoUri,
+  onSend,
 }: ReviewSheetProps) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  async function send() {
+    if (!onSend) return;
+    setSending(true);
+    setProblem(null);
+    try {
+      await onSend();
+      setSent(true);
+    } catch (error) {
+      // The day is on the device and stays there. Saying so is the whole message: a
+      // caregiver who thinks the note was lost will retype it, and a retyped note is a
+      // second correction on a record that only changed once.
+      setProblem(
+        error instanceof ApiError
+          ? `${error.message}. It is still saved on this phone.`
+          : 'Could not reach DailyCare. It is still saved on this phone.',
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
-    <Sheet open={open} onClose={onClose} footer={<Button label="Done" onPress={onClose} />}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      footer={
+        onSend ? (
+          <View style={styles.footer}>
+            <Button label={sent ? 'Sent' : 'Send'} onPress={send} busy={sending} disabled={sent} />
+            {problem ? (
+              <Text style={styles.problem} accessibilityLiveRegion="polite">
+                {problem}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <Button label="Done" onPress={onClose} />
+        )
+      }
+    >
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.headerIcon}>
@@ -155,6 +205,8 @@ function ChecklistCard({ group }: { group: ChecklistGroup }) {
 }
 
 const styles = StyleSheet.create({
+  footer: { gap: 10 },
+  problem: { ...type.body, color: color.flag, textAlign: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerIcon: {
     width: 44,

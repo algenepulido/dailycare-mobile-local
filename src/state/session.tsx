@@ -145,15 +145,45 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [caregiver, resident],
   );
 
-  const signIn = useCallback<SessionValue['signIn']>(async (email, password) => {
-    setSigningIn(true);
-    try {
-      const tokens = await api.signIn(email.trim(), password, deviceLabel());
-      setAccount({ userId: (tokens as { userId?: string }).userId ?? '' });
-    } finally {
-      setSigningIn(false);
-    }
+  /**
+   * Find this resident on the server and remember which one they are.
+   *
+   * The local id was made on the phone and the server has never seen it, so a day filed
+   * against it is refused - correctly, and confusingly, because everything on the screen
+   * looks right. Matching is by name for now, which is enough while a caregiver has one
+   * resident and is the wrong answer the moment two of them are called Margaret. A real
+   * one is picking from the server's list, and that is a screen rather than a line.
+   */
+  const linkResident = useCallback(async () => {
+    const local = await repository.getActiveIds();
+    if (!local.residentId) return;
+    const here = await repository.getResident(local.residentId);
+    if (!here) return;
+
+    const theirs = await api.listResidents();
+    const match = theirs.find(
+      (r) => r.displayName.trim().toLowerCase() === here.displayName.trim().toLowerCase(),
+    );
+    if (!match) return;
+
+    const linked = { ...here, remoteId: match.id };
+    await repository.saveResident(linked);
+    setResident(linked);
   }, []);
+
+  const signIn = useCallback<SessionValue['signIn']>(
+    async (email, password) => {
+      setSigningIn(true);
+      try {
+        const tokens = await api.signIn(email.trim(), password, deviceLabel());
+        setAccount({ userId: (tokens as { userId?: string }).userId ?? '' });
+        await linkResident();
+      } finally {
+        setSigningIn(false);
+      }
+    },
+    [linkResident],
+  );
 
   const signOut = useCallback<SessionValue['signOut']>(async () => {
     // The account, not the records. Somebody signing out of a shared ward tablet is
