@@ -556,6 +556,17 @@ INSERT INTO iam_open_questions (id, environment, principal, role, question, owne
  'Reading a project policy needs getIamPolicy, which the deploy-only set does not carry - so gcp_iam_drift can say nothing about staging. Either a read role goes on, or Inktree runs load-iam-policy.sh there. Not urgent while staging is empty; it stops being fine the moment something is deployed to it.',
  'Inktree', DATE '2026-09-22');
 
+INSERT INTO iam_open_questions (id, environment, principal, role, question, owner, raised_on) VALUES
+('migrations_run_as_the_api','dev','dc-dev-api','roles/secretmanager.secretAccessor',
+ 'The migrate, reset, seed, verify and iam-grant jobs all run as dc-dev-api - the identity the API itself runs under. Two consequences. The jobs connect as postgres, so that identity can reach a secret holding the superuser password: updating dc-dev-reset, whose PGPASSWORD comes from the secret seed_pw, is accepted, while the same update against dc-dev-verify and dc-dev-migrate is refused by name for verify_pw and migration_postgres_password. So seed_pw outlived the run it was borrowed for, and the declared set above is db_password, jwt_signing_key and twilio_token - seed_pw is not in it. And the second consequence is the shape rather than the leftover: a migration identity and a serving identity are different things, and one account being both means the API''s blast radius includes the schema. The likely answer is a dc-dev-migrate account of its own, which also makes the elevated-login question in infra/migrate/README.md answerable - an owner role rather than borrowing postgres.',
+ 'Inktree', DATE '2026-09-23');
+
+-- Found by the platform refusing half of a job update, not by gcp_iam_drift, which reads
+-- secret policies and would have said the same thing. Worth writing down: a drift run
+-- needs secrets list and get-iam-policy, and the account doing the reading did not have
+-- them at the time. A check that cannot run reports nothing, which looks exactly like a
+-- check that found nothing - which is what gcp_iam_observations exists to separate.
+
 UPDATE iam_open_questions
    SET answered_on = DATE '2026-09-23',
        answer = 'A custom role, dailycareIamReader, in both projects. Narrower than viewer and enough to read a policy, which is what the reading was for. Confirmed against both policies.'
