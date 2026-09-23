@@ -190,9 +190,18 @@ func countRows(t *testing.T) int {
 }
 
 // The same rule internal/records holds itself to, in the package that shares its
-// exemption. Every method here that queries has to audit first, and adding one that does
-// not means editing this list on purpose.
+// exemption. Every method here that queries has to audit first, unless it is named below
+// with a reason - which is a small enough act to do by accident and a loud enough one to
+// notice in review.
 func TestEveryQueryInThisPackageAuditsFirst(t *testing.T) {
+	declared := map[string]string{
+		"Arrived": "Not a read of a resident. It says the object the caller just uploaded " +
+			"is in the bucket, and the row it touches is one this session created - the " +
+			"UPDATE is keyed on uploaded_by being the caller, so it cannot reach anybody " +
+			"else's. Auditing it would record a read that did not happen, on a resident " +
+			"whose record was not opened.",
+	}
+
 	body, err := os.ReadFile("media.go")
 	if err != nil {
 		t.Fatal(err)
@@ -209,8 +218,17 @@ func TestEveryQueryInThisPackageAuditsFirst(t *testing.T) {
 		if !strings.Contains(block, "tx.Query") && !strings.Contains(block, "tx.Exec") {
 			continue
 		}
-		if !strings.Contains(block, "audit_read") {
-			t.Errorf("%s queries without calling audit_read first", name)
+		if strings.Contains(block, "audit_read") {
+			continue
+		}
+		why, ok := declared[name]
+		if !ok {
+			t.Errorf("%s queries without calling audit_read first, and is not declared. "+
+				"Either audit it, or say here why the query is not a read of a resident.", name)
+			continue
+		}
+		if len(why) < 40 {
+			t.Errorf("%s is declared with a reason too short to be one", name)
 		}
 	}
 }

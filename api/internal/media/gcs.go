@@ -1,8 +1,13 @@
 package media
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -19,6 +24,9 @@ type GCS struct {
 	// The account doing the signing. Empty when running on Cloud Run, where the metadata
 	// server answers with the identity the revision runs as.
 	serviceAccount string
+
+	// Set only by NewGCSWithToken. Empty everywhere it matters.
+	token string
 }
 
 func NewGCS(ctx context.Context, serviceAccount string) (*GCS, error) {
@@ -29,7 +37,24 @@ func NewGCS(ctx context.Context, serviceAccount string) (*GCS, error) {
 	return &GCS{client: c, serviceAccount: serviceAccount}, nil
 }
 
-func (g *GCS) Close() error { return g.client.Close() }
+// NewGCSWithToken signs through the IAM signBlob API using a bearer token supplied by the
+// caller, for running against a real bucket from somewhere that has no
+// application-default credentials - which is every machine here, since these projects
+// deliberately do not use ADC.
+//
+// On Cloud Run none of this is needed: the metadata server answers, the library finds the
+// revision's identity, and NewGCS is the constructor. This one exists so the path can be
+// exercised before it is deployed rather than after.
+func NewGCSWithToken(serviceAccount, token string) *GCS {
+	return &GCS{serviceAccount: serviceAccount, token: token}
+}
+
+func (g *GCS) Close() error {
+	if g.client == nil {
+		return nil
+	}
+	return g.client.Close()
+}
 
 func (g *GCS) SignedPutURL(ctx context.Context, bucket, object, contentType string,
 	until time.Time) (string, error) {
@@ -45,9 +70,60 @@ func (g *GCS) SignedPutURL(ctx context.Context, bucket, object, contentType stri
 	if g.serviceAccount != "" {
 		opts.GoogleAccessID = g.serviceAccount
 	}
+
+	if g.token != "" {
+		opts.SignBytes = func(b []byte) ([]byte, error) { return g.signBlob(ctx, b) }
+		url, err := storage.SignedURL(bucket, object, opts)
+		if err != nil {
+			return "", fmt.Errorf("media: signing %s: %w", object, err)
+		}
+		return url, nil
+	}
+
 	url, err := g.client.Bucket(bucket).SignedURL(object, opts)
 	if err != nil {
 		return "", fmt.Errorf("media: signing %s: %w", object, err)
 	}
 	return url, nil
+}
+
+// What the storage library does for itself when there is no private key: asks IAM to sign
+// the bytes as the service account. There is no key to hold, which is what makes
+// iam.disableServiceAccountKeyCreation enforceable rather than aspirational.
+func (g *GCS) signBlob(ctx context.Context, payload []byte) ([]byte, error) {
+	body, err := json.Marshal(map[string]string{
+		"payload": base64.StdEncoding.EncodeToString(payload),
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"+
+			g.serviceAccount+":signBlob", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+g.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		// The status, not the body. A signBlob refusal quotes the caller's identity.
+		return nil, fmt.Errorf("media: signBlob returned %d", resp.StatusCode)
+	}
+	var out struct {
+		SignedBlob string `json:"signedBlob"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return base64.StdEncoding.DecodeString(out.SignedBlob)
 }

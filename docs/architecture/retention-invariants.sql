@@ -116,15 +116,19 @@ INSERT INTO assignments (facility_id, resident_id, facility_member_id)
 SELECT r.facility_id, r.id, 'fa000000-0000-0000-0000-00000000000a'
 FROM residents r WHERE r.facility_id = 'f1000000-0000-0000-0000-000000000001';
 
--- Frances's photograph. Still in the bucket: deleted_at is null.
+-- Frances's photograph. In the bucket: uploaded_at is set and deleted_at is not.
+--
+-- The upload stamp matters here rather than being decoration. A row whose object never
+-- arrived is not a photograph to be retained or removed - there is nothing in the bucket
+-- behind it - and the constraint refuses to mark one deleted, which is what it is for.
 INSERT INTO media_objects (id, facility_id, resident_id, care_day_id, bucket, object_path,
-                           content_type, byte_size, uploaded_by)
+                           content_type, byte_size, uploaded_by, uploaded_at)
 VALUES ('4e000000-0000-0000-0000-00000000000f',
         'f1000000-0000-0000-0000-000000000001',
         'e4000000-0000-0000-0000-000000000004',
         'cd000000-0000-0000-0000-000000000004',
         'dailycare-media-prod', 'f1000000-0000-0000-0000-000000000001/2025/frances-garden.jpg',
-        'image/jpeg', 184320, 'a0000000-0000-0000-0000-00000000000a');
+        'image/jpeg', 184320, 'a0000000-0000-0000-0000-00000000000a', now());
 
 -- An audit row older than the six-year window, and one from today.
 INSERT INTO audit_events (occurred_at, facility_id, action, subject_type, resident_id)
@@ -427,6 +431,50 @@ WHERE r.facility_id = 'f1000000-0000-0000-0000-000000000001'
 ORDER BY r.display_name;
 
 \set QUIET on
+\echo ''
+\echo '── a row whose photograph never arrived'
+
+-- Between asking for somewhere to put a photograph and uploading it there is a row with
+-- no object behind it. A phone that lost signal leaves one; so does a signature that did
+-- not match, which is what happens when the content type is guessed rather than read.
+--
+-- They are not errors. Treating one as a photograph is: showing it to a family, counting
+-- it in an export, or having retention look in the bucket for something never written.
+
+\set QUIET on
+INSERT INTO residents (id, facility_id, display_name, admitted_on)
+VALUES ('e9000000-0000-0000-0000-000000000009',
+        'f1000000-0000-0000-0000-000000000001', 'Nora', current_date);
+
+INSERT INTO media_objects (id, facility_id, resident_id, bucket, object_path,
+                           content_type, byte_size, uploaded_by)
+VALUES ('4e000000-0000-0000-0000-0000000000aa',
+        'f1000000-0000-0000-0000-000000000001',
+        'e9000000-0000-0000-0000-000000000009',
+        'dailycare-media-prod',
+        'f1000000-0000-0000-0000-000000000001/2025/never-arrived.jpg',
+        'image/jpeg', 1, 'a0000000-0000-0000-0000-00000000000a');
+\set QUIET off
+
+SELECT expect('a row with no object behind it is listed as never arrived',
+  EXISTS (SELECT 1 FROM media_never_arrived
+          WHERE id = '4e000000-0000-0000-0000-0000000000aa'));
+
+SELECT expect('and one that did arrive is not',
+  NOT EXISTS (SELECT 1 FROM media_never_arrived
+              WHERE id = '4e000000-0000-0000-0000-00000000000f'));
+
+-- The one that would be a lie. Marking an object deleted says it was removed from the
+-- bucket, and there is nothing to remove.
+DO $$
+BEGIN
+  UPDATE media_objects SET deleted_at = now()
+   WHERE id = '4e000000-0000-0000-0000-0000000000aa';
+  RAISE NOTICE 'FAIL  ALLOWED: a photograph that never arrived was marked deleted';
+EXCEPTION WHEN check_violation THEN
+  RAISE NOTICE 'PASS  refused: a photograph that never arrived cannot be marked deleted';
+END $$;
+
 SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_refused(text, text);

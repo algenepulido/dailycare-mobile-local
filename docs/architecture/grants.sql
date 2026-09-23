@@ -92,8 +92,8 @@ INSERT INTO app_privileges (grantee, table_name, privilege, columns, note) VALUE
  'A person corrects their own name. Not their email, which is their login, and not deactivated_at, which is an administrative act.'),
 ('dailycare_app','care_day_meals','UPDATE', ARRAY['happened','amount'],
  'While a day is being filed. A corrected day gets its own children.'),
-('dailycare_app','media_objects','UPDATE', ARRAY['checksum'],
- 'Set once the object is stored. Never deleted_at, which belongs to the retention handshake.');
+('dailycare_app','media_objects','UPDATE', ARRAY['checksum','uploaded_at'],
+ 'Set once the object is stored - which the application is the only thing in a position to know, because it is what did the uploading. The row exists before the object does: a path has to be there to sign a URL for, and the upload happens afterwards from a phone. Never deleted_at, which belongs to the retention handshake.');
 
 -- Nothing anywhere grants the application DELETE. That is not an omission, and the check
 -- below is what keeps it from becoming one.

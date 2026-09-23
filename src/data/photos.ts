@@ -50,6 +50,31 @@ function photoDirectory(): Directory {
   return directory;
 }
 
+/**
+ * What the file actually is, from the name the app gave it.
+ *
+ * persist() keeps the extension of whatever was picked, so this is not a guess - and it
+ * has to be right, because the content type is part of what an upload URL is signed for.
+ * Get it wrong and Cloud Storage answers SignatureDoesNotMatch, which is a 403 that reads
+ * like a permissions problem and is not one.
+ *
+ * A blob's own `type` would be the obvious place to read it. It is empty for a file:// URI
+ * on Android, so reading it gave image/jpeg for a png and the upload was refused.
+ */
+export function contentTypeFor(uri: string): string {
+  switch (extensionFor(uri)) {
+    case 'png':
+      return 'image/png';
+    case 'heic':
+    case 'heif':
+      return 'image/heic';
+    case 'webp':
+      return 'image/webp';
+    default:
+      return 'image/jpeg';
+  }
+}
+
 function extensionFor(uri: string): string {
   const match = /\.([A-Za-z0-9]+)(?:\?.*)?$/.exec(uri);
   return match ? match[1].toLowerCase() : 'jpg';

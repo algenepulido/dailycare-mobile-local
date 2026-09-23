@@ -7,6 +7,7 @@
  * should stop somebody working.
  */
 
+import { contentTypeFor } from '@/data/photos';
 import type { WireDay } from '@/data/wire';
 import {
   currentAccessToken,
@@ -196,4 +197,66 @@ export async function fileDay(residentId: string, date: string, day: WireDay): P
     body: JSON.stringify(day),
   })) as { careDayId: string };
   return body.careDayId;
+}
+
+export interface PhotoPlace {
+  url: string;
+  objectId: string;
+  expiresAt: string;
+}
+
+/**
+ * Ask for somewhere to put a photograph, then put it there.
+ *
+ * The photograph does not go through DailyCare's API. It goes straight to Cloud Storage
+ * with a URL good for one object and a few minutes, so a resident's photograph is never in
+ * the server's memory or its logs on the way past.
+ *
+ * Two things that have to match or the upload is refused: the content type is part of what
+ * was signed, and the object can only be written once. A retry that appears to succeed
+ * locally and fails at the bucket is better than one that quietly replaces a photograph
+ * already attached to a filed day.
+ */
+export async function uploadPhoto(
+  residentId: string,
+  uri: string,
+  careDayId?: string,
+): Promise<string> {
+  const file = await fetch(uri);
+  if (!file.ok) throw new ApiError(0, 'that photograph could not be read from this phone');
+  const bytes = await file.blob();
+
+  // From the file's name, which persist() kept. Not from the blob: its `type` is empty
+  // for a file:// URI on Android, so reading it gave image/jpeg for a png and Cloud
+  // Storage answered SignatureDoesNotMatch - the content type is part of what the URL was
+  // signed for, and that 403 reads like a permissions problem and is not one.
+  const contentType = contentTypeFor(uri);
+
+  const place = (await authed(`/v1/residents/${residentId}/photos`, {
+    method: 'POST',
+    body: JSON.stringify({
+      contentType,
+      byteSize: bytes.size,
+      ...(careDayId ? { careDayId } : {}),
+    }),
+  })) as PhotoPlace;
+
+  const put = await fetch(place.url, {
+    method: 'PUT',
+    // The same type that was signed for. A different one and the bucket refuses the URL.
+    headers: { 'Content-Type': contentType },
+    body: bytes,
+  });
+  if (!put.ok) {
+    // Deliberately not the bucket's XML. It says SignatureDoesNotMatch when the content
+    // type is wrong and AccessDenied for an overwrite, and both read to a caregiver like
+    // they have done something wrong.
+    throw new ApiError(put.status, 'the photograph did not upload');
+  }
+
+  // Tell the server it arrived. Until this the row is a place that was offered, not a
+  // photograph - a phone that lost signal here leaves one behind, and the server lists
+  // those rather than showing them to a family.
+  await authed(`/v1/photos/${place.objectId}/arrived`, { method: 'POST' });
+  return place.objectId;
 }

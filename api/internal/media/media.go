@@ -117,6 +117,10 @@ var allowedType = map[string]bool{
 	"image/jpeg": true,
 	"image/png":  true,
 	"image/heic": true,
+	// Android's picker returns these for a screenshot or a shared image, and the client
+	// will send one. A type the client can produce and the server refuses is an upload
+	// that fails after the day is already filed, which is the worst moment for it.
+	"image/webp": true,
 }
 
 // facility/resident/random.ext
@@ -139,4 +143,30 @@ func extensionFor(contentType string) string {
 	default:
 		return ".jpg"
 	}
+}
+
+// Arrived records that the object is actually in the bucket.
+//
+// Between Offer and this there is a row describing a photograph that may never come: a
+// phone that lost signal, or a signature that did not match. Those rows are real and
+// media_never_arrived lists them; what must not happen is one of them being counted as a
+// photograph - shown to a family, or looked for by retention.
+//
+// Only the account that asked for the place may say it arrived, and only once.
+func (s *Store) Arrived(ctx context.Context, c db.Caller, object uuid.UUID) error {
+	return s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE media_objects SET uploaded_at = now()
+			WHERE id = $1 AND uploaded_by = $2 AND uploaded_at IS NULL`,
+			object, c.UserID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			// Unknown, somebody else's, or already said. All three are the same answer
+			// to the caller: nothing changed and there is nothing to tell them about it.
+			return ErrNotVisible
+		}
+		return nil
+	})
 }

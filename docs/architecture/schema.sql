@@ -525,7 +525,25 @@ CREATE TABLE media_objects (
 
   uploaded_by    uuid NOT NULL REFERENCES users(id),
   created_at     timestamptz NOT NULL DEFAULT now(),
+
+  -- Set when the object is known to be in the bucket, which is not when this row was
+  -- written. The row comes first because the path has to exist before a URL can be signed
+  -- for it, and the upload happens afterwards, from a phone, over a ward's wifi - so
+  -- between the two there is a row describing a photograph that may never arrive.
+  --
+  -- deleted_at already makes this distinction on the way out: "we asked for it to go" and
+  -- "it is gone" are different facts and only the second one is recorded. This is the same
+  -- honesty on the way in. Without it, retention looks for an object that was never there
+  -- and a family is shown a photograph that does not exist.
+  uploaded_at    timestamptz,
+
   deleted_at     timestamptz,   -- set when the object has actually been removed from GCS
+
+  -- Gone before it arrived is not a state. Either it was uploaded and then removed, or it
+  -- was never uploaded and there is nothing to remove.
+  CONSTRAINT deleted_means_it_was_uploaded
+    CHECK (deleted_at IS NULL OR uploaded_at IS NOT NULL),
+
   UNIQUE (bucket, object_path),
 
   -- The path begins with the facility the row belongs to. The application generates it;
@@ -541,6 +559,24 @@ CREATE TABLE media_objects (
 );
 
 CREATE INDEX ON media_objects (resident_id) WHERE deleted_at IS NULL;
+
+-- Rows whose object never arrived. A phone that lost signal between asking for a URL and
+-- uploading leaves one of these, and so does a signature that did not match - which is a
+-- thing that happens when the content type is guessed rather than read.
+--
+-- They are not an error. What would be an error is treating one as a photograph: showing
+-- it to a family, counting it in an export, or having retention look for an object that
+-- was never written.
+CREATE VIEW media_never_arrived AS
+SELECT id, facility_id, resident_id, care_day_id, object_path, created_at,
+       now() - created_at AS waiting
+FROM media_objects
+WHERE uploaded_at IS NULL AND deleted_at IS NULL
+ORDER BY created_at;
+
+COMMENT ON VIEW media_never_arrived IS
+  'A row with no object behind it. Old ones can be removed; the object they name was never
+   written, so there is nothing in the bucket to tidy up after them.';
 CREATE INDEX ON media_objects (care_day_id);
 
 COMMENT ON TABLE media_objects IS

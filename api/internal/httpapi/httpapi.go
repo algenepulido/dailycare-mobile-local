@@ -60,6 +60,10 @@ func (a *API) Routes() http.Handler {
 	// this process's memory, its logs, or anything's buffers on the way past.
 	mux.Handle("POST /v1/residents/{id}/photos", a.identified(a.offerPhoto))
 
+	// The upload happened. Until this arrives the row is a place that was offered, not a
+	// photograph - media_never_arrived is the list of ones that never came.
+	mux.Handle("POST /v1/photos/{objectId}/arrived", a.identified(a.photoArrived))
+
 	// No identity and nothing about the system: a health check that reported the database
 	// version or the migration state would be a free map for anybody who found the port.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +209,23 @@ func (a *API) offerPhoto(w http.ResponseWriter, r *http.Request, c db.Caller) {
 		return
 	}
 	a.ok(w, r, http.StatusCreated, up)
+}
+
+func (a *API) photoArrived(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	if a.media == nil {
+		a.fail(w, r, http.StatusServiceUnavailable, "photographs are not set up on this server", nil)
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("objectId"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such photograph", nil)
+		return
+	}
+	if err := a.media.Arrived(r.Context(), c, id); err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such photograph", nil)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) fileDay(w http.ResponseWriter, r *http.Request, c db.Caller) {

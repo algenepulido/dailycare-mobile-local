@@ -216,6 +216,7 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('media_objects','checksum','operational',NULL),
  ('media_objects','uploaded_by','operational',NULL),
  ('media_objects','created_at','operational',NULL),
+ ('media_objects','uploaded_at','operational','When the object was confirmed in the bucket. Null means the row is a place that was offered and never used.'),
  ('media_objects','deleted_at','operational',NULL);
 
 

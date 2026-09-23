@@ -18,7 +18,7 @@ import {
   Screen,
   SectionHeading,
 } from '@/components';
-import { fileDay } from '@/data/api';
+import { fileDay, uploadPhoto } from '@/data/api';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
 import { toWire } from '@/data/wire';
@@ -349,7 +349,18 @@ function CareReport({
         onSend={
           account && resident.remoteId
             ? async () => {
-                await fileDay(resident.remoteId!, draft.careDate, toWire(asCheckIn(draft)));
+                const careDayId = await fileDay(
+                  resident.remoteId!,
+                  draft.careDate,
+                  toWire(asCheckIn(draft)),
+                );
+                // The day first, then the photograph, and a failed photograph does not
+                // undo a filed day. A caregiver whose upload failed on a corridor's wifi
+                // has still recorded the shift, and refiling the day to carry the picture
+                // would be a second correction on a record that only changed once.
+                if (draft.photoUri) {
+                  await uploadPhoto(resident.remoteId!, draft.photoUri, careDayId);
+                }
               }
             : undefined
         }

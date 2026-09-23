@@ -80,9 +80,20 @@ func run() error {
 		// Named apart from the access-token signer above. Two things called signer in one
 		// function, one signing tokens and one signing URLs, is a line that reads
 		// correctly and means the other thing.
-		urls, err := media.NewGCS(ctx, os.Getenv("SIGNING_SERVICE_ACCOUNT"))
-		if err != nil {
-			return err
+		account := os.Getenv("SIGNING_SERVICE_ACCOUNT")
+		var urls *media.GCS
+		if token := os.Getenv("SIGNING_ACCESS_TOKEN"); token != "" {
+			// Running somewhere with no application-default credentials, which is every
+			// machine here - these projects deliberately do not use ADC. On Cloud Run the
+			// metadata server answers and this branch is not taken.
+			urls = media.NewGCSWithToken(account, token)
+			log.Info("signing photograph URLs with a supplied token")
+		} else {
+			var err error
+			urls, err = media.NewGCS(ctx, account)
+			if err != nil {
+				return err
+			}
 		}
 		defer urls.Close()
 		photos = media.New(database, bucket, urls)
