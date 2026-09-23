@@ -289,6 +289,24 @@ ALTER TABLE users ENABLE TRIGGER reject_plaintext_password;
 \set QUIET off
 
 
+-- The grant and the trigger are two statements of the same rule, and the grant is the
+-- narrower of the two on purpose: reject_record_rewrite is generic and permits updated_at
+-- because other tables need it, while on a filed day superseded_at already is the
+-- timestamp of the only change a row can undergo.
+--
+-- What must hold is that the grant never exceeds the trigger. Wider, and a column could be
+-- changed that the rule was written to protect; narrower is a deliberate second opinion.
+SELECT expect('the columns a filed day may have updated are within what the trigger allows',
+  NOT EXISTS (
+    SELECT 1
+      FROM information_schema.role_column_grants g
+     WHERE g.grantee = 'dailycare_app' AND g.table_name = 'care_days'
+       AND g.privilege_type = 'UPDATE'
+       AND g.column_name::text <> ALL (
+             SELECT unnest(string_to_array(encode(t.tgargs, 'escape'), '\000'))
+               FROM pg_trigger t
+              WHERE t.tgname = 'care_days_are_amended_not_rewritten')));
+
 SELECT checks_end();
 DROP FUNCTION must_reject(text, text);
 DROP FUNCTION must_accept(text, text);

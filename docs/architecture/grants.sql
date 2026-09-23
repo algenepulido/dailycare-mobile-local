@@ -78,7 +78,7 @@ FROM unnest(ARRAY[
 
 INSERT INTO app_privileges (grantee, table_name, privilege, columns, note) VALUES
 ('dailycare_app','care_days','UPDATE', ARRAY['superseded_at'],
- 'The whole of what update is for on a filed day. A trigger refuses the rest; this means the request never gets that far.'),
+ 'The whole of what update is for on a filed day. A trigger refuses the rest; this means the request never gets that far. Narrower than the trigger on purpose: reject_record_rewrite also permits updated_at, because it is generic and other tables need it, but on this table superseded_at already is the timestamp of the only change that can happen to a row. An amendment that stamps updated_at as well is refused here, which is the right answer arrived at before the trigger is reached.'),
 ('dailycare_app','residents','UPDATE',
  ARRAY['display_name','external_source','external_patient_id','baseline_mood',
        'baseline_appetite','baseline_sleep','admitted_on','departed_on','updated_at'],
