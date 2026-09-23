@@ -27,7 +27,11 @@ IMAGE="us-central1-docker.pkg.dev/$PROJECT/dc-$ENVIRONMENT-docker/migrate:$TAG"
 # that applies a different copy is the thing all of this is meant to prevent.
 rm -rf "$HERE/architecture"
 cp -r "$HERE/../../docs/architecture" "$HERE/architecture"
-cp "$HERE/entrypoint.sh" "$HERE/verify-entrypoint.sh" "$HERE/architecture/"
+# Every entrypoint, not the two this script happened to need first. Each job overrides
+# the command, so one image serves all of them - and when it did not, the reset and seed
+# jobs ended up pinned to one-off tags built by hand, which is how a job comes to be
+# running a copy of the model nobody can name.
+cp "$HERE"/*-entrypoint.sh "$HERE/entrypoint.sh" "$HERE/architecture/"
 trap 'rm -rf "$HERE/architecture"' EXIT
 
 docker build -t "$IMAGE" "$HERE"

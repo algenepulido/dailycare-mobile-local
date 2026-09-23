@@ -11,7 +11,7 @@
 
 FROM postgres:14-bookworm
 
-# The same files verify.sh runs its 500 checks against, applied by the same migrate.sh.
+# The same files verify.sh runs its checks against, applied by the same migrate.sh.
 # Nothing is rebuilt for the occasion - a container that applies a different copy of the
 # model is the thing this is supposed to prevent.
 COPY architecture /model
