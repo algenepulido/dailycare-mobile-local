@@ -29,5 +29,21 @@ psql -c "SELECT purpose, count(*) FILTER (WHERE consumed_at IS NULL) AS unused,
                 count(*) FILTER (WHERE consumed_at IS NOT NULL) AS used
          FROM user_tokens GROUP BY purpose ORDER BY 1"
 
+echo "── roles, and who owns the schema"
+psql -c "SELECT rolname, rolcanlogin AS can_login, rolbypassrls AS bypasses_rls, rolsuper
+         FROM pg_roles WHERE rolname LIKE 'dailycare%' OR rolname = 'postgres' ORDER BY 1"
+psql -c "SELECT nspname AS schema, pg_get_userbyid(nspowner) AS owner
+         FROM pg_namespace WHERE nspname = 'public'"
+psql -c "SELECT pg_get_userbyid(relowner) AS owner, count(*) AS tables
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r'
+         GROUP BY 1 ORDER BY 2 DESC"
+
+echo "── anything the model does not declare"
+psql -c "SELECT rolname FROM pg_roles
+         WHERE rolname LIKE 'dailycare%'
+           AND rolname NOT IN ('dailycare_app','dailycare_retention',
+                               'dailycare_integration','dailycare_backup')"
+
 echo "── migrations applied"
 psql -c "SELECT count(*) AS files, max(applied_at) AS most_recent FROM schema_migrations"
