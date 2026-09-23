@@ -4,7 +4,7 @@
 #
 #   ./review.sh
 #
-# Starts a throwaway PostgreSQL 14, runs all ten check suites and the restore drill inside
+# Starts a throwaway PostgreSQL 14, runs every check suite and the restore drill inside
 # it, and removes the container afterwards. Nothing touches anything on this machine.
 #
 # It runs as an ordinary database user rather than as a superuser, deliberately. A

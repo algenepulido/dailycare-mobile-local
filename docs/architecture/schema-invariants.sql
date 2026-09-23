@@ -118,6 +118,57 @@ SELECT must_accept('a meal ticked with no amount — not observed is a real answ
 $$);
 
 
+-- ── photographs ────────────────────────────────────────────────────────────────
+
+-- Cathy's day is 66666666; Robert is 77777777 and has no day here.
+SELECT must_reject('a photograph of one resident attached to another resident''s day', $$
+  INSERT INTO media_objects (facility_id, resident_id, care_day_id, bucket, object_path,
+         content_type, byte_size, uploaded_by)
+  VALUES ('11111111-1111-1111-1111-111111111111', '77777777-7777-7777-7777-777777777777',
+          '66666666-6666-6666-6666-666666666666', 'dc-media',
+          '11111111-1111-1111-1111-111111111111/robert/1.jpg', 'image/jpeg', 1,
+          '22222222-2222-2222-2222-222222222222')
+$$);
+
+SELECT must_accept('a photograph on its own resident''s day', $$
+  INSERT INTO media_objects (facility_id, resident_id, care_day_id, bucket, object_path,
+         content_type, byte_size, uploaded_by)
+  VALUES ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555',
+          '66666666-6666-6666-6666-666666666666', 'dc-media',
+          '11111111-1111-1111-1111-111111111111/cathy/1.jpg', 'image/jpeg', 1,
+          '22222222-2222-2222-2222-222222222222')
+$$);
+
+-- A photograph taken before the day was filed has nowhere to hang yet, and the upload
+-- should not have to wait for one. The pair is only checked once there is a day named.
+SELECT must_accept('a photograph attached to no day at all', $$
+  INSERT INTO media_objects (facility_id, resident_id, care_day_id, bucket, object_path,
+         content_type, byte_size, uploaded_by)
+  VALUES ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555',
+          NULL, 'dc-media', '11111111-1111-1111-1111-111111111111/cathy/2.jpg',
+          'image/jpeg', 1, '22222222-2222-2222-2222-222222222222')
+$$);
+
+-- The path is what a signed URL is minted for. A row whose path points outside its own
+-- facility would mint a link to another building's photograph.
+SELECT must_reject('an object path outside the facility the row belongs to', $$
+  INSERT INTO media_objects (facility_id, resident_id, bucket, object_path,
+         content_type, byte_size, uploaded_by)
+  VALUES ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555',
+          'dc-media', '99999999-9999-9999-9999-999999999999/cathy/3.jpg', 'image/jpeg', 1,
+          '22222222-2222-2222-2222-222222222222')
+$$);
+
+-- Gone before it arrived is not a state.
+SELECT must_reject('a photograph marked deleted that never arrived', $$
+  INSERT INTO media_objects (facility_id, resident_id, bucket, object_path,
+         content_type, byte_size, uploaded_by, deleted_at)
+  VALUES ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555',
+          'dc-media', '11111111-1111-1111-1111-111111111111/cathy/4.jpg', 'image/jpeg', 1,
+          '22222222-2222-2222-2222-222222222222', now())
+$$);
+
+
 -- ── medication ─────────────────────────────────────────────────────────────────
 
 SELECT must_reject('an external medication event with no reference to its source record', $$

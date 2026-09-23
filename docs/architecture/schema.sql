@@ -418,7 +418,11 @@ CREATE TABLE care_days (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+
+  -- Redundant against the primary key, and there so a photograph can reference the day
+  -- and the resident together. See media_objects below.
+  UNIQUE (id, resident_id)
 );
 
 -- One current row per resident per day. Superseded rows are exempt, which is what makes
@@ -515,7 +519,7 @@ CREATE TABLE media_objects (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id    uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
   resident_id    uuid NOT NULL,
-  care_day_id    uuid REFERENCES care_days(id) ON DELETE SET NULL ON UPDATE CASCADE,
+  care_day_id    uuid,   -- paired with resident_id in a composite reference below
 
   bucket         text NOT NULL,
   object_path    text NOT NULL,
@@ -555,7 +559,18 @@ CREATE TABLE media_objects (
   -- The resident and the facility together, so a row cannot name one facility and a
   -- resident who is in another. Two separate references each held; the pair did not.
   FOREIGN KEY (resident_id, facility_id)
-    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE
+    REFERENCES residents (id, facility_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+
+  -- The day and the resident together, for the same reason. Both references were held
+  -- separately and the pair was not, so the database accepted a photograph of one
+  -- resident filed against another resident's day - tested and it did. Anything reading
+  -- a day's photographs reads them by care_day_id, so that row would have shown one
+  -- family a photograph of somebody else's relative.
+  --
+  -- care_day_id is nullable and this is MATCH SIMPLE, so a photograph attached to no day
+  -- is still allowed; the pair is only checked once there is a day to check it against.
+  FOREIGN KEY (care_day_id, resident_id)
+    REFERENCES care_days (id, resident_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE INDEX ON media_objects (resident_id) WHERE deleted_at IS NULL;
