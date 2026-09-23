@@ -143,6 +143,31 @@ being in a building and being responsible for a resident are different grants â€
 caregiver who signs in to an empty list will reasonably assume the app is broken, so the
 command says so when `--resident` is left off.
 
+## When somebody loses their password
+
+    gcloud run jobs execute dc-dev-bootstrap --region us-central1 \
+      --update-env-vars BOOTSTRAP_RESET=true,BOOTSTRAP_EMAIL=ben@cedar.test
+
+Manual for the same reason account creation is: nothing can send an email yet, and a
+reset somebody can request for themselves without one is a way to hand an account to
+whoever asks for it.
+
+One hour rather than the invitation's seven days. An invitation is expected to sit
+somewhere until the recipient's next shift; a reset is somebody standing there now, and
+the window is the only thing limiting a link that gets read off a screen.
+
+Using it ends every session that account has on record, so nothing can refresh afterwards.
+
+One thing it does not do: an access token already issued keeps working until it expires,
+which is fifteen minutes. Those are verified against a signature and a clock and never
+against the database - that is what keeps a read off every request - so a reset stops the
+refresh, not the quarter of an hour before it. Confirmed on the deployed instance rather
+than assumed.
+
+Closing that window means a database lookup on every request, which is a different system
+and a real cost. If a compromise is suspected and fifteen minutes is too long, the answer
+today is `users.deactivated_at`, which sign-in and `credential_for_sign_in` both check.
+
 `--by` is recorded against both the membership and the assignments. Leave it off for the
 first account in a building, where there is genuinely nobody to name;
 `assignments_without_an_author` lists whatever stays unattributed.

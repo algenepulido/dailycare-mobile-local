@@ -49,6 +49,8 @@ func bootstrap(ctx context.Context, args []string) error {
 	name := fs.String("name", "", "the name a family sees on a day they filed")
 	role := fs.String("role", "caregiver", "caregiver or care_manager")
 	by := fs.String("by", "", "the address of the person doing this, recorded against the grant")
+	reset := fs.Bool("reset", false,
+		"issue a password reset for an account that already exists, instead of creating one")
 	var residents residentList
 	fs.Var(&residents, "resident", "a resident to assign them to; repeat for more")
 	if err := fs.Parse(args); err != nil {
@@ -59,6 +61,9 @@ func bootstrap(ctx context.Context, args []string) error {
 	// arguments are fixed when it is created - `gcloud run jobs execute` can override the
 	// environment and not the command line. Flags win, so the same binary is usable by
 	// hand without the environment getting a say it was not asked for.
+	if !*reset && strings.EqualFold(os.Getenv("BOOTSTRAP_RESET"), "true") {
+		*reset = true
+	}
 	fallback(facility, "BOOTSTRAP_FACILITY")
 	fallback(email, "BOOTSTRAP_EMAIL")
 	fallback(name, "BOOTSTRAP_NAME")
@@ -74,6 +79,16 @@ func bootstrap(ctx context.Context, args []string) error {
 				}
 			}
 		}
+	}
+
+	// A reset needs the address and nothing else: the account is already there, with a
+	// facility and assignments it is not this command's business to change.
+	if *reset {
+		if *email == "" {
+			fs.Usage()
+			return errors.New("--reset needs --email")
+		}
+		return issueReset(ctx, *email)
 	}
 
 	if *facility == "" || *email == "" || *name == "" {
@@ -199,4 +214,59 @@ func fallback(flagValue *string, env string) {
 	if *flagValue == "" {
 		*flagValue = os.Getenv(env)
 	}
+}
+
+// issueReset gives an existing account a way back in.
+//
+// The other half of the same mechanism: redeem_token takes the purpose, so a reset link
+// and an invitation are the same act with a different row behind them. It is manual for
+// the same reason account creation is - there is nothing that can send an email yet, and
+// a reset somebody can request for themselves without one is a way to hand an account to
+// whoever asks.
+//
+// It does not say whether the address exists. Somebody running this command knows who
+// they meant; the refusal is for the case where they mistyped, and it costs one look.
+func issueReset(ctx context.Context, email string) error {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return errors.New("DATABASE_URL is not set")
+	}
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	var userID uuid.UUID
+	var active bool
+	if err := conn.QueryRow(ctx,
+		`SELECT id, deactivated_at IS NULL FROM users WHERE lower(email) = lower($1)`,
+		email).Scan(&userID, &active); err != nil {
+		return fmt.Errorf("no account for %s", email)
+	}
+	if !active {
+		// Reactivating is a different decision and this is not it. A reset issued here
+		// would be refused at redemption anyway, and the person holding it would have no
+		// way to know why.
+		return fmt.Errorf("%s is deactivated. Reactivate the account first", email)
+	}
+
+	link, digest, err := auth.NewToken()
+	if err != nil {
+		return err
+	}
+	// An hour, not a week. An invitation is expected to sit in somebody's inbox until
+	// their next shift; a reset is somebody standing there now, and the window is the only
+	// thing limiting a link that is read off a screen.
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
+		 VALUES ($1, 'password_reset', $2, now() + interval '1 hour')`,
+		userID, digest); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "\nA reset for %s. It lasts one hour, works once, and every\n"+
+		"session they have open now will end when they use it:\n\n", email)
+	fmt.Println(link)
+	return nil
 }

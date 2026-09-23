@@ -366,9 +366,20 @@ BEGIN
       USING HINT = 'The link is still unused. The account has to be reactivated first.';
   END IF;
 
-  -- Everything already signed in stops. A password arriving from an invitation means the
+  -- Every session on record ends. A password arriving from an invitation means the
   -- account is new; from a reset it means somebody believes it was compromised. Neither
   -- wants a session opened before it to keep working.
+  --
+  -- What this does not do, and it matters: an access token already in somebody's hand
+  -- keeps working until it expires. The application verifies those against a signature
+  -- and a clock and never asks this database, which is what keeps a read off every
+  -- request - so ending a session here stops the refresh and not the fifteen minutes
+  -- before it. Measured on the deployed instance rather than assumed: a token taken
+  -- before a reset still answered 200 afterwards.
+  --
+  -- Closing that window means a lookup per request, which is a different system. The
+  -- window is the design; writing it down is so that nobody reads the line above and
+  -- believes a reset is instant.
   --
   -- Written here rather than through revoke_all_sessions, which refuses: that function
   -- checks the caller is the person whose sessions are ending, and during a redeem there
