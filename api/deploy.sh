@@ -43,6 +43,21 @@ docker push "$IMAGE"
 gcloud run services update "$SERVICE" \
   --image "$IMAGE" --project "$PROJECT" --region "$REGION" --quiet
 
+# Every job running this image moves with it.
+#
+# dc-dev-bootstrap is the API's own binary - the account it creates has to be hashed by
+# the code that verifies it - and its image was set by hand once and then left behind. It
+# ran with an old build, could not see the environment variables the newer one reads, and
+# reported that its arguments were missing. The job and the service are the same program
+# and there is no version of this where they should differ.
+for job in "dc-$ENVIRONMENT-bootstrap"; do
+  if gcloud run jobs describe "$job" --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
+    gcloud run jobs update "$job" --image "$IMAGE" \
+      --project "$PROJECT" --region "$REGION" --quiet >/dev/null
+    echo "$job is on $TAG"
+  fi
+done
+
 echo ""
 echo "$SERVICE is on $TAG"
 echo "the revision serving traffic:"
