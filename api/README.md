@@ -71,7 +71,7 @@ method that queries without auditing.
     DELETE /v1/sessions/all        sign out everywhere (identified)
     GET    /v1/residents           (identified)
     GET    /v1/residents/{id}/days/{date}   (identified)
-    GET    /healthz
+    GET    /v1/health
 
 Three of those are unauthenticated and nothing else is. `identified` refuses anything
 without a verifiable access token before the handler runs, because a handler that has to

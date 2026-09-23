@@ -14,10 +14,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/oauth2/google"
 )
 
 type DB struct{ pool *pgxpool.Pool }
@@ -37,6 +39,29 @@ func Open(ctx context.Context, dsn string) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: %w", err)
+	}
+
+	// Cloud SQL's IAM authentication puts an OAuth access token where the password goes.
+	// Nothing holds a database password anywhere - not this process, not Secret Manager,
+	// not a developer's shell - which is the whole reason for turning it on.
+	//
+	// The token is fetched per connection rather than once. They last an hour and the pool
+	// outlives that, so a token read at start-up would work until the first idle stretch
+	// and then fail in a way that looks like the database going away.
+	if cfg.ConnConfig.Password == "" && strings.HasSuffix(cfg.ConnConfig.User, ".iam") {
+		source, err := google.DefaultTokenSource(ctx,
+			"https://www.googleapis.com/auth/sqlservice.login")
+		if err != nil {
+			return nil, fmt.Errorf("db: no identity to authenticate as: %w", err)
+		}
+		cfg.BeforeConnect = func(ctx context.Context, c *pgx.ConnConfig) error {
+			token, err := source.Token()
+			if err != nil {
+				return fmt.Errorf("db: getting a database token: %w", err)
+			}
+			c.Password = token.AccessToken
+			return nil
+		}
 	}
 	// Small. Cloud SQL counts connections, and a caregiver app's traffic is a few requests
 	// per shift per phone rather than a firehose.

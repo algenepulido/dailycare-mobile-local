@@ -50,7 +50,13 @@ for f in "${WANTED[@]}"; do
 done
 for f in "$HERE"/*.sql; do
   b="$(basename "$f")"
-  case "$b" in *-invariants.sql|roles.sql|checks-support.sql) continue ;; esac
+  # Not model, and each for its own reason. The suites are checks; roles.sql needs a
+  # login that may create roles; checks-support.sql is scaffolding the suites need; and
+  # cloudsql-iam.sql names four Google service accounts and only means anything on a
+  # Cloud SQL instance - applying it to a container would fail on users that are not there.
+  case "$b" in
+    *-invariants.sql|roles.sql|checks-support.sql|cloudsql-iam.sql) continue ;;
+  esac
   printf '%s\n' "${WANTED[@]}" | grep -qx "$b" || {
     echo "$b is in this directory and not in model.list, so it would never be applied" >&2
     missing=1; }

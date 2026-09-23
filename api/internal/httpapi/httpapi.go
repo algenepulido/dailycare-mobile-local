@@ -64,9 +64,14 @@ func (a *API) Routes() http.Handler {
 	// photograph - media_never_arrived is the list of ones that never came.
 	mux.Handle("POST /v1/photos/{objectId}/arrived", a.identified(a.photoArrived))
 
+	// /healthz is not ours to use. Cloud Run's frontend answers it before a request
+	// reaches the container, with an HTML 404 - so a probe against a deployed service
+	// tests Google's load balancer and reports the service as broken. Found by deploying
+	// and curling it.
+	//
 	// No identity and nothing about the system: a health check that reported the database
 	// version or the migration state would be a free map for anybody who found the port.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok\n"))
 	})
