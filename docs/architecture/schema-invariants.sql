@@ -159,6 +159,35 @@ SELECT must_reject('an object path outside the facility the row belongs to', $$
           '22222222-2222-2222-2222-222222222222')
 $$);
 
+-- A correction makes a new care_days row. The photograph stays on the row it was filed
+-- against, so the current revision of a corrected day has no photograph of its own - and
+-- that is what these two checks are for. Not a defect: the revisions of a day are a chain,
+-- and the photograph belongs to the day rather than to one telling of it. It is a trap,
+-- though, and it is the obvious query that falls into it. A read path written as
+--
+--     WHERE care_day_id = <the current row>
+--
+-- shows a family nothing the moment a caregiver fixes a typo. Resolving by the resident
+-- and the date instead reaches every revision, which is what the partial unique index on
+-- (resident_id, care_date) already assumes a day is.
+--
+-- 66666666 was superseded further up this file, and the photograph above is attached to
+-- it, so the fixture is already a corrected day.
+SELECT expect('a corrected day has no photograph under its current row',
+  NOT EXISTS (
+    SELECT 1 FROM media_objects m
+    JOIN care_days cd ON cd.id = m.care_day_id
+    WHERE cd.resident_id = '55555555-5555-5555-5555-555555555555'
+      AND cd.care_date = '2026-09-14'
+      AND cd.superseded_at IS NULL));
+
+SELECT expect('and the same photograph is found by the resident and the date',
+  EXISTS (
+    SELECT 1 FROM media_objects m
+    JOIN care_days cd ON cd.id = m.care_day_id
+    WHERE cd.resident_id = '55555555-5555-5555-5555-555555555555'
+      AND cd.care_date = '2026-09-14'));
+
 -- Gone before it arrived is not a state.
 SELECT must_reject('a photograph marked deleted that never arrived', $$
   INSERT INTO media_objects (facility_id, resident_id, bucket, object_path,
