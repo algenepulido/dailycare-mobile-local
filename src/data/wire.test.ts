@@ -12,6 +12,7 @@ import {
   CONCERN_WIRE,
   MOOD_WIRE,
   SLEEP_WIRE,
+  fromWire,
   toWire,
 } from '@/data/wire';
 import {
@@ -107,4 +108,83 @@ test('an amount is never sent for a meal that did not happen', () => {
   const odd = { ...aDay, meals: { ...aDay.meals, dinner: { done: false, amount: 'all' as const } } };
   const dinner = toWire(odd).meals.find((m) => m.slot === 'dinner');
   expect('amount' in (dinner ?? {})).toBe(false);
+});
+
+describe('reading a day back', () => {
+  const empty = { residentId: 'r1', on: '2026-09-23T00:00:00Z', meals: [], concerns: [] };
+
+  it('is null for a day nobody has filed', () => {
+    // The server answers with an empty day rather than a 404, so filedAt is the question.
+    expect(fromWire(empty)).toBeNull();
+  });
+
+  it('turns stored values back into the words on the screen', () => {
+    const got = fromWire({
+      ...empty,
+      filedAt: '2026-09-23T16:30:00Z',
+      mood: 'withdrawn',
+      appetite: 'refused',
+      sleep: 'up_a_lot',
+      note: 'quiet all afternoon',
+      shower: true,
+      grooming: false,
+      meals: [
+        { slot: 'breakfast', happened: true, amount: 'most' },
+        { slot: 'lunch', happened: false },
+      ],
+      concerns: ['fall_or_near_fall', 'skin_concern'],
+    })!;
+
+    expect(got.mood).toBe('Withdrawn');
+    expect(got.appetite).toBe('Refused');
+    expect(got.sleep).toBe('Up a lot');
+    expect(got.note).toBe('quiet all afternoon');
+    expect(got.shower).toBe(true);
+    expect(got.grooming).toBe(false);
+    expect(got.meals).toEqual([
+      { slot: 'breakfast', happened: true, amount: 'most' },
+      { slot: 'lunch', happened: false, amount: null },
+    ]);
+    expect(got.concerns).toEqual(['Fall / near-fall', 'Skin concern']);
+  });
+
+  /**
+   * The failure this file exists to prevent, in the other direction. A value the app
+   * cannot name must not reach the screen as itself: `up_a_lot` in front of a caregiver
+   * reads as a corrupted record rather than as a gap in a translation table.
+   */
+  it('drops a value it cannot name rather than showing the stored one', () => {
+    const got = fromWire({
+      ...empty,
+      filedAt: '2026-09-23T16:30:00Z',
+      mood: 'euphoric',
+      meals: [{ slot: 'elevenses', happened: true }],
+      concerns: ['abducted_by_gulls'],
+    })!;
+
+    expect(got.mood).toBeNull();
+    expect(got.meals).toEqual([]);
+    expect(got.concerns).toEqual([]);
+  });
+
+  it('round-trips every value the app can produce', () => {
+    // toWire and fromWire have to agree about every constant, not just the ones a test
+    // happened to name. This walks them.
+    for (const [label, stored] of Object.entries(MOOD_WIRE)) {
+      expect(fromWire({ ...empty, filedAt: 'x', mood: stored })!.mood).toBe(label);
+    }
+    for (const [label, stored] of Object.entries(APPETITE_WIRE)) {
+      expect(fromWire({ ...empty, filedAt: 'x', appetite: stored })!.appetite).toBe(label);
+    }
+    for (const [label, stored] of Object.entries(SLEEP_WIRE)) {
+      expect(fromWire({ ...empty, filedAt: 'x', sleep: stored })!.sleep).toBe(label);
+    }
+    for (const [label, stored] of Object.entries(CONCERN_WIRE)) {
+      expect(fromWire({ ...empty, filedAt: 'x', concerns: [stored] })!.concerns).toEqual([label]);
+    }
+    for (const [label, stored] of Object.entries(AMOUNT_WIRE)) {
+      const meals = [{ slot: 'breakfast', happened: true, amount: stored }];
+      expect(fromWire({ ...empty, filedAt: 'x', meals })!.meals[0].amount).toBe(label);
+    }
+  });
 });

@@ -9,7 +9,8 @@
 
 import { contentTypeFor } from '@/data/photos';
 import { rememberUpload, uploadedAs } from '@/data/uploads';
-import type { WireDay } from '@/data/wire';
+import { fromWire } from '@/data/wire';
+import type { FiledDay, FiledSummary, WireDay } from '@/data/wire';
 import {
   currentAccessToken,
   forgetTokens,
@@ -192,6 +193,19 @@ export async function signOut(): Promise<void> {
  * Which is why this is not retried on anything but a 401: a retry that the server had
  * already applied would file the same day twice and read as two corrections.
  */
+/**
+ * A day as the server has it, or null if nobody has filed one.
+ *
+ * Read on the day screen so a caregiver picking up a phone can see that the shift is
+ * already recorded, rather than filing it a second time and turning one day into two
+ * corrections. The server answers with an empty day rather than a 404 for a date nobody
+ * has touched, so the absence of filedAt is the question being asked here.
+ */
+export async function fetchDay(residentId: string, date: string): Promise<FiledSummary | null> {
+  const body = (await authed(`/v1/residents/${residentId}/days/${date}`)) as FiledDay;
+  return fromWire(body);
+}
+
 export async function fileDay(residentId: string, date: string, day: WireDay): Promise<string> {
   const body = (await authed(`/v1/residents/${residentId}/days/${date}`, {
     method: 'POST',

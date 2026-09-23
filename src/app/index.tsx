@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
+  AlreadyFiled,
   Button,
   Card,
   CareCheck,
@@ -18,11 +19,12 @@ import {
   Screen,
   SectionHeading,
 } from '@/components';
-import { fileDay, uploadPhoto } from '@/data/api';
+import { fetchDay, fileDay, uploadPhoto } from '@/data/api';
 import { forgetUpload } from '@/data/uploads';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
 import { toWire } from '@/data/wire';
+import type { FiledSummary } from '@/data/wire';
 import { buildChanges, buildChecklist } from '@/domain/rules';
 import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS } from '@/domain/rules';
 import type { CheckIn, Meal } from '@/domain/types';
@@ -100,6 +102,37 @@ function CareReport({
     baseline: resident.baseline,
   });
   const { draft, dispatch } = form;
+
+  /**
+   * What the server already has for this resident on this date.
+   *
+   * Only asked when there is a session and a server-side resident to ask about - an
+   * unsigned-in phone is a working phone here, and a screen that waits for a network
+   * answer before it can be used would be the wrong trade in a basement corridor.
+   *
+   * A failure is silence rather than a message. Not knowing whether somebody else filed
+   * the day is the state this screen was in before, and it is still a usable one; an
+   * error banner for it would be noise on every shift with poor signal.
+   */
+  const [filed, setFiled] = useState<FiledSummary | null>(null);
+  const remoteId = resident.remoteId;
+  const signedIn = Boolean(account);
+
+  const lookUpFiled = useCallback(async () => {
+    if (!signedIn || !remoteId) {
+      setFiled(null);
+      return;
+    }
+    try {
+      setFiled(await fetchDay(remoteId, draft.careDate));
+    } catch {
+      setFiled(null);
+    }
+  }, [signedIn, remoteId, draft.careDate]);
+
+  useEffect(() => {
+    void lookUpFiled();
+  }, [lookUpFiled]);
 
   async function handlePickPhoto(source: PhotoSource) {
     setPhotoBusy(true);
@@ -213,6 +246,8 @@ function CareReport({
         <Text style={styles.separator}>·</Text>
         <CareDateButton careDate={draft.careDate} onChange={form.selectDate} />
       </View>
+
+      {filed ? <AlreadyFiled summary={filed} residentName={resident.displayName} /> : null}
 
       <Card title="Meals">
         {MEALS.map((meal) => (
@@ -367,6 +402,10 @@ function CareReport({
                 if (draft.photoUri) {
                   await uploadPhoto(resident.remoteId!, draft.photoUri, careDayId);
                 }
+                // So the screen underneath agrees with what was just sent. Not awaited
+                // into the send's own result: the day is filed either way, and a failed
+                // read here would report a failed send.
+                void lookUpFiled();
               }
             : undefined
         }

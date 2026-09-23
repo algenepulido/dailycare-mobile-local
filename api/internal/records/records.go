@@ -35,13 +35,26 @@ func New(d *db.DB) *Store { return &Store{db: d} }
 var ErrNotVisible = errors.New("records: no such resident, or not one this session may read")
 
 // CareDay is what a caregiver files at the end of a shift.
+// A day as it reads back. The pointers are the difference between a day nobody has filed
+// and a day filed as calm: absent means nothing was recorded, and false would be a claim.
+//
+// `note` rather than `notes`, to match what Filing sends. The two names for one field were
+// a wart nothing had tripped over yet, because nothing read a day back.
 type CareDay struct {
-	ResidentID uuid.UUID  `json:"residentId"`
-	On         time.Time  `json:"on"`
-	Mood       *string    `json:"mood,omitempty"`
-	Notes      *string    `json:"notes,omitempty"`
-	FiledBy    *uuid.UUID `json:"filedBy,omitempty"`
-	FiledAt    *time.Time `json:"filedAt,omitempty"`
+	ResidentID uuid.UUID `json:"residentId"`
+	On         time.Time `json:"on"`
+	Mood       *string   `json:"mood,omitempty"`
+	Appetite   *string   `json:"appetite,omitempty"`
+	Sleep      *string   `json:"sleep,omitempty"`
+	Note       *string   `json:"note,omitempty"`
+	Shower     *bool     `json:"shower,omitempty"`
+	Grooming   *bool     `json:"grooming,omitempty"`
+	// Always present, never null, so a caller can range over them without checking. Empty
+	// means nothing was recorded, which is what an unfiled day is.
+	Meals    []Meal     `json:"meals"`
+	Concerns []string   `json:"concerns"`
+	FiledBy  *uuid.UUID `json:"filedBy,omitempty"`
+	FiledAt  *time.Time `json:"filedAt,omitempty"`
 }
 
 // read runs fn after recording that the resident's data was looked at. Unexported, and the
@@ -66,19 +79,61 @@ func (s *Store) read(ctx context.Context, c db.Caller, resident uuid.UUID, subje
 
 // Day returns one resident's day, or ErrNotVisible.
 func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on time.Time) (*CareDay, error) {
-	var d CareDay
+	d := CareDay{ResidentID: resident, On: on, Meals: []Meal{}, Concerns: []string{}}
 	err := s.read(ctx, c, resident, "care_days", func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `
-			SELECT resident_id, care_date, mood, note, filed_by, filed_at
+		// The current revision only. A corrected day has an older row with the same
+		// resident and date, and showing that one would be showing a past that was
+		// withdrawn - which is the opposite of what amends_id is for.
+		var id uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			SELECT id, resident_id, care_date, mood, appetite, sleep, note,
+			       hygiene_shower, hygiene_grooming, filed_by, filed_at
 			FROM care_days
 			WHERE resident_id = $1 AND care_date = $2 AND superseded_at IS NULL`,
-			resident, on)
-		return row.Scan(&d.ResidentID, &d.On, &d.Mood, &d.Notes, &d.FiledBy, &d.FiledAt)
+			resident, on).Scan(&id, &d.ResidentID, &d.On, &d.Mood, &d.Appetite, &d.Sleep,
+			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt); err != nil {
+			return err
+		}
+
+		// Ordered by the enum rather than by name, so breakfast comes before lunch comes
+		// before dinner instead of breakfast, dinner, lunch.
+		rows, err := tx.Query(ctx,
+			`SELECT slot, happened, amount FROM care_day_meals
+			 WHERE care_day_id = $1 ORDER BY slot`, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m Meal
+			if err := rows.Scan(&m.Slot, &m.Happened, &m.Amount); err != nil {
+				return err
+			}
+			d.Meals = append(d.Meals, m)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		concerns, err := tx.Query(ctx,
+			`SELECT concern FROM care_day_concerns WHERE care_day_id = $1 ORDER BY concern`, id)
+		if err != nil {
+			return err
+		}
+		defer concerns.Close()
+		for concerns.Next() {
+			var name string
+			if err := concerns.Scan(&name); err != nil {
+				return err
+			}
+			d.Concerns = append(d.Concerns, name)
+		}
+		return concerns.Err()
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// A day nobody has filed yet is an empty day, not a missing one. The read is still
 		// in the trail: somebody asked about this resident.
-		return &CareDay{ResidentID: resident, On: on}, nil
+		return &CareDay{ResidentID: resident, On: on, Meals: []Meal{}, Concerns: []string{}}, nil
 	}
 	if err != nil {
 		return nil, err

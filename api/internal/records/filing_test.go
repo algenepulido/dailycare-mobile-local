@@ -84,7 +84,7 @@ func TestFilingADayAndReadingItBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading it back: %v", err)
 	}
-	if got.Notes == nil || *got.Notes != "settled evening" {
+	if got.Note == nil || *got.Note != "settled evening" {
 		t.Fatalf("the note did not come back: %+v", got)
 	}
 }
@@ -143,7 +143,7 @@ func TestAmendingLeavesTheOriginalReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Notes == nil || *got.Notes != "fall in the corridor, GP called" {
+	if got.Note == nil || *got.Note != "fall in the corridor, GP called" {
 		t.Fatalf("reading the day gave the old note: %+v", got)
 	}
 }
@@ -187,4 +187,100 @@ func indexOf(h, n string) int {
 		}
 	}
 	return -1
+}
+
+// The whole day, not a quarter of it.
+//
+// Day() used to select mood, note, filed_by and filed_at and nothing else, so an endpoint
+// called "the day" answered with a fraction of one and the meals, the concerns, the
+// hygiene, the appetite and the sleep were all simply absent. Nothing had noticed because
+// nothing read a day back yet.
+func TestReadingADayReturnsEveryPartOfIt(t *testing.T) {
+	s, caller, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	filed := Filing{
+		Mood: "anxious", Appetite: "poor", Sleep: "up_a_lot",
+		Note: "restless after lunch", Shower: true, Grooming: false,
+		Meals: []Meal{
+			{Slot: "dinner", Happened: false},
+			{Slot: "breakfast", Happened: true, Amount: ptr("all")},
+			{Slot: "lunch", Happened: true, Amount: ptr("half")},
+		},
+		Concerns: []string{"pain", "fall_or_near_fall"},
+	}
+	if _, err := s.File(ctx, caller, resident, on, filed); err != nil {
+		t.Fatalf("filing: %v", err)
+	}
+
+	got, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+
+	for _, c := range []struct {
+		field string
+		got   *string
+		want  string
+	}{
+		{"mood", got.Mood, "anxious"},
+		{"appetite", got.Appetite, "poor"},
+		{"sleep", got.Sleep, "up_a_lot"},
+		{"note", got.Note, "restless after lunch"},
+	} {
+		if c.got == nil || *c.got != c.want {
+			t.Errorf("%s: wanted %q, got %v", c.field, c.want, c.got)
+		}
+	}
+	if got.Shower == nil || !*got.Shower {
+		t.Errorf("shower: wanted true, got %v", got.Shower)
+	}
+	if got.Grooming == nil || *got.Grooming {
+		t.Errorf("grooming: wanted false, got %v", got.Grooming)
+	}
+
+	// Filed out of order on purpose. A caregiver reads breakfast, lunch, dinner, and the
+	// order a row happened to be inserted in is not that.
+	if len(got.Meals) != 3 {
+		t.Fatalf("wanted three meals, got %d: %+v", len(got.Meals), got.Meals)
+	}
+	for i, want := range []string{"breakfast", "lunch", "dinner"} {
+		if got.Meals[i].Slot != want {
+			t.Errorf("meal %d: wanted %s, got %s", i, want, got.Meals[i].Slot)
+		}
+	}
+	if got.Meals[1].Amount == nil || *got.Meals[1].Amount != "half" {
+		t.Errorf("lunch amount did not come back: %+v", got.Meals[1])
+	}
+	if got.Meals[2].Happened {
+		t.Error("dinner was filed as not happened and came back as happened")
+	}
+
+	if len(got.Concerns) != 2 {
+		t.Fatalf("wanted two concerns, got %+v", got.Concerns)
+	}
+}
+
+// A day nobody has filed is an empty day, and the difference has to be readable. Absent
+// rather than false: "no shower recorded" and "they did not have a shower" are different
+// things to put in front of a family.
+func TestAnUnfiledDayIsEmptyRatherThanMissing(t *testing.T) {
+	s, caller, resident := ward(t)
+	ctx := context.Background()
+
+	got, err := s.Day(ctx, caller, resident, time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("reading a day nobody filed: %v", err)
+	}
+	if got.FiledAt != nil || got.Mood != nil || got.Shower != nil {
+		t.Errorf("an unfiled day came back with something in it: %+v", got)
+	}
+	// Never null, so a caller can range over them without checking first.
+	if got.Meals == nil || got.Concerns == nil {
+		t.Errorf("meals and concerns should be empty, not absent: %+v", got)
+	}
+	if len(got.Meals) != 0 || len(got.Concerns) != 0 {
+		t.Errorf("an unfiled day has no meals and no concerns: %+v", got)
+	}
 }
