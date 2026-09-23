@@ -107,10 +107,17 @@ by architecture and each device downloads only its own.
 ## Verifying
 
 ```bash
-npm run verify      # types, then tests
-npm run typecheck   # tsc only
-npm test            # jest only
+npm run verify              # the app: types, then tests
+api/test.sh                 # the API, against a real database with the model applied
+docs/architecture/review.sh # the model: every suite and the restore drill, in a container
 ```
+
+All three run on every push, in `.github/workflows/verify.yml`, on a runner with no cloud
+credentials of any kind — none of them needs one. The model job also reads the output
+rather than only the exit code: a run that reports no total, or fewer checks than a floor,
+or a suite that could not migrate, fails the build. This repository has already had a
+check that passed because it never asked its question, and an exit code cannot tell the
+difference between everything passing and almost nothing running.
 
 The product rules — what the family is told, and what counts as worth flagging — are
 covered by tests, because that logic is the part a change can quietly get wrong.

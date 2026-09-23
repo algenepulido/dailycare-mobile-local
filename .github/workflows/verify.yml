@@ -1,0 +1,119 @@
+# Everything that can be checked without a cloud account, on every push.
+#
+# The three suites run in parallel because they do not share anything: the model checks
+# build their own PostgreSQL, the API tests build another, and the client tests touch no
+# database at all. A failure in one should not hide the other two, which is why they are
+# separate jobs rather than steps.
+#
+# Nothing here needs a credential. Deploying does, and deploying is not this - see
+# docs/architecture/gcp-iam.sql, where the identity a deploy would run as is still an open
+# question. A verification workflow that needed a key would be the wrong thing to add to a
+# project whose org policy forbids service account keys.
+
+name: verify
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A second push while the first is still running makes the first one uninteresting.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# The default shell for a `run:` step is `bash -e`, which is not `pipefail` - so in
+# `review.sh | tee`, tee's zero would be the step's result and a failing suite would pass.
+# Naming bash explicitly gets `-eo pipefail`, which is the difference between reporting
+# what happened and reporting that something ran.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  model:
+    name: the model, as somebody who is not a superuser
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: run every suite and the restore drill
+        run: docs/architecture/review.sh | tee /tmp/review.txt
+
+      # review.sh exits non-zero when a check fails. It does not, on its own, distinguish
+      # "every check passed" from "almost nothing ran" - and this repository has already
+      # been bitten once by a check that passed because it never asked the question. So
+      # the output is read as well as the exit code.
+      - name: and the run has to have actually asked something
+        run: |
+          set -euo pipefail
+
+          if grep -q 'could not migrate' /tmp/review.txt; then
+            echo "::error::a suite could not migrate, so its checks never ran"
+            grep -A1 'could not migrate' /tmp/review.txt
+            exit 1
+          fi
+
+          total=$(grep -E '^TOTAL' /tmp/review.txt || true)
+          [ -n "$total" ] || { echo "::error::no TOTAL line - review.sh did not finish"; exit 1; }
+          echo "$total"
+
+          pass=$(awk '/^TOTAL/ {print $3}' /tmp/review.txt)
+          fail=$(awk '/^TOTAL/ {print $5}' /tmp/review.txt)
+          err=$(awk  '/^TOTAL/ {print $7}' /tmp/review.txt)
+
+          [ "$fail" = 0 ] || { echo "::error::$fail checks failed"; exit 1; }
+          [ "$err"  = 0 ] || { echo "::error::$err suites errored"; exit 1; }
+
+          # A floor, not a target. It is here to catch a run that quietly stopped asking,
+          # and it should be raised when it starts looking close - never lowered to make a
+          # red build green.
+          floor=500
+          [ "$pass" -ge "$floor" ] || {
+            echo "::error::only $pass checks ran, and there should be at least $floor"
+            exit 1; }
+
+          echo "$pass checks, none failed"
+
+      - name: keep the output when it goes wrong
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-output
+          path: /tmp/review.txt
+
+  client:
+    name: the app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: types and tests
+        run: npm run verify
+
+  api:
+    name: the API, against a real database
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: go vet
+        working-directory: api
+        run: go vet ./...
+      # Builds its own PostgreSQL and applies the model with the same migrate.sh that
+      # deploys, so a test cannot pass against a schema nobody ships.
+      - name: go test
+        run: api/test.sh
