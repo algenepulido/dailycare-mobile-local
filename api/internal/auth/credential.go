@@ -96,3 +96,24 @@ func Digest(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
+
+// The shortest password this will accept.
+//
+// Length and nothing else. Composition rules - a capital, a digit, a symbol - make people
+// write Passw0rd! and write it on the back of the badge, and NIST dropped them for that
+// reason. What is left is length, which is the part that actually costs an attacker
+// something, and a caregiver setting this is choosing it once on a phone.
+const MinimumPasswordLength = 12
+
+var ErrPasswordTooShort = fmt.Errorf(
+	"a password needs at least %d characters", MinimumPasswordLength)
+
+// Acceptable is checked before anything is hashed, so a refusal costs nothing and the
+// message can say what is wrong. Counted in runes: a passphrase in a language that is not
+// English is not shorter for being written in fewer bytes.
+func Acceptable(password string) error {
+	if len([]rune(password)) < MinimumPasswordLength {
+		return ErrPasswordTooShort
+	}
+	return nil
+}

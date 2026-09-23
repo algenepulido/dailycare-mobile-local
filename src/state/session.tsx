@@ -51,6 +51,8 @@ interface SessionValue {
   updateSetup(caregiverName: string, residentName: string, baseline: Baseline): Promise<void>;
   /** Throws ApiError with a message fit to show. */
   signIn(email: string, password: string): Promise<void>;
+  /** Accepting an invitation or a reset link. Ends signed in, like signIn. */
+  redeem(link: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   clear(): Promise<void>;
 }
@@ -185,6 +187,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [linkResident],
   );
 
+  const redeem = useCallback<SessionValue['redeem']>(
+    async (link, password) => {
+      setSigningIn(true);
+      try {
+        const tokens = await api.redeem(link, password, deviceLabel());
+        setAccount({ userId: (tokens as { userId?: string }).userId ?? '' });
+        await linkResident();
+      } finally {
+        setSigningIn(false);
+      }
+    },
+    [linkResident],
+  );
+
   const signOut = useCallback<SessionValue['signOut']>(async () => {
     // The account, not the records. Somebody signing out of a shared ward tablet is
     // finishing a shift, not asking for the day they just filed to be deleted - and
@@ -215,6 +231,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       updateResident,
       updateSetup,
       signIn,
+      redeem,
       signOut,
       clear,
     }),
@@ -228,6 +245,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       updateResident,
       updateSetup,
       signIn,
+      redeem,
       signOut,
       clear,
     ],

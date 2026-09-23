@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Field, Sheet } from '@/components';
 import { ApiError } from '@/data/api';
@@ -21,17 +21,34 @@ interface SignInSheetProps {
 }
 
 export function SignInSheet({ open, onClose }: SignInSheetProps) {
-  const { signIn, signingIn } = useSession();
+  const { signIn, redeem, signingIn } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
 
+  /**
+   * An invitation is the same sheet with different fields.
+   *
+   * A caregiver whose account is new opens this one, finds their password does not work
+   * because they have not got one yet, and the way out is here rather than somewhere they
+   * would have to be told about. The same path accepts a reset link, because a reset is
+   * the same act: a link, and a password they choose.
+   */
+  const [invited, setInvited] = useState(false);
+  const [link, setLink] = useState('');
+
   const submit = async () => {
     setProblem(null);
     try {
-      await signIn(email, password);
+      if (invited) {
+        await redeem(link, password);
+      } else {
+        await signIn(email, password);
+      }
       setEmail('');
       setPassword('');
+      setLink('');
+      setInvited(false);
       onClose();
     } catch (error) {
       // The server's sentence, which is deliberately the same for a wrong password and an
@@ -46,7 +63,9 @@ export function SignInSheet({ open, onClose }: SignInSheetProps) {
     }
   };
 
-  const ready = email.trim().length > 0 && password.length > 0 && !signingIn;
+  const ready = invited
+    ? link.trim().length > 0 && password.length > 0 && !signingIn
+    : email.trim().length > 0 && password.length > 0 && !signingIn;
 
   return (
     <Sheet
@@ -58,7 +77,7 @@ export function SignInSheet({ open, onClose }: SignInSheetProps) {
       // typing into it on an emulator, where the second tap went into the first field.
       footer={
         <Button
-          label="Sign in"
+          label={invited ? 'Set my password' : 'Sign in'}
           onPress={submit}
           disabled={!ready}
           busy={signingIn}
@@ -66,31 +85,44 @@ export function SignInSheet({ open, onClose }: SignInSheetProps) {
       }
     >
       <View style={styles.body}>
-        <Text style={styles.title}>Sign in</Text>
+        <Text style={styles.title}>{invited ? 'Set your password' : 'Sign in'}</Text>
         <Text style={styles.note}>
-          You can keep filing days without signing in. Signing in is what lets them reach
-          the rest of your team.
+          {invited
+            ? 'Paste the invitation you were given. It works once, and the password you choose is yours — nobody else sees it.'
+            : 'You can keep filing days without signing in. Signing in is what lets them reach the rest of your team.'}
         </Text>
 
-        <Field
-          value={email}
-          onChangeText={setEmail}
-          placeholder="you@example.com"
-          accessibilityLabel="Email"
-          sheet
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-        />
+        {invited ? (
+          <Field
+            value={link}
+            onChangeText={setLink}
+            placeholder="Your invitation"
+            accessibilityLabel="Invitation"
+            sheet
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        ) : (
+          <Field
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            accessibilityLabel="Email"
+            sheet
+            autoCapitalize="none"
+            keyboardType="email-address"
+            autoComplete="email"
+          />
+        )}
         <Field
           value={password}
           onChangeText={setPassword}
-          placeholder="Password"
-          accessibilityLabel="Password"
+          placeholder={invited ? 'Choose a password' : 'Password'}
+          accessibilityLabel={invited ? 'New password' : 'Password'}
           sheet
           secureTextEntry
           autoCapitalize="none"
-          autoComplete="current-password"
+          autoComplete={invited ? 'new-password' : 'current-password'}
         />
 
         {problem ? (
@@ -98,6 +130,20 @@ export function SignInSheet({ open, onClose }: SignInSheetProps) {
             {problem}
           </Text>
         ) : null}
+
+        <Pressable
+          onPress={() => {
+            setInvited(!invited);
+            setProblem(null);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={invited ? 'I already have a password' : 'I have an invitation'}
+          style={({ pressed }) => [styles.switcher, pressed && styles.pressed]}
+        >
+          <Text style={styles.switcherText}>
+            {invited ? 'I already have a password' : 'I have an invitation'}
+          </Text>
+        </Pressable>
       </View>
     </Sheet>
   );
@@ -105,6 +151,9 @@ export function SignInSheet({ open, onClose }: SignInSheetProps) {
 
 const styles = StyleSheet.create({
   body: { gap: 14 },
+  switcher: { paddingVertical: 8, alignSelf: 'flex-start' },
+  pressed: { opacity: 0.6 },
+  switcherText: { ...typeScale.body, color: color.clay, fontWeight: '600' },
   title: { ...typeScale.sectionHeading, color: color.ink },
   note: { ...typeScale.body, color: color.ink3 },
   // The one place this sheet uses a colour with a meaning: flag is what the report uses

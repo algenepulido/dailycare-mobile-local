@@ -174,6 +174,66 @@ SELECT expect_rejected('storing an invitation token as it was sent', $$
 $$);
 
 
+\echo ''
+\echo '── redeeming one, which is where the flow used to stop'
+--
+-- consume_token says whose link it was and stops. The application then has to write the
+-- password, and its UPDATE on users is display_name and updated_at - deliberately, because
+-- an application that can write password_hash can write anybody's. So an invitation could
+-- be accepted by an account that still had no way in.
+
+\set QUIET on
+-- A second person, so "nobody else was touched" has somebody to be about.
+INSERT INTO users (id, email, display_name) VALUES
+  ('e0000000-0000-0000-0000-00000000000e', 'elliot@example.test', 'Elliot');
+INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
+  ('c0000000-0000-0000-0000-00000000000c', 'invitation', h('welcome'), now() + interval '7 days'),
+  ('e0000000-0000-0000-0000-00000000000e', 'invitation', h('gone'),    now() + interval '7 days');
+\set QUIET off
+
+SET ROLE dailycare_app;
+
+SELECT expect_rejected('the application writing a password directly', $$
+  UPDATE users SET password_hash =
+    '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$3sYhZ0ZQZxQKqUk0gq7Wc2Dk8Q0rKvVQe0GJ5m1wXyz'
+  WHERE id = 'c0000000-0000-0000-0000-00000000000c'
+$$);
+
+SELECT expect('but it can redeem a link, which is the one password it may write',
+  (SELECT redeem_token(h('welcome'), 'invitation',
+     '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$3sYhZ0ZQZxQKqUk0gq7Wc2Dk8Q0rKvVQe0GJ5m1wXyz')
+     = 'c0000000-0000-0000-0000-00000000000c'));
+
+SELECT expect('and the same link a second time writes nothing',
+  (SELECT redeem_token(h('welcome'), 'invitation',
+     '$argon2id$v=19$m=19456,t=2,p=1$ZZZZZZZZZZZZZZZZZZZZZZ$3sYhZ0ZQZxQKqUk0gq7Wc2Dk8Q0rKvVQe0GJ5m1wXyz')
+     IS NULL));
+
+RESET ROLE;
+
+SELECT expect('the password that was written is the one it was given',
+  (SELECT password_hash LIKE '%YWJjZGVmZ2hpamtsbW5vcA%'
+     FROM users WHERE id = 'c0000000-0000-0000-0000-00000000000c'));
+
+SELECT expect('and nobody else was touched',
+  (SELECT password_hash IS NULL
+     FROM users WHERE id = 'e0000000-0000-0000-0000-00000000000e'));
+
+-- A link that is fine arriving at an account that is not. Burning it would leave somebody
+-- holding a used link, no way in, and nothing to ask for.
+\set QUIET on
+UPDATE users SET deactivated_at = now() WHERE id = 'e0000000-0000-0000-0000-00000000000e';
+\set QUIET off
+
+SELECT expect_rejected('redeeming against a deactivated account', $$
+  SELECT redeem_token(h('gone'), 'invitation',
+    '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$3sYhZ0ZQZxQKqUk0gq7Wc2Dk8Q0rKvVQe0GJ5m1wXyz')
+$$);
+
+SELECT expect('and the link it refused is still unused',
+  (SELECT consumed_at IS NULL FROM user_tokens WHERE token_hash = h('gone')));
+
+
 -- ── a person who has left ──────────────────────────────────────────────────────
 --
 -- From an independent review. session_is_valid() checked the session and nothing about

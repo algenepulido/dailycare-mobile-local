@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/dailycare-hq/dailycare-api/internal/auth"
 	"github.com/dailycare-hq/dailycare-api/internal/db"
 	"github.com/dailycare-hq/dailycare-api/internal/logging"
 	"github.com/dailycare-hq/dailycare-api/internal/media"
@@ -44,6 +45,11 @@ func (a *API) Routes() http.Handler {
 	// Unauthenticated, and only these three. Everything else goes through identified.
 	mux.HandleFunc("POST /v1/sessions", a.signIn)
 	mux.HandleFunc("POST /v1/sessions/refresh", a.refresh)
+
+	// Unauthenticated on purpose: this is how somebody who has never signed in gets a
+	// password, and how somebody who has lost theirs gets another. The link is the
+	// credential, it is single-use, and it is checked in one statement in the database.
+	mux.HandleFunc("POST /v1/credentials", a.redeem)
 	mux.HandleFunc("DELETE /v1/sessions", a.signOut)
 
 	mux.Handle("DELETE /v1/sessions/all", a.identified(a.signOutEverywhere))
@@ -130,6 +136,39 @@ func (a *API) signIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ok(w, r, http.StatusCreated, s)
+}
+
+// Accepting an invitation or a reset link.
+func (a *API) redeem(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Link     string `json:"link"`
+		Password string `json:"password"`
+		Device   string `json:"device"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	session, err := a.sessions.Redeem(r.Context(), body.Link, body.Password, body.Device)
+	switch {
+	case errors.Is(err, auth.ErrPasswordTooShort):
+		// The one refusal here that is worth spelling out. Everything else about a link
+		// is deliberately one answer.
+		a.fail(w, r, http.StatusBadRequest, err.Error(), nil)
+		return
+	case errors.Is(err, sessions.ErrAccountNotActive):
+		a.fail(w, r, http.StatusForbidden,
+			"that account is not active. The link has not been used", nil)
+		return
+	case errors.Is(err, sessions.ErrLinkNotUsable):
+		// Never used, already used, expired, or invented: one answer, because a caller
+		// who can tell them apart can test links.
+		a.fail(w, r, http.StatusUnauthorized, "that link cannot be used", nil)
+		return
+	case err != nil:
+		a.fail(w, r, http.StatusInternalServerError, "could not set that password", err)
+		return
+	}
+	a.ok(w, r, http.StatusCreated, session)
 }
 
 func (a *API) refresh(w http.ResponseWriter, r *http.Request) {

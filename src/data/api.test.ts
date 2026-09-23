@@ -30,7 +30,7 @@ jest.mock('expo-secure-store', () => ({
   }),
 }));
 
-import { listResidents, signIn, SignedOut } from '@/data/api';
+import { listResidents, redeem, signIn, SignedOut } from '@/data/api';
 
 type Handler = (url: string, init?: RequestInit) => Response;
 
@@ -129,4 +129,28 @@ test('a page that is not JSON does not surface as a parse error', async () => {
   };
   await signIn('nurse@example.test', 'a passphrase', 'a test');
   await expect(listResidents()).rejects.toThrow('the server did not answer');
+});
+
+/**
+ * Accepting an invitation ends signed in.
+ *
+ * The password was just chosen on this device, so the alternative - sending somebody back
+ * to the sign-in screen to type it again - proves nothing and is one more chance to
+ * mistype it. This pins that the tokens are kept, so the next request carries them.
+ */
+test('redeeming a link keeps the session it returns', async () => {
+  handler = (url) => {
+    if (url.endsWith('/v1/credentials')) return respond(201, tokens(9));
+    return respond(200, []);
+  };
+  await redeem('an-invitation', 'a perfectly fine passphrase', 'his phone');
+  await listResidents();
+  expect(calls).toEqual(['POST /v1/credentials', 'GET /v1/residents']);
+});
+
+test('a link the server refuses is the server sentence, not a status code', async () => {
+  handler = () => respond(401, { error: 'that link cannot be used' });
+  await expect(redeem('nope', 'a perfectly fine passphrase', 'x')).rejects.toThrow(
+    'that link cannot be used',
+  );
 });

@@ -64,6 +64,32 @@ function messageOf(body: unknown, fallback: string): { message: string; requestI
   return { message: fallback };
 }
 
+/**
+ * Accepting an invitation, or a reset link.
+ *
+ * The same shape as signing in, and it ends the same way: with a session. The password was
+ * just chosen on this device, so sending somebody back to the sign-in screen to type it
+ * again proves nothing and is one more chance to mistype it in a corridor.
+ *
+ * The server says the same thing for a link that never existed, one already used and one
+ * that expired - a caller who can tell them apart can test links.
+ */
+export async function redeem(link: string, password: string, device: string): Promise<Tokens> {
+  const response = await fetch(`${BASE_URL}/v1/credentials`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ link: link.trim(), password, device }),
+  });
+  const body = await parse(response);
+  if (!response.ok) {
+    const { message, requestId } = messageOf(body, 'could not use that link');
+    throw new ApiError(response.status, message, requestId);
+  }
+  const tokens = body as Tokens;
+  await saveTokens(tokens);
+  return tokens;
+}
+
 export async function signIn(email: string, password: string, device: string): Promise<Tokens> {
   const response = await fetch(`${BASE_URL}/v1/sessions`, {
     method: 'POST',

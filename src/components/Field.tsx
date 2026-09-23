@@ -21,7 +21,15 @@ interface FieldProps {
    */
   secureTextEntry?: boolean;
   /** So a password manager offers the right thing rather than the last thing. */
-  autoComplete?: 'email' | 'current-password' | 'off';
+  autoComplete?: 'email' | 'current-password' | 'new-password' | 'off';
+  /**
+   * Off for anything that is not a word.
+   *
+   * An invitation is a random string, and a keyboard that helpfully corrects it hands the
+   * server something that was never issued - which reads on screen as "that link cannot
+   * be used" and is nothing of the sort.
+   */
+  autoCorrect?: boolean;
 }
 
 export function Field({
@@ -36,6 +44,7 @@ export function Field({
   keyboardType = 'default',
   secureTextEntry = false,
   autoComplete = 'off',
+  autoCorrect = true,
 }: FieldProps) {
   return (
     <TextInput
@@ -48,6 +57,7 @@ export function Field({
       keyboardType={keyboardType}
       secureTextEntry={secureTextEntry}
       autoComplete={autoComplete}
+      autoCorrect={autoCorrect}
       accessibilityLabel={accessibilityLabel}
       style={[
         styles.input,

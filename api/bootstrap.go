@@ -19,11 +19,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 
@@ -74,11 +72,13 @@ func bootstrap(ctx context.Context, args []string) error {
 	}
 	defer conn.Close(ctx)
 
-	passphrase, err := newPassphrase()
-	if err != nil {
-		return err
-	}
-	hash, err := auth.Hash(passphrase)
+	// A link, not a password.
+	//
+	// This used to generate a passphrase and hand it over, which meant whoever ran the
+	// command knew the caregiver's password. That weakens the one thing the audit trail
+	// is for: "who filed this record" has a different answer if somebody else could have
+	// signed in as them. The caregiver chooses their own and nobody else ever sees it.
+	link, digest, err := auth.NewToken()
 	if err != nil {
 		return err
 	}
@@ -113,10 +113,12 @@ func bootstrap(ctx context.Context, args []string) error {
 		actor = &id
 	}
 
+	// No password_hash. An account with none cannot be signed in to - credential_for_sign_in
+	// returns nothing for it - so the invitation is the only way in until it is accepted.
 	var userID uuid.UUID
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO users (email, display_name, password_hash) VALUES ($1,$2,$3)
-		 RETURNING id`, *email, *name, hash).Scan(&userID); err != nil {
+		`INSERT INTO users (email, display_name) VALUES ($1,$2) RETURNING id`,
+		*email, *name).Scan(&userID); err != nil {
 		return err
 	}
 
@@ -134,6 +136,13 @@ func bootstrap(ctx context.Context, args []string) error {
 			 VALUES ($1,$2,$3,$4)`, *facility, r, memberID, actor); err != nil {
 			return fmt.Errorf("assigning %s: %w", r, err)
 		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
+		 VALUES ($1, 'invitation', $2, now() + interval '7 days')`,
+		userID, digest); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -156,37 +165,10 @@ func bootstrap(ctx context.Context, args []string) error {
 			"No --by given, so nothing records who granted this. That is expected for the\n"+
 				"first account in a building and is listed by assignments_without_an_author.\n")
 	}
-	fmt.Fprintf(os.Stderr, "\nThe passphrase is printed once and is not stored anywhere:\n\n")
-	fmt.Println(passphrase)
+	fmt.Fprintf(os.Stderr,
+		"\nThe invitation is printed once. Only its digest is stored, so this cannot be\n"+
+			"asked for again - run this command for another if it goes astray. It lasts\n"+
+			"seven days, admits one person, and is how they choose their own password:\n\n")
+	fmt.Println(link)
 	return nil
-}
-
-// Words rather than characters.
-//
-// A caregiver reads this off a screen and types it into a phone, once, standing up. Six
-// words from this list is about 62 bits, which is more than a person invents and far
-// easier to get across a room without a typo than the same strength in punctuation.
-func newPassphrase() (string, error) {
-	words := []string{
-		"amber", "anchor", "apple", "arbour", "autumn", "barley", "basin", "beacon",
-		"birch", "bramble", "bridge", "bucket", "candle", "canvas", "cedar", "chalk",
-		"cinder", "clover", "copper", "cotton", "crescent", "cricket", "damson", "dawn",
-		"dovetail", "driftwood", "ember", "fathom", "fennel", "ferry", "flint", "furrow",
-		"garland", "granite", "harbour", "hazel", "heather", "hollow", "ivory", "juniper",
-		"kettle", "lantern", "lattice", "linden", "lupin", "marble", "meadow", "mint",
-		"mosaic", "nettle", "orchard", "otter", "parsley", "pebble", "pewter", "pillar",
-		"quarry", "quilt", "rafter", "reed", "ribbon", "rosemary", "saffron", "sandal",
-		"satchel", "seabird", "shale", "sorrel", "spindle", "sprig", "starling", "sumac",
-		"tallow", "tamarind", "thicket", "thimble", "thistle", "timber", "trellis", "tulip",
-		"vellum", "verbena", "vessel", "walnut", "wicker", "willow", "windmill", "yarrow",
-	}
-	out := make([]string, 6)
-	for i := range out {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(words))))
-		if err != nil {
-			return "", err
-		}
-		out[i] = words[n.Int64()]
-	}
-	return strings.Join(out, " "), nil
 }

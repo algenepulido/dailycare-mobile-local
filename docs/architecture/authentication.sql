@@ -321,6 +321,74 @@ COMMENT ON FUNCTION consume_token(text, text) IS
    forwarded to a whole family, or double-tapped on a bad connection, admits one person.';
 
 
+-- Redeeming a link: the token is spent and the password is set, or neither happens.
+--
+-- consume_token stops half way. It tells the caller whose link it was, and the caller then
+-- has to write the password - which the application cannot do and should not be able to.
+-- Its UPDATE on users is display_name and updated_at, deliberately, because an application
+-- that can write password_hash can write anybody's. So an invitation could be accepted and
+-- the account it belonged to still had no way in. The flow was designed to this point and
+-- stopped.
+--
+-- Both halves are here, in one transaction, for the same reason consume_token is one
+-- statement. A token spent against an account whose password was never written is a
+-- caregiver holding a link that looks used and does not work, with nothing to do about it.
+--
+-- The purpose is passed in rather than guessed: an invitation and a reset both end with a
+-- password, but they are different events and the row says which one happened.
+CREATE OR REPLACE FUNCTION redeem_token(candidate_hash text, for_purpose text, new_hash text)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public AS $$
+DECLARE owner uuid;
+BEGIN
+  UPDATE user_tokens SET consumed_at = now()
+  WHERE token_hash  = candidate_hash
+    AND purpose     = for_purpose
+    AND consumed_at IS NULL
+    AND expires_at  > now()
+  RETURNING user_id INTO owner;
+
+  IF owner IS NULL THEN
+    RETURN NULL;   -- already used, expired, or for something else
+  END IF;
+
+  -- reject_unhashed_credential on users is what checks new_hash is an Argon2id digest.
+  -- Not repeated here: one guard, on the column, that everything writing to it meets.
+  UPDATE users
+     SET password_hash = new_hash, updated_at = now()
+   WHERE id = owner AND deactivated_at IS NULL;
+
+  IF NOT FOUND THEN
+    -- A good link on an account that has since been deactivated. Raising rolls the
+    -- consume back with it, so the link is not silently burned on somebody who would then
+    -- have neither a way in nor a way to ask for another.
+    RAISE EXCEPTION 'that account is not active'
+      USING HINT = 'The link is still unused. The account has to be reactivated first.';
+  END IF;
+
+  -- Everything already signed in stops. A password arriving from an invitation means the
+  -- account is new; from a reset it means somebody believes it was compromised. Neither
+  -- wants a session opened before it to keep working.
+  --
+  -- Written here rather than through revoke_all_sessions, which refuses: that function
+  -- checks the caller is the person whose sessions are ending, and during a redeem there
+  -- is no session yet to be that person. The check is right for the case it guards - an
+  -- application ending somebody else's access - and this is not that case. What stands in
+  -- for it is the line above: the token was unused, unexpired, and issued for this user,
+  -- or nothing here runs at all.
+  UPDATE sessions SET revoked_at = now()
+   WHERE user_id = owner AND revoked_at IS NULL AND expires_at > now();
+
+  RETURN owner;
+END; $$;
+
+COMMENT ON FUNCTION redeem_token(text, text, text) IS
+  'The whole of accepting an invitation or a reset. Handed out to the application because
+   it cannot be used for anything else: it writes one password, for the one account the
+   token names, and only while that token is unused and unexpired. The application''s own
+   UPDATE on users stays display_name and updated_at.';
+
+
 -- ════════════════════════════════════════════════════════════════════ what a reviewer asks
 --
 -- Sessions per user and per device, which is the answer to "can one person be signed in on
@@ -364,6 +432,7 @@ DO $$ BEGIN
     GRANT EXECUTE ON FUNCTION revoke_session(text)                      TO dailycare_app;
     GRANT EXECUTE ON FUNCTION revoke_all_sessions(uuid)                 TO dailycare_app;
     GRANT EXECUTE ON FUNCTION consume_token(text, text)                 TO dailycare_app;
+    GRANT EXECUTE ON FUNCTION redeem_token(text, text, text)           TO dailycare_app;
     -- Not session_inventory, and not stale_invitations. A view runs with its owner's
     -- privileges in PostgreSQL 14, so granting one to the application is a way around
     -- every policy on the table underneath it: session_inventory lists every user's

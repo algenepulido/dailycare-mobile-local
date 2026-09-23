@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,6 +71,56 @@ func (s *Store) SignIn(ctx context.Context, email, password, device string) (*Se
 		return nil, ErrSignInFailed
 	}
 	return s.issue(ctx, userID, device)
+}
+
+var (
+	// Said the same way for a link that never existed, one already used, one that has
+	// expired, and one for an account that was never activated. A caller who can tell
+	// those apart can test links.
+	ErrLinkNotUsable = errors.New("sessions: that link cannot be used")
+	// Different, because it is actionable and says nothing about anybody else: the link
+	// is fine and the account is not, and the link stays unused so it can be tried again
+	// after somebody reactivates it.
+	ErrAccountNotActive = errors.New("sessions: that account is not active")
+)
+
+// Redeem accepts an invitation or a password reset: the password is set, every session
+// already open for that account ends, and a new one is issued.
+//
+// Signing them in here rather than sending them back to the sign-in screen is deliberate.
+// The password was just chosen on this device; asking for it again proves nothing and is
+// one more chance to mistype it standing in a corridor.
+//
+// The purpose is not taken from the caller. A link is one row with one purpose, so this
+// tries invitation and then reset - and it does each in its own transaction, because a
+// link belonging to a deactivated account raises, and a raised error inside a transaction
+// takes the second attempt down with it.
+func (s *Store) Redeem(ctx context.Context, token, password, device string) (*Session, error) {
+	if err := auth.Acceptable(password); err != nil {
+		return nil, err
+	}
+	digest, err := auth.Hash(password)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: hashing: %w", err)
+	}
+
+	for _, purpose := range []string{"invitation", "password_reset"} {
+		var userID *uuid.UUID
+		err := s.db.Unidentified(ctx, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT redeem_token($1, $2, $3)`,
+				auth.Digest(token), purpose, digest).Scan(&userID)
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "that account is not active") {
+				return nil, ErrAccountNotActive
+			}
+			return nil, fmt.Errorf("sessions: redeeming: %w", err)
+		}
+		if userID != nil {
+			return s.issue(ctx, *userID, device)
+		}
+	}
+	return nil, ErrLinkNotUsable
 }
 
 // Refresh rotates. The old token is revoked in the same statement that issues the new one,
