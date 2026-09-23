@@ -8,6 +8,7 @@
  */
 
 import { contentTypeFor } from '@/data/photos';
+import { rememberUpload, uploadedAs } from '@/data/uploads';
 import type { WireDay } from '@/data/wire';
 import {
   currentAccessToken,
@@ -222,6 +223,12 @@ export async function uploadPhoto(
   uri: string,
   careDayId?: string,
 ): Promise<string> {
+  // Already in the bucket. A day gets filed more than once - a corrected note, a tick
+  // that was missed - and re-sending the photograph each time put a second copy in the
+  // bucket with nothing pointing at it, paid for by whatever connection the phone is on.
+  const already = await uploadedAs(uri);
+  if (already) return already;
+
   const file = await fetch(uri);
   if (!file.ok) throw new ApiError(0, 'that photograph could not be read from this phone');
   const bytes = await file.blob();
@@ -257,9 +264,6 @@ export async function uploadPhoto(
   });
   if (!put.ok) {
     // Deliberately not the bucket's XML. It says SignatureDoesNotMatch when the content
-    // type is wrong and AccessDenied for an overwrite, and both read to a caregiver like
-    // they have done something wrong.
-    // Deliberately not the bucket's XML. It says SignatureDoesNotMatch when the content
     // type is not exactly what was signed and AccessDenied for an overwrite, and both
     // read to a caregiver like they have done something wrong.
     throw new ApiError(put.status, 'the photograph did not upload');
@@ -269,5 +273,9 @@ export async function uploadPhoto(
   // photograph - a phone that lost signal here leaves one behind, and the server lists
   // those rather than showing them to a family.
   await authed(`/v1/photos/${place.objectId}/arrived`, { method: 'POST' });
+
+  // After the server has been told, never before. Remembering an upload the server does
+  // not know arrived would skip the only call that can still tell it.
+  await rememberUpload(uri, place.objectId);
   return place.objectId;
 }

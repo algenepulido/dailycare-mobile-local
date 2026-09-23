@@ -10,6 +10,15 @@
 // reach variables whose names say they belong to a mock.
 const mockStore = new Map<string, string>();
 
+// api.ts reaches AsyncStorage through data/uploads, which remembers which photographs
+// have already reached the bucket. Nothing here exercises that; it just has to exist.
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(async () => null),
+  setItem: jest.fn(async () => undefined),
+  removeItem: jest.fn(async () => undefined),
+  multiRemove: jest.fn(async () => undefined),
+}));
+
 jest.mock('expo-secure-store', () => ({
   AFTER_FIRST_UNLOCK: 'afterFirstUnlock',
   setItemAsync: jest.fn(async (k: string, v: string) => {

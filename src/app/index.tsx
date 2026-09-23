@@ -19,6 +19,7 @@ import {
   SectionHeading,
 } from '@/components';
 import { fileDay, uploadPhoto } from '@/data/api';
+import { forgetUpload } from '@/data/uploads';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
 import { toWire } from '@/data/wire';
@@ -135,7 +136,12 @@ function CareReport({
   }
 
   function handleRemovePhoto() {
-    if (draft.photoUri) deletePhoto(draft.photoUri);
+    if (draft.photoUri) {
+      deletePhoto(draft.photoUri);
+      // The object stays in the bucket - taking it out is retention's, through the
+      // handshake - but this phone has nothing left to attach it to.
+      void forgetUpload(draft.photoUri);
+    }
     dispatch({ type: 'setPhoto', uri: null });
     setPhotoError(null);
   }

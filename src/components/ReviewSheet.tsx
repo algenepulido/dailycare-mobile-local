@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image } from 'expo-image';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -48,6 +48,20 @@ export function ReviewSheet({
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+
+  /**
+   * Disabling the button after a send stops a double tap filing the day twice. But the
+   * sheet is only hidden, never unmounted, so that state outlived the sheet: a caregiver
+   * who filed at noon and came back at four to add the photograph they had forgotten
+   * found a greyed-out "Sent" and no way past it. Filing again is a supersede, which is
+   * what correcting a day is supposed to be, so the guard belongs to one opening.
+   */
+  useEffect(() => {
+    if (open) {
+      setSent(false);
+      setProblem(null);
+    }
+  }, [open]);
 
   async function send() {
     if (!onSend) return;

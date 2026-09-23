@@ -27,6 +27,11 @@ export const STORAGE_KEYS = {
    * half-written day on the device.
    */
   draft: 'inktree_caregiver_draft_v1',
+  /**
+   * Which photographs have already reached the bucket. Here for the same reason as the
+   * draft above: reset() removes what is in this object and nothing else.
+   */
+  uploads: 'inktree_caregiver_uploads_v1',
 } as const;
 
 /** The old name, kept so the rest of this file reads as it did. */
