@@ -322,6 +322,33 @@ CREATE POLICY media_write ON media_objects FOR INSERT
               AND uploaded_by = app_user_id()
               AND deleted_at IS NULL);
 
+-- Saying the photograph arrived, which only the thing that uploaded it can know.
+--
+-- Narrow on both halves. USING picks the row: it has to be one this caller uploaded and
+-- one that has not already been confirmed, so a caller cannot confirm somebody else's and
+-- cannot confirm twice. WITH CHECK guards what the row becomes: uploaded_at has to end up
+-- set, and deleted_at has to stay null - otherwise this is a way to mark an object gone
+-- without the retention handshake, which is what media_retention_confirm exists for and
+-- what the application is deliberately not allowed to do.
+--
+-- Without this policy the application held the UPDATE privilege on uploaded_at and no row
+-- to use it on: the grant was there, the policy was not, and the update quietly affected
+-- nothing. Which is how a photograph ends up in the bucket with the record saying it never
+-- arrived.
+CREATE POLICY media_confirm_upload ON media_objects FOR UPDATE
+  USING (uploaded_by = app_user_id()
+         AND uploaded_at IS NULL
+         AND deleted_at IS NULL
+         AND app_may_write_resident(resident_id, facility_id))
+  WITH CHECK (uploaded_by = app_user_id()
+              AND uploaded_at IS NOT NULL
+              AND deleted_at IS NULL);
+
+COMMENT ON POLICY media_confirm_upload ON media_objects IS
+  'The one update the application may make to a photograph: that it is there. Not that it
+   is gone - a row cannot be marked deleted through this policy, because the object being
+   removed is retention''s to confirm and the two are different facts.';
+
 COMMENT ON POLICY media_read ON media_objects IS
   'This is the row that gates the minting of a signed URL. The URL is issued after this
    policy has admitted the caller and never before, so a caller who was never admitted

@@ -920,6 +920,74 @@ SELECT expect_rows('no PHI-bearing table is missing from the matrix', 0,
   'SELECT * FROM access_matrix_uncovered_tables');
 
 \echo ''
+\echo '── saying a photograph arrived'
+
+-- The application holds UPDATE on uploaded_at, and for a while held it with no policy
+-- that let it reach a row: the grant was there, the update affected nothing, and a
+-- photograph sat in the bucket with the record saying it never came.
+--
+-- Placed before the checks that end Maria's assignment. After them she is not assigned to
+-- anybody, app_may_write_resident is false, and the policy refuses her for the right
+-- reason at the wrong moment - which reads exactly like the policy being broken.
+
+-- Maria's photograph of her own resident, uploaded and not yet confirmed. Seeded as the
+-- owner because the point is what the application may do to it, not how it got there -
+-- and RESET ROLE first, because earlier checks in this file leave one set and an insert
+-- made as the application would be refused by the policy it is here to exercise.
+\set QUIET on
+RESET ROLE;
+INSERT INTO media_objects (id, facility_id, resident_id, bucket, object_path,
+                           content_type, byte_size, uploaded_by)
+VALUES ('4e000000-0000-0000-0000-00000000000e',
+        'f1000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000001',
+        'dailycare-media-prod',
+        'f1000000-0000-0000-0000-000000000001/2026/just-uploaded.jpg',
+        'image/jpeg', 180, 'a0000000-0000-0000-0000-00000000000a');
+
+SET ROLE dailycare_app;
+-- false, not true. The third argument means transaction-local, and psql runs each
+-- statement in its own - so a local setting is gone by the next line, and a policy then
+-- reads as refusing the caller when what happened is there was no caller at all.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+\set QUIET off
+
+-- A data-modifying statement cannot live inside a subquery in PostgreSQL, so each of
+-- these is a CTE and the check reads the count it returned.
+WITH said AS (
+  UPDATE media_objects SET uploaded_at = now()
+   WHERE id = '4e000000-0000-0000-0000-00000000000e' AND uploaded_at IS NULL
+   RETURNING 1)
+SELECT expect('a caregiver can say the photograph they uploaded arrived',
+  (SELECT count(*) = 1 FROM said));
+
+WITH again AS (
+  UPDATE media_objects SET uploaded_at = now()
+   WHERE id = '4e000000-0000-0000-0000-00000000000e'
+   RETURNING 1)
+SELECT expect('and cannot say it twice', (SELECT count(*) = 0 FROM again));
+
+-- The one that would undo the retention handshake: marking an object gone without
+-- anything having removed it from the bucket.
+--
+-- Refused by the privilege rather than by the policy, which is the stronger of the two -
+-- the request never reaches a row to be judged. The column grant on media_objects names
+-- checksum and uploaded_at and not deleted_at, so this is the grant and the policy saying
+-- the same thing twice, and the outer one answering first.
+DO $$
+BEGIN
+  UPDATE media_objects SET deleted_at = now()
+   WHERE id = '4e000000-0000-0000-0000-00000000000e';
+  RAISE NOTICE 'FAIL  ALLOWED: the application marked a photograph deleted';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: the application cannot mark a photograph deleted';
+END $$;
+
+\set QUIET on
+RESET ROLE;
+\set QUIET off
+
+\echo ''
 \echo '── the matrix as the reviewer reads it'
 SELECT table_name, operation, caregiver, care_manager, family FROM access_matrix_report
 WHERE table_name IN ('residents','care_days','media_objects') ORDER BY table_name, operation;
