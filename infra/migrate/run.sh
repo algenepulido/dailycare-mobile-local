@@ -20,6 +20,16 @@ INSTANCE="$(terraform output -raw instance_connection_name)"
 PROJECT="${INSTANCE%%:*}"
 cd "$HERE"
 
+# The same guard deploy.sh has, and this did not. An image tagged with a commit has to
+# actually be that commit, or the tag is worse than the timestamp it replaced: it looks
+# like it can be traced back. migrate:b264e1d was built from a tree with edits in it
+# before this was here.
+if [ -n "$(git -C "$HERE/../.." status --porcelain)" ]; then
+  echo "the working tree has uncommitted changes, so a commit tag would be a lie." >&2
+  echo "commit them, or stash them, and run this again." >&2
+  exit 1
+fi
+
 TAG="$(git -C "$HERE/../.." rev-parse --short HEAD)"
 IMAGE="us-central1-docker.pkg.dev/$PROJECT/dc-$ENVIRONMENT-docker/migrate:$TAG"
 
