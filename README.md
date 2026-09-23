@@ -7,12 +7,21 @@ Built with React Native and Expo, one codebase for iOS and Android.
 
 ## Milestone 1 — synthetic MVP
 
-This milestone builds the caregiver flow only, running entirely on the device against
-made-up residents. There is no server, no account, and no path for real resident data to
-enter or leave the app. Network access is blocked in the Android manifest rather than
-merely unused, so switching it on later is a deliberate, reviewable change.
+This milestone built the caregiver flow only, running entirely on the device against
+made-up residents. There was no server, no account, and no path for real resident data to
+enter or leave the app. Network access was blocked in the Android manifest rather than
+merely unused, so switching it on later would have to be a deliberate, reviewable change.
 
-Deliberately not in this milestone: backend and database, production authentication,
+**It has since been switched on, and this section is a record of what milestone one was
+rather than a description of the app today.** The app signs in against a deployed API over
+HTTPS and files a day to a private Cloud SQL instance with no public address. The manifest
+carries `INTERNET`; `docs/why-internet.md` is the decision, and `network-security/` is what
+keeps it narrow - cleartext is off in every shipping build, with the emulator's exception
+confined to debug builds by the Android resource merger rather than by anybody remembering.
+
+The residents are still made up. Nothing real has been in any of this.
+
+Deliberately not in milestone one: backend and database, production authentication,
 family accounts, links and photo download, notifications, email and SMS delivery, weekly
 report automation, HIPAA production infrastructure, App Store release, and final visual
 polish.
@@ -32,9 +41,12 @@ cd docs/architecture
 ./review.sh
 ```
 
-It starts a throwaway PostgreSQL 14, runs 319 checks across eleven suites and a restore drill
-as an ordinary database user, and removes the container. `docs/architecture/README.md` maps
-every item in the review package to the file that answers it.
+It starts a throwaway PostgreSQL 14, runs every check suite and a restore drill as an
+ordinary database user - not as a superuser, who would bypass the policies under test - and
+removes the container. The count is deliberately not written here: it changes with every
+suite added, and a number in prose is wrong from the next commit onwards. The run prints
+it, and so does CI. `docs/architecture/README.md` maps every item in the review package to
+the file that answers it.
 
 ## Requirements
 
@@ -137,11 +149,17 @@ src/
   theme/        Design tokens. Every colour, size and type style comes from here.
   domain/       Entities, option sets, and the product rules that decide what the
                 summary says.
-  data/         Storage, IDs and photos. Screens talk to the repository interface,
-                never to storage directly, so the backend can replace it without
-                touching the UI.
+  data/         On-device storage, IDs and photos, and the API client: tokens,
+                filing a day, and uploading a photograph.
   state/        Session, and the check-in form reducer.
   hooks/        Small shared behaviour that is not tied to one screen.
+
+api/            The server. Go, talking to Cloud SQL as an IAM database user with
+                no password anywhere in it.
+infra/          Terraform for the development project, and the migration jobs that
+                apply the model to the instance from inside the VPC.
+network-security/  What cleartext is permitted, and in which build type.
+docs/architecture/ The data model, the access model and the review package, as SQL.
 ```
 
 ## Notes for later milestones
@@ -151,14 +169,21 @@ src/
   resident ID rather than possession of a link.
 - **Photos are kept at original resolution** so the family can be offered a real download
   later without going back for files that were never stored.
-- **`src/data/repository.ts` is the seam.** Swapping on-device storage for the production
-  API means replacing that one implementation, and no screen changes.
+- **`src/data/repository.ts` was meant to be the seam**, and it turned out not to be the
+  whole of it. On-device storage stayed - a day is written there first, so a phone that
+  loses signal mid-shift has not lost the shift - and `src/data/api.ts` was added beside it
+  rather than in place of it. The screens did not change, which was the point.
+- **The app writes to the server and does not yet read from it.** `GET /v1/residents/{id}/days/{date}`
+  exists and is tested; nothing in the app calls it. So two caregivers on two phones cannot
+  see each other's work yet, and that is the next thing the client needs rather than
+  something that is missing from the server.
 - **Medication is the model to watch.** It is a caregiver checkbox today. In production it
   becomes an event with a status, two timestamps, a source and a source reference, so that
   an external clinical system can supply it instead of the caregiver.
-- **Permissions are declared only where they are used.** Network, microphone and overlay
-  are all kept out of the build on purpose. Adding one back should be a decision someone
-  made, not something a dependency did.
+- **Permissions are declared only where they are used.** Microphone and overlay are still
+  kept out of the build on purpose. `INTERNET` was too, until the app needed a server; it
+  went back in with `docs/why-internet.md` beside it, which is what "a decision someone
+  made, not something a dependency did" was supposed to mean.
 - **Design tokens come from the existing InkTree stylesheet**, so the visual direction
   starts from the product's own palette rather than a new one. A refinement pass on top of
   these tokens is an adjustment; replacing them is a rewrite.
