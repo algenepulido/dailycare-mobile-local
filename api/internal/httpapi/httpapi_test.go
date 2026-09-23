@@ -304,3 +304,44 @@ func TestABadResidentIdAnswersLikeAnUnknownOne(t *testing.T) {
 		t.Fatalf("two answers: %q and %q", errorOf(t, bad), errorOf(t, unknown))
 	}
 }
+
+// The photograph routes on a server with no bucket configured, which is how the API runs
+// on a laptop. Three things, and the third is the one that matters.
+//
+// They answer 503 and say so, rather than 404 - a route that disappears when a dependency
+// is missing reads to whoever is calling it as "you asked for the wrong thing".
+//
+// And they are behind authentication. The compiler already refuses the naive version of
+// that mistake - identified() is the only wrapper that takes a handler wanting a
+// db.Caller, so an unauthenticated registration of this one does not build. What this
+// catches is the version the compiler cannot see: a second wrapper, added later, that
+// takes the same shape and authenticates differently or not at all. The route hands out
+// links to photographs of residents, so the property is worth stating out loud whether or
+// not today's type system happens to enforce it.
+func TestThePhotographRoutesWithoutABucket(t *testing.T) {
+	h := serve(t)
+	s := h.signIn(t)
+	resident := uuid.NewString()
+	paths := []string{
+		"/v1/residents/" + resident + "/days/2026-09-23/photos",
+	}
+
+	for _, p := range paths {
+		resp, body := h.do(t, "GET", p, s.AccessToken, nil)
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("%s: got %d, want 503 (%s)", p, resp.StatusCode, body)
+		}
+		if !bytes.Contains(body, []byte("photographs are not set up")) {
+			t.Errorf("%s: the body does not say why: %s", p, body)
+		}
+	}
+
+	for _, p := range paths {
+		for _, token := range []string{"", "hello", forgeWithAnotherKey(t)} {
+			resp, body := h.do(t, "GET", p, token, nil)
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("%s with %q: got %d, want 401 (%s)", p, token, resp.StatusCode, body)
+			}
+		}
+	}
+}

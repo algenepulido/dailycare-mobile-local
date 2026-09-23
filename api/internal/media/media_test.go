@@ -351,3 +351,55 @@ func TestAPhotographThatNeverArrivedIsNotOffered(t *testing.T) {
 		t.Fatalf("an upload that never finished was offered as a photograph: %+v", got)
 	}
 }
+
+// A real caregiver, in a real building, asking for a real resident's photographs in a
+// building that is not theirs.
+//
+// An invented uuid proves less than this does: it fails because nothing is there, which
+// is the same answer a broken policy would give. Two wards, both populated, and the
+// question is whether the wall between them holds.
+func TestAnotherBuildingsCaregiverGetsNoPhotographs(t *testing.T) {
+	cedar, _, atCedar, cathy, cedarID := ward(t)
+	birch, _, atBirch, _, _ := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	day := aDay(t, cedar, atCedar, cedarID, cathy, on)
+	up, err := cedar.Offer(ctx, atCedar, cathy, &day, "image/jpeg", 2048)
+	if err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	if err := cedar.Arrived(ctx, atCedar, up.ObjectID); err != nil {
+		t.Fatalf("confirming: %v", err)
+	}
+
+	// Cedar's own caregiver can see it, so the fixture is real and the next assertion
+	// means something.
+	mine, err := cedar.ForDay(ctx, atCedar, cathy, on)
+	if err != nil || len(mine) != 1 {
+		t.Fatalf("cedar's caregiver should see one photograph, got %d (%v)", len(mine), err)
+	}
+
+	got, err := birch.ForDay(ctx, atBirch, cathy, on)
+	if len(got) != 0 {
+		t.Fatalf("another building's caregiver got %d photographs of Cathy", len(got))
+	}
+	// Refused rather than empty: audit_read will not record a read of a resident this
+	// session cannot see, and that refusal is the access check.
+	if !errors.Is(err, ErrNotVisible) {
+		t.Fatalf("got %v, want ErrNotVisible", err)
+	}
+}
+
+// The same question with nothing behind it, which is the cheaper half of the pair.
+func TestAResidentYouCannotSeeHasNoPhotographs(t *testing.T) {
+	s, _, caller, _, _ := ward(t)
+	got, err := s.ForDay(context.Background(), caller, uuid.New(),
+		time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC))
+	if len(got) != 0 {
+		t.Fatalf("got %d photographs for a resident that is not there", len(got))
+	}
+	if !errors.Is(err, ErrNotVisible) {
+		t.Fatalf("got %v, want ErrNotVisible", err)
+	}
+}
