@@ -18,6 +18,7 @@ import (
 
 	"github.com/dailycare-hq/dailycare-api/internal/db"
 	"github.com/dailycare-hq/dailycare-api/internal/logging"
+	"github.com/dailycare-hq/dailycare-api/internal/media"
 	"github.com/dailycare-hq/dailycare-api/internal/records"
 	"github.com/dailycare-hq/dailycare-api/internal/sessions"
 )
@@ -25,11 +26,16 @@ import (
 type API struct {
 	sessions *sessions.Store
 	records  *records.Store
-	log      *logging.Logger
+	// Nil when the process has no Cloud Storage to sign against, which is how it runs on
+	// a laptop. The route still exists and says so rather than disappearing, because an
+	// endpoint that is absent in one environment and present in another is a difference
+	// nobody notices until a client is written against the wrong one.
+	media *media.Store
+	log   *logging.Logger
 }
 
-func New(s *sessions.Store, r *records.Store, l *logging.Logger) *API {
-	return &API{sessions: s, records: r, log: l}
+func New(s *sessions.Store, r *records.Store, m *media.Store, l *logging.Logger) *API {
+	return &API{sessions: s, records: r, media: m, log: l}
 }
 
 func (a *API) Routes() http.Handler {
@@ -48,6 +54,11 @@ func (a *API) Routes() http.Handler {
 	// that should be swallowed; it is a correction, and the database records it as a new
 	// row pointing back at what it corrected.
 	mux.Handle("POST /v1/residents/{id}/days/{date}", a.identified(a.fileDay))
+
+	// Somewhere to put a photograph. The photograph itself never comes through here - the
+	// app uploads to Cloud Storage with the URL this returns, so a care photo is not in
+	// this process's memory, its logs, or anything's buffers on the way past.
+	mux.Handle("POST /v1/residents/{id}/photos", a.identified(a.offerPhoto))
 
 	// No identity and nothing about the system: a health check that reported the database
 	// version or the migration state would be a free map for anybody who found the port.
@@ -161,6 +172,39 @@ func (a *API) listResidents(w http.ResponseWriter, r *http.Request, c db.Caller)
 		list = []records.Resident{}
 	}
 	a.ok(w, r, http.StatusOK, list)
+}
+
+func (a *API) offerPhoto(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	var body struct {
+		ContentType string     `json:"contentType"`
+		ByteSize    int64      `json:"byteSize"`
+		CareDayID   *uuid.UUID `json:"careDayId,omitempty"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	if a.media == nil {
+		// Running without Cloud Storage configured, which is how the API runs locally.
+		// Said plainly rather than as a 500, because a caregiver seeing this is looking at
+		// a deployment that is not finished rather than at something broken.
+		a.fail(w, r, http.StatusServiceUnavailable, "photographs are not set up on this server", nil)
+		return
+	}
+	up, err := a.media.Offer(r.Context(), c, id, body.CareDayID, body.ContentType, body.ByteSize)
+	if err != nil {
+		if errors.Is(err, media.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
+		a.fail(w, r, http.StatusBadRequest, "that is not a photograph this takes", err)
+		return
+	}
+	a.ok(w, r, http.StatusCreated, up)
 }
 
 func (a *API) fileDay(w http.ResponseWriter, r *http.Request, c db.Caller) {

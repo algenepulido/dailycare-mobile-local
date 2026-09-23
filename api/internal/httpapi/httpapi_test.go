@@ -73,7 +73,9 @@ func serve(t *testing.T) *harness {
 
 	logs := &bytes.Buffer{}
 	signer, _ := auth.NewSigner([]byte("0123456789abcdef0123456789abcdef"))
-	api := New(sessions.New(d, signer), records.New(d), logging.New(logs, fields))
+	// No media store: a laptop has no bucket to sign against, and the route answers that
+	// rather than disappearing.
+	api := New(sessions.New(d, signer), records.New(d), nil, logging.New(logs, fields))
 	s := httptest.NewServer(api.Routes())
 	t.Cleanup(s.Close)
 	return &harness{server: s, logs: logs, email: email, pass: pass}

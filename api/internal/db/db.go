@@ -15,9 +15,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/google/uuid"
 )
 
 type DB struct{ pool *pgxpool.Pool }

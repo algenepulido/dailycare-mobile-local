@@ -21,6 +21,7 @@ import (
 	"github.com/dailycare-hq/dailycare-api/internal/db"
 	"github.com/dailycare-hq/dailycare-api/internal/httpapi"
 	"github.com/dailycare-hq/dailycare-api/internal/logging"
+	"github.com/dailycare-hq/dailycare-api/internal/media"
 	"github.com/dailycare-hq/dailycare-api/internal/records"
 	"github.com/dailycare-hq/dailycare-api/internal/sessions"
 )
@@ -70,7 +71,27 @@ func run() error {
 	log := logging.New(os.Stdout, neverLog)
 	log.Info("starting", logging.F("fields_that_will_be_redacted", len(neverLog)))
 
-	api := httpapi.New(sessions.New(database, signer), records.New(database), log)
+	// Cloud Storage only when there is a bucket to sign against. On a laptop there is not,
+	// and the photograph route says so rather than being absent - an endpoint that exists
+	// in one environment and not another is a difference nobody notices until a client has
+	// been written against the wrong one.
+	var photos *media.Store
+	if bucket := os.Getenv("MEDIA_BUCKET"); bucket != "" {
+		// Named apart from the access-token signer above. Two things called signer in one
+		// function, one signing tokens and one signing URLs, is a line that reads
+		// correctly and means the other thing.
+		urls, err := media.NewGCS(ctx, os.Getenv("SIGNING_SERVICE_ACCOUNT"))
+		if err != nil {
+			return err
+		}
+		defer urls.Close()
+		photos = media.New(database, bucket, urls)
+		log.Info("photographs will be signed for", logging.F("bucket", bucket))
+	} else {
+		log.Info("no MEDIA_BUCKET, so photographs are not set up on this server")
+	}
+
+	api := httpapi.New(sessions.New(database, signer), records.New(database), photos, log)
 
 	port := os.Getenv("PORT")
 	if port == "" {

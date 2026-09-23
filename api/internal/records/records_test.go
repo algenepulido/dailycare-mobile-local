@@ -73,8 +73,20 @@ func TestNothingOutsideThisPackageReadsPHI(t *testing.T) {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
 		}
-		// This package is the exception, which is the whole point of it.
-		if strings.Contains(filepath.ToSlash(path), "internal/records/") {
+		// Two packages may read resident data, and both audit before they do.
+		//
+		// records is the general one. media is the second, and it is separate because a
+		// photograph does not pass through this process at all - the app uploads to Cloud
+		// Storage with a URL signed here, so there is no body to hand to records and
+		// nothing for it to return. It calls audit_read first, in the same transaction,
+		// exactly as read() does.
+		//
+		// Adding a third to this list should feel like a decision. The rule is not "one
+		// package" - it is that every path to a resident records the read in the same
+		// transaction as the read, and a list of two is still a list somebody has to edit
+		// on purpose.
+		dir := filepath.ToSlash(path)
+		if strings.Contains(dir, "internal/records/") || strings.Contains(dir, "internal/media/") {
 			return nil
 		}
 		body, err := os.ReadFile(path)
