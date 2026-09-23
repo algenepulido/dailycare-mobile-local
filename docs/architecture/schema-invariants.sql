@@ -118,6 +118,41 @@ SELECT must_accept('a meal ticked with no amount — not observed is a real answ
 $$);
 
 
+-- ── who granted the access ─────────────────────────────────────────────────────
+--
+-- facility_members.invited_by says who let somebody into the building. An assignment is
+-- the narrower half: it is what lets one named person read one named resident's record,
+-- and it had nowhere to say who did that.
+
+SELECT must_accept('an assignment that records who made it', $$
+  INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+  VALUES ('11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555',
+          '44444444-4444-4444-4444-444444444444', '22222222-2222-2222-2222-222222222222')
+$$);
+
+SELECT expect('and it is the user it names',
+  (SELECT assigned_by FROM assignments
+    WHERE resident_id = '55555555-5555-5555-5555-555555555555')
+  = '22222222-2222-2222-2222-222222222222');
+
+SELECT must_reject('an author who is not a user', $$
+  INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+  VALUES ('11111111-1111-1111-1111-111111111111', '77777777-7777-7777-7777-777777777777',
+          '44444444-4444-4444-4444-444444444444', '99999999-9999-9999-9999-999999999999')
+$$);
+
+-- Nullable on purpose: a development seed and a facility's own import both legitimately
+-- have no DailyCare user behind them. The view is how that stays visible.
+SELECT must_accept('an assignment with no author, which a seed writes', $$
+  INSERT INTO assignments (facility_id, resident_id, facility_member_id)
+  VALUES ('11111111-1111-1111-1111-111111111111', '77777777-7777-7777-7777-777777777777',
+          '44444444-4444-4444-4444-444444444444')
+$$);
+
+SELECT expect('and that one is the only thing the view lists',
+  (SELECT count(*) FROM assignments_without_an_author) = 1);
+
+
 -- ── photographs ────────────────────────────────────────────────────────────────
 
 -- Cathy's day is 66666666; Robert is 77777777 and has no day here.

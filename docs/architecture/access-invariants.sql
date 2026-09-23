@@ -17,6 +17,15 @@ SET client_min_messages TO notice;
 -- Lift FORCE for this suite so that it behaves the same run by a superuser and run by a
 -- managed-instance owner. See checks-support.sql: the policies stay in force, and every
 -- check that tests one does it by becoming the role it is about.
+-- Snapshotted before checks_begin(), and it has to be.
+--
+-- checks_begin() lifts FORCE for the duration of this suite so a run by a non-superuser
+-- answers the same as a run by a superuser. After that line every forced table looks
+-- unforced, so asking then would report nine tables in drift - correct about the database
+-- in front of it and useless. The answer is taken here and asserted further down, once
+-- expect_rows exists.
+CREATE TEMP TABLE rls_drift_at_start AS SELECT * FROM row_security_drift;
+
 SELECT checks_begin();
 
 -- The role the application will connect as. Ordinary privileges, no BYPASSRLS.
@@ -832,6 +841,20 @@ SELECT expect_rows('and reaches no part of the compliance register', 0,
 -- every policy in this file off for one path without raising anything.
 SELECT expect_rows('and reaches no policy-protected table through a view', 0,
   'SELECT * FROM app_reads_rls_through_a_view');
+
+-- Taken at the top of this file, before checks_begin() lifted FORCE. See the comment there.
+--
+-- ENABLE applies the policies to everybody but the table's owner; FORCE applies them to
+-- the owner too, and on Cloud SQL the owner is postgres - an ordinary role, not a
+-- superuser. So the difference is whether one role reads every row of a PHI table.
+--
+-- Either direction is a change nobody wrote down. The seed job made the harmless-looking
+-- one: it lifted FORCE on assignments to write its fixtures and turned it ON afterwards,
+-- which the model never asked for. Nothing failed, because every suite builds its own
+-- database from the model and none of them ever looked at a seeded one.
+SELECT expect_rows('row security is forced on exactly the tables that declare it', 0,
+  'SELECT * FROM rls_drift_at_start');
+
 
 SELECT expect('the baseline is not empty, which would make all four of those cheap',
   (SELECT count(*) >= 30 FROM app_privileges));

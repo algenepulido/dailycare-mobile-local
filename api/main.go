@@ -27,6 +27,15 @@ import (
 )
 
 func main() {
+	// One binary, so that an account is created by the same Argon2id code that will be
+	// asked to verify it. See bootstrap.go.
+	if len(os.Args) > 1 && os.Args[1] == "bootstrap" {
+		if err := bootstrap(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "dailycare-api bootstrap: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "dailycare-api: %v\n", err)
 		os.Exit(1)

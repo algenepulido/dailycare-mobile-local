@@ -327,6 +327,21 @@ CREATE TABLE assignments (
   facility_id         uuid NOT NULL REFERENCES facilities(id) ON DELETE RESTRICT,
   resident_id         uuid NOT NULL,
   facility_member_id  uuid NOT NULL REFERENCES facility_members(id) ON DELETE RESTRICT,
+
+  -- Who put this caregiver in front of this resident.
+  --
+  -- facility_members.invited_by records who let somebody into the building. This is the
+  -- narrower and more consequential half of the same question - a membership grants
+  -- nothing on its own, and this row is what lets one named person read one named
+  -- resident's record. It was not recorded, so "who gave them access to her" had no
+  -- answer while "who let them in" did.
+  --
+  -- Nullable, like invited_by, and for the same reasons: the rows that seed a development
+  -- database have no author, and an assignment that arrives from a facility's own system
+  -- one day will not have a DailyCare user behind it. assignments_without_an_author lists
+  -- whatever is left null so the gap is visible rather than assumed empty.
+  assigned_by         uuid REFERENCES users(id),
+
   started_at          timestamptz NOT NULL DEFAULT now(),
   ended_at            timestamptz,
   created_at          timestamptz NOT NULL DEFAULT now(),
@@ -582,6 +597,24 @@ CREATE INDEX ON media_objects (resident_id) WHERE deleted_at IS NULL;
 -- They are not an error. What would be an error is treating one as a photograph: showing
 -- it to a family, counting it in an export, or having retention look for an object that
 -- was never written.
+-- Access granted with nobody's name against it.
+--
+-- An assignment is what lets one named person read one named resident's record, and
+-- 164.308(a)(4) is about who authorised that. This is the list of rows that cannot answer.
+-- It is not empty in development, where the seed writes assignments with no author, and it
+-- is what a facility's own imports would land in if they ever arrive without one.
+CREATE VIEW assignments_without_an_author AS
+SELECT a.id, a.facility_id, a.resident_id, a.facility_member_id, a.started_at
+FROM assignments a
+WHERE a.assigned_by IS NULL AND a.ended_at IS NULL
+ORDER BY a.started_at;
+
+COMMENT ON VIEW assignments_without_an_author IS
+  'Current assignments with no record of who made them. Not required to be empty - a
+   development seed and a facility import both legitimately have no DailyCare user behind
+   them - but it has to be looked at rather than assumed, which is why it is a view and not
+   a constraint.';
+
 CREATE VIEW media_never_arrived AS
 SELECT id, facility_id, resident_id, care_day_id, object_path, created_at,
        now() - created_at AS waiting

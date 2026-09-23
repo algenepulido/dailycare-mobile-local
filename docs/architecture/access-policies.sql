@@ -118,6 +118,57 @@ ALTER TABLE resident_contacts  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE resident_contacts  FORCE  ROW LEVEL SECURITY;
 
 
+-- What is forced, written down as data so it can be compared against.
+--
+-- ENABLE and FORCE are different controls. ENABLE applies the policies to everybody except
+-- the table's owner; FORCE applies them to the owner too, which matters here because on
+-- Cloud SQL the owner is `postgres` and `postgres` is not a superuser - it is an ordinary
+-- role that happens to own the schema, and without FORCE it reads every row of a PHI table.
+--
+-- The state is easy to change by accident and invisible afterwards. The seed job did
+-- exactly that: it lifted FORCE on assignments to write its fixtures and then turned it
+-- ON, which the model never asked for, so a seeded database and a database built from the
+-- model disagreed about who the assignment policies apply to. No error, nothing in a diff,
+-- and every check still passing because the checks build their own databases from the
+-- model and never see the seeded one.
+--
+-- checks-support.sql and the scrub in environments.sql both get this right: they read
+-- which tables are forced, lift those, and restore exactly what they found. Asserting a
+-- value instead of restoring one is the mistake, and this is what makes it visible.
+CREATE TABLE forced_row_security (
+  table_name  text PRIMARY KEY,
+  why         text NOT NULL
+);
+
+INSERT INTO forced_row_security (table_name, why) VALUES
+ ('residents',         'The resident register. The owner reading it is the whole of the tenancy boundary.'),
+ ('care_days',         'PHI.'),
+ ('care_day_meals',    'PHI.'),
+ ('care_day_concerns', 'PHI.'),
+ ('medication_events', 'PHI.'),
+ ('media_objects',     'Photographs of residents.'),
+ ('resident_contacts', 'Family names and contact details.'),
+ ('imported_content',  'Arrives from outside and is shown to a family.'),
+ ('content_responses', 'What a family said back.');
+
+CREATE VIEW row_security_drift AS
+SELECT coalesce(d.table_name, c.relname) AS table_name,
+       d.table_name IS NOT NULL          AS should_be_forced,
+       coalesce(c.relforcerowsecurity, false) AS is_forced
+FROM forced_row_security d
+FULL OUTER JOIN (
+  SELECT c.oid, c.relname, c.relforcerowsecurity
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity
+) c ON c.relname = d.table_name
+WHERE coalesce(c.relforcerowsecurity, false) IS DISTINCT FROM (d.table_name IS NOT NULL);
+
+COMMENT ON VIEW row_security_drift IS
+  'Must be empty. A table forced that should not be, or - far worse - a table that should
+   be forced and is not, which is the owner reading every row of it. Either direction is a
+   change nobody wrote down.';
+
+
 -- ── residents ──────────────────────────────────────────────────────────────────
 
 CREATE POLICY residents_read ON residents FOR SELECT

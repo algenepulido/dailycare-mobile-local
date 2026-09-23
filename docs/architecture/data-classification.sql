@@ -107,6 +107,9 @@ INSERT INTO data_classification (table_name, column_name, class, note) VALUES
  ('assignments','facility_id','operational',NULL),
  ('assignments','resident_id','operational','A resident identifier. Not health information by itself, but it is the key everything else hangs from.'),
  ('assignments','facility_member_id','operational',NULL),
+ ('assignments','assigned_by','operational','Who granted this caregiver sight of this resident.'),
+ ('forced_row_security','table_name','operational','Which tables apply their policies to the owner too.'),
+ ('forced_row_security','why','operational',NULL),
  ('assignments','started_at','operational',NULL),
  ('assignments','ended_at','operational',NULL),
  ('assignments','created_at','operational',NULL);

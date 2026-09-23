@@ -112,3 +112,37 @@ back to an empty list would be a logger with no rules at the moment nobody was w
 
 A forbidden field keeps its name and loses its value. Dropping it entirely would leave a
 line that reads as though nothing was there.
+
+## Creating a caregiver's account
+
+There is no sign-up and no admin screen. A caregiver's account is made by somebody who
+already has the authority to grant access to a building's residents, which is an
+administrative act rather than a feature — and for milestone two it stays that way.
+
+    dailycare-api bootstrap \
+      --facility <uuid> --email <address> --name "<name>" \
+      --by <the address of whoever is doing this> \
+      --resident <uuid> [--resident <uuid> ...]
+
+It runs as a Cloud Run job inside the VPC, because the instance has no public address.
+
+Three things worth knowing before running it:
+
+**The passphrase is generated, not chosen.** Six words, printed once, on stdout and
+nowhere else — everything else the command says goes to stderr. It is not stored, not
+logged, and there is no way to ask for it again. A passphrase passed as an argument would
+be in the shell's history and in the job's arguments.
+
+**It is in the API's own binary on purpose.** The account it creates is hashed by exactly
+the code that will be asked to verify it. A second Argon2id implementation, in a script,
+with its own parameters, creates an account that cannot sign in — and that failure turns
+up at the caregiver's first shift, not at the command that caused it.
+
+**An account with no assignments can see nobody.** That is correct rather than broken —
+being in a building and being responsible for a resident are different grants — but a
+caregiver who signs in to an empty list will reasonably assume the app is broken, so the
+command says so when `--resident` is left off.
+
+`--by` is recorded against both the membership and the assignments. Leave it off for the
+first account in a building, where there is genuinely nobody to name;
+`assignments_without_an_author` lists whatever stays unattributed.

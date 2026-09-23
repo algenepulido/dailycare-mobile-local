@@ -10,8 +10,13 @@ until psql -c 'SELECT 1' >/dev/null 2>&1; do sleep 2; done
 # So the force is lifted for the insert and put back. checks-support.sql does the same
 # thing for the suites and for the same reason.
 psql -v ON_ERROR_STOP=1 -v h="$SEED_HASH" <<'SQL'
-ALTER TABLE residents   NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE assignments NO FORCE ROW LEVEL SECURITY; 
+-- residents only. assignments is ENABLE and not FORCE in the model, so the owner is
+-- already outside its policies and lifting it achieves nothing - but turning it back ON,
+-- which is what this used to do, left a seeded database with an access model the model
+-- never declared. Restore what was there, never assert a value; checks-support.sql and
+-- the scrub in environments.sql both do it by reading first, and row_security_drift now
+-- fails the build if anything gets this wrong again.
+ALTER TABLE residents NO FORCE ROW LEVEL SECURITY;
 INSERT INTO facilities (id, name, timezone) VALUES
  ('11111111-1111-1111-1111-111111111111','Cedar House','America/Chicago')
 ON CONFLICT (id) DO NOTHING;
@@ -40,8 +45,7 @@ SELECT '11111111-1111-1111-1111-111111111111',
    AND fm.user_id     = '22222222-2222-2222-2222-222222222222'
    AND fm.role        = 'caregiver'
 ON CONFLICT DO NOTHING;
-ALTER TABLE residents   FORCE ROW LEVEL SECURITY;
-ALTER TABLE assignments FORCE ROW LEVEL SECURITY;
+ALTER TABLE residents FORCE ROW LEVEL SECURITY;
 
 SELECT 'seeded: ' || (SELECT count(*) FROM residents) || ' residents, '
        || (SELECT count(*) FROM users) || ' users, '
