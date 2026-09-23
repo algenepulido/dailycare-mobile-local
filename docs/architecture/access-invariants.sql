@@ -828,6 +828,11 @@ SELECT expect_rows('and owns nothing, which is what FORCE was standing in for', 
 SELECT expect_rows('and reaches no part of the compliance register', 0,
   'SELECT * FROM app_reaches_the_register');
 
+-- PostgreSQL 14 reads a view with its owner's privileges, so this is the shape that turns
+-- every policy in this file off for one path without raising anything.
+SELECT expect_rows('and reaches no policy-protected table through a view', 0,
+  'SELECT * FROM app_reads_rls_through_a_view');
+
 SELECT expect('the baseline is not empty, which would make all four of those cheap',
   (SELECT count(*) >= 30 FROM app_privileges));
 

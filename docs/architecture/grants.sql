@@ -211,6 +211,47 @@ COMMENT ON VIEW app_reaches_the_register IS
    an agreement.';
 
 
+CREATE VIEW app_reads_rls_through_a_view AS
+-- A view over a row-level-security table, readable by a role that row-level security
+-- applies to.
+--
+-- On PostgreSQL 14 a view runs with the privileges of the view's owner, not the caller's.
+-- security_invoker, which changes that, arrived in 15. So granting one of these to an
+-- application role does not narrow what it can see by the policies - it hands over every
+-- row the owner can see, and the policies are simply not consulted. Nothing in the error
+-- log, nothing in the plan, no failing query. The view returns more rows than it should
+-- and looks like it worked.
+--
+-- Empty today, and checked rather than assumed. Every view here reads its tables for an
+-- operator or for another check, and none of them is granted to an application role.
+-- Nothing stops the next convenience view from being granted, which is what this is for.
+--
+-- dailycare_backup is absent on purpose: it holds BYPASSRLS so that logical exports can
+-- read everything, so a view changes nothing about what it already reaches.
+SELECT v.relname AS view_name,
+       r.relname AS reads_table,
+       g.grantee  AS readable_by
+FROM pg_class v
+JOIN pg_namespace n ON n.oid = v.relnamespace AND n.nspname = 'public'
+JOIN pg_rewrite  w ON w.ev_class = v.oid AND w.rulename = '_RETURN'
+JOIN pg_depend   d ON d.objid = w.oid
+JOIN pg_class    r ON r.oid = d.refobjid AND r.relrowsecurity
+JOIN information_schema.role_table_grants g
+  ON g.table_schema = 'public' AND g.table_name = v.relname
+ AND g.privilege_type = 'SELECT'
+ AND g.grantee IN ('dailycare_app','dailycare_integration','dailycare_retention')
+WHERE v.relkind = 'v'
+GROUP BY v.relname, r.relname, g.grantee;
+
+COMMENT ON VIEW app_reads_rls_through_a_view IS
+  'Must be empty. On PostgreSQL 14 a view is read with its owner''s privileges, so a view
+   over a policy-protected table, granted to a role the policies apply to, is a way around
+   every policy on that table - silently, and with the right-looking rows missing rather
+   than an error. If a view like this is ever genuinely wanted, the answer is a SECURITY
+   DEFINER function that checks the caller, the way authentication.sql does, and not a
+   grant on the view.';
+
+
 -- ════════════════════════════════════════════════════════════════════ classification
 
 INSERT INTO data_classification (table_name, column_name, class, note) VALUES
