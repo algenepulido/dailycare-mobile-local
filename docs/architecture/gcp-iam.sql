@@ -129,8 +129,6 @@ INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs,
 ('dev','jenith.dev1202@gmail.com','person','roles/cloudsql.client','project',NULL,NULL,false),
 ('dev','jenith.dev1202@gmail.com','person','roles/cloudsql.instanceUser','project',NULL,
  'IAM database auth, so there is no password for a person to lose.',false),
-('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountUser','project',NULL,
- 'Deploying a revision that runs as one of the four.',false),
 ('dev','jenith.dev1202@gmail.com','person','roles/logging.viewer','project',NULL,NULL,false),
 ('dev','jenith.dev1202@gmail.com','person','roles/logging.configWriter','project',NULL,
  'Log sinks and retention.',false),
@@ -138,14 +136,23 @@ INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs,
 ('dev','jenith.dev1202@gmail.com','person','roles/orgpolicy.policyViewer','project',NULL,
  'Read the four guardrails. Viewing them, not changing them.',false),
 
--- The three worth a question. All read as ordinary parts of a self-serve sandbox and all
--- three are wider than the sentence in the handover that justified the sandbox.
-('dev','jenith.dev1202@gmail.com','person','roles/viewer','project',NULL,
- 'A basic role. The handover says owner and editor are deliberately absent; viewer is the third of the three and it reads everything in the project, including anything added later. Probably wanted broad read and this was the quick way to it. Worth asking whether it can come off, since the named roles above already carry the reads that are used.',false),
-('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountAdmin','project',NULL,
- 'Creates and deletes service accounts. Not needed to use the four that exist.',false),
-('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountTokenCreator','project',NULL,
- 'At project level this is impersonation of every service account in the project. The handover makes exactly this argument about the api account, where it is scoped to the account rather than the project - so the same reasoning points at this one. Impersonation is also how deploys work here, since the no-keys policy leaves no alternative, so the answer may be to scope it to the four rather than remove it.',false);
+-- What replaced the three that were too wide. Inktree removed viewer and
+-- serviceAccountAdmin outright, scoped token creation to the four accounts, and made a
+-- custom role for the one read that was actually wanted - all confirmed against the real
+-- policy on 23 September rather than taken from the message that described them.
+('dev','jenith.dev1202@gmail.com','person','projects/inktree-dailycare-dev/roles/dailycareIamReader','project',NULL,
+ 'A custom role, in place of roles/viewer. It exists so this directory can read a policy and compare it against itself; everything else viewer carried was never used.',false);
+
+-- Impersonation, on the four accounts rather than the project. This is how a deploy runs
+-- as one of them, which the no-keys org policy leaves no alternative to - so the answer
+-- was scoping rather than removal, and that is what it got.
+INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why, temporary) VALUES
+('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountTokenCreator','service_account',
+ ARRAY['dc-dev-api','dc-dev-retention','dc-dev-integration','dc-dev-backup'],
+ 'Four named accounts, not the project. At project level it is impersonation of everything, including anything created later - which is the argument the handover itself makes about the api account.',false),
+('dev','jenith.dev1202@gmail.com','person','roles/iam.serviceAccountUser','service_account',
+ ARRAY['dc-dev-api','dc-dev-retention','dc-dev-integration','dc-dev-backup'],
+ 'Deploying a revision that runs as one of the four.',false);
 
 -- Theirs, recorded so the policy reads the same as this file rather than nearly the same.
 INSERT INTO gcp_iam (environment, principal, kind, role, scope_kind, scope_refs, why) VALUES
@@ -548,6 +555,49 @@ INSERT INTO iam_open_questions (id, environment, principal, role, question, owne
 ('staging_cannot_be_checked','staging','jenith.dev1202@gmail.com','roles/resourcemanager.projects.getIamPolicy',
  'Reading a project policy needs getIamPolicy, which the deploy-only set does not carry - so gcp_iam_drift can say nothing about staging. Either a read role goes on, or Inktree runs load-iam-policy.sh there. Not urgent while staging is empty; it stops being fine the moment something is deployed to it.',
  'Inktree', DATE '2026-09-22');
+
+UPDATE iam_open_questions
+   SET answered_on = DATE '2026-09-23',
+       answer = 'A custom role, dailycareIamReader, in both projects. Narrower than viewer and enough to read a policy, which is what the reading was for. Confirmed against both policies.'
+ WHERE id = 'staging_cannot_be_checked';
+
+UPDATE iam_open_questions
+   SET answered_on = DATE '2026-09-23',
+       answer = 'Removed. The named roles already carried the reads that were used, and dailycareIamReader covers the one that was not.'
+ WHERE id = 'viewer_is_a_basic_role';
+
+UPDATE iam_open_questions
+   SET answered_on = DATE '2026-09-23',
+       answer = 'Removed.'
+ WHERE id = 'service_account_admin';
+
+UPDATE iam_open_questions
+   SET answered_on = DATE '2026-09-23',
+       answer = 'Scoped to the four service accounts rather than removed, which is the right answer: the no-keys policy means a deploy runs by impersonation, so removing it would have stopped deploys rather than narrowed them.'
+ WHERE id = 'project_wide_impersonation';
+
+
+-- ── and one the same reading opened ────────────────────────────────────────────
+--
+-- Reading staging for the first time is what found this, which is the argument for the
+-- read access in one line.
+--
+-- Staging now carries the same eighteen roles as dev, including admin on Cloud SQL,
+-- Storage, Secret Manager, Artifact Registry and Cloud Run. The handover says something
+-- different about that environment in two places: "Deploy and read only" in the access
+-- table, and "In staging you have read access only; tell us what needs setting" about
+-- secrets. So either the intent changed - which is a fine answer, staging has to be built
+-- by somebody - or the same role bundle went onto both projects while the three
+-- narrowings were being applied.
+--
+-- Not declared as intended until somebody says it is. The expiry conditions did survive:
+-- all eighteen staging bindings still close on 20 December, which is the part that would
+-- have been worth worrying about.
+
+INSERT INTO iam_open_questions (id, environment, principal, role, question, owner, raised_on) VALUES
+('staging_matches_dev','staging','jenith.dev1202@gmail.com','roles/secretmanager.admin',
+ 'Staging now holds the same eighteen roles as dev, where the handover says deploy and read only, and read only for secrets in particular. Deliberate, or the same bundle applied twice? Asking because the difference between the two environments is the thing that makes dev safe to be wide in.',
+ 'Inktree', DATE '2026-09-23');
 
 CREATE VIEW iam_questions_outstanding AS
 SELECT id, environment, principal, role, owner, raised_on,

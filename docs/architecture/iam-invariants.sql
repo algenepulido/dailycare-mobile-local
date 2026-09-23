@@ -166,8 +166,19 @@ SELECT CASE WHEN (SELECT count(*) FROM gcp_iam_observed) = 0
   ELSE 'NOTE  ' || (SELECT count(*)::text FROM gcp_iam_observed) || ' observed bindings loaded.'
 END;
 
-SELECT expect('nothing broad in staging or production, asked of the real policy',
-  (SELECT count(*) = 0 FROM iam_broad_in_practice WHERE environment <> 'dev'));
+-- Production still grants nobody anything, and that is the half of this that must not
+-- move. Staging is a separate question with a row of its own rather than a silent pass:
+-- it was wide when it was first read, the handover says it should not be, and until
+-- somebody says which is right, asserting either would be picking an answer.
+SELECT expect('nothing broad in production, asked of the real policy',
+  (SELECT count(*) = 0 FROM iam_broad_in_practice WHERE environment = 'prod'));
+
+SELECT expect('and where staging is wider than the handover says, that is recorded',
+  NOT EXISTS (
+    SELECT 1 FROM iam_broad_in_practice b
+    WHERE b.environment = 'staging'
+      AND NOT EXISTS (SELECT 1 FROM iam_open_questions q
+                      WHERE q.environment = 'staging' AND q.answered_on IS NULL)));
 
 -- Not a failure, a list. Dev is meant to be wide and the argument for it is in gcp-iam.sql;
 -- what is not wanted is for it to widen further without anybody saying so, and a drift of

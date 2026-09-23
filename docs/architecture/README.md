@@ -72,7 +72,7 @@ deliberately — see below.
 With your own PostgreSQL:
 
 ```bash
-./verify.sh                  # 507 checks across fourteen suites
+./verify.sh                  # 508 checks across fourteen suites
 ./restore-drill.sh --build   # 14 more, and a real dump and restore
 ```
 
