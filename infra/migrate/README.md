@@ -36,3 +36,25 @@ right answer is an owner role of its own, created once. That is the real conclus
 And the org policy caught a mistake on the way through. The secret was first created with
 automatic replication, which puts a database password in every region Google has;
 `gcp.resourceLocations` refused it. It is pinned to `us-central1` now.
+
+## Creating a caregiver's account on a deployed instance
+
+`dailycare-api bootstrap` needs to reach the database, and the instance has no public
+address, so it runs as a job like everything else here. The job is the API image, not the
+migration image: the account it creates has to be hashed by the code that will verify it.
+
+    gcloud run jobs execute dc-dev-bootstrap --region us-central1 \
+      --update-env-vars BOOTSTRAP_EMAIL=ben@cedar.test,\
+    BOOTSTRAP_NAME="Ben Okafor",\
+    BOOTSTRAP_FACILITY=<facility uuid>,\
+    BOOTSTRAP_RESIDENTS=<resident uuid>
+
+The invitation is on stdout in the execution's log, printed once, and only its digest is
+stored — so if it is lost, the answer is another invitation rather than a lookup.
+
+A job's command line is fixed when the job is created and `execute` can only override the
+environment, which is why `bootstrap` reads both. Flags win when it is run by hand.
+
+It connects as `postgres` through the `seed_pw` secret, like the migration jobs do. That
+is the credential path Trevor is replacing with a dedicated migration identity; nothing
+here removes it.
