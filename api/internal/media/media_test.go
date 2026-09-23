@@ -32,6 +32,17 @@ func (r *recorder) SignedPutURL(_ context.Context, bucket, object, contentType s
 	return "https://storage.example/" + object + "?signed", nil
 }
 
+func (r *recorder) SignedGetURL(_ context.Context, bucket, object string,
+	until time.Time) (string, error) {
+	r.bucket, r.object, r.until = bucket, object, until
+	// No content type on a read, and the recorder keeps whatever the last call set so a
+	// test can assert that this one did not pin one.
+	if r.err != nil {
+		return "", r.err
+	}
+	return "https://storage.example/" + object + "?read", nil
+}
+
 func ward(t *testing.T) (*Store, *recorder, db.Caller, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	dsn, admin := os.Getenv("DAILYCARE_TEST_DSN"), os.Getenv("DAILYCARE_TEST_ADMIN_DSN")
@@ -230,5 +241,113 @@ func TestEveryQueryInThisPackageAuditsFirst(t *testing.T) {
 		if len(why) < 40 {
 			t.Errorf("%s is declared with a reason too short to be one", name)
 		}
+	}
+}
+
+// A day to hang a photograph on, written as the application so the policies apply.
+func aDay(t *testing.T, s *Store, c db.Caller, facility, resident uuid.UUID,
+	on time.Time) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := s.db.InSession(context.Background(), c, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `
+			INSERT INTO care_days (facility_id, resident_id, care_date, mood, appetite,
+			                       sleep, filed_by)
+			VALUES ($1,$2,$3,'calm','good','slept_well',$4) RETURNING id`,
+			facility, resident, on, c.UserID).Scan(&id)
+	})
+	if err != nil {
+		t.Fatalf("writing a care day: %v", err)
+	}
+	return id
+}
+
+// A correction, the way records.File makes one: retire the old row, insert a new one
+// pointing back at it. The photograph is not touched, which is the point.
+func correct(t *testing.T, s *Store, c db.Caller, facility, resident, previous uuid.UUID,
+	on time.Time) {
+	t.Helper()
+	err := s.db.InSession(context.Background(), c, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(context.Background(),
+			`UPDATE care_days SET superseded_at = now() WHERE id = $1`, previous); err != nil {
+			return err
+		}
+		_, err := tx.Exec(context.Background(), `
+			INSERT INTO care_days (facility_id, resident_id, care_date, mood, appetite,
+			                       sleep, filed_by, amends_id)
+			VALUES ($1,$2,$3,'anxious','poor','restless',$4,$5)`,
+			facility, resident, on, c.UserID, previous)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("correcting the day: %v", err)
+	}
+}
+
+// A photograph filed against a day that was later corrected is still that day's
+// photograph.
+//
+// This is the trap schema-invariants.sql names: a correction makes a new care_days row,
+// the photograph stays attached to the one it was filed against, and the obvious query -
+// where care_day_id is the current row - returns nothing the moment somebody fixes a typo.
+// Resolving by the resident and the date is what reaches every revision.
+func TestPhotographsSurviveACorrection(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	day := aDay(t, s, caller, facility, resident, on)
+
+	up, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024)
+	if err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	if err := s.Arrived(ctx, caller, up.ObjectID); err != nil {
+		t.Fatalf("confirming: %v", err)
+	}
+
+	before, err := s.ForDay(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("wanted one photograph before the correction, got %d", len(before))
+	}
+	if before[0].URL == "" || before[0].ExpiresAt.IsZero() {
+		t.Errorf("a photograph came back without a link: %+v", before[0])
+	}
+
+	correct(t, s, caller, facility, resident, day, on)
+
+	after, err := s.ForDay(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatalf("reading after the correction: %v", err)
+	}
+	if len(after) != 1 {
+		t.Fatalf("the photograph was lost by a correction: got %d", len(after))
+	}
+	if after[0].ID != before[0].ID {
+		t.Errorf("a different photograph came back: %v then %v", before[0].ID, after[0].ID)
+	}
+}
+
+// An offer that was never confirmed describes an object that is not in the bucket. A link
+// to it is a broken image in front of a family.
+func TestAPhotographThatNeverArrivedIsNotOffered(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	day := aDay(t, s, caller, facility, resident, on)
+
+	if _, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024); err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	// Deliberately no Arrived.
+
+	got, err := s.ForDay(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("an upload that never finished was offered as a photograph: %+v", got)
 	}
 }

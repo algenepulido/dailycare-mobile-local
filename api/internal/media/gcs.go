@@ -71,6 +71,36 @@ func (g *GCS) SignedPutURL(ctx context.Context, bucket, object, contentType stri
 		opts.GoogleAccessID = g.serviceAccount
 	}
 
+	return g.sign(ctx, bucket, object, opts)
+}
+
+// SignedGetURL is a link to look at one photograph, and nothing else.
+//
+// No ContentType: that option pins what an upload may send and has no meaning for a read,
+// and setting it would put a Content-Type into the signature that a plain GET does not
+// send - which fails as SignatureDoesNotMatch and reads like a permissions problem. The
+// same trap the upload path fell into from the other side.
+//
+// Minted only when somebody is about to look. A signed URL cannot be withdrawn once it
+// exists, so the control is its lifetime, and issuing one per photograph on every read of
+// a day would hand out links nobody asked to see.
+func (g *GCS) SignedGetURL(ctx context.Context, bucket, object string,
+	until time.Time) (string, error) {
+	opts := &storage.SignedURLOptions{
+		Scheme:  storage.SigningSchemeV4,
+		Method:  "GET",
+		Expires: until,
+	}
+	if g.serviceAccount != "" {
+		opts.GoogleAccessID = g.serviceAccount
+	}
+	return g.sign(ctx, bucket, object, opts)
+}
+
+// One place that knows how the signing actually happens, so the GET and the PUT cannot
+// drift into signing differently.
+func (g *GCS) sign(ctx context.Context, bucket, object string,
+	opts *storage.SignedURLOptions) (string, error) {
 	if g.token != "" {
 		opts.SignBytes = func(b []byte) ([]byte, error) { return g.signBlob(ctx, b) }
 		url, err := storage.SignedURL(bucket, object, opts)

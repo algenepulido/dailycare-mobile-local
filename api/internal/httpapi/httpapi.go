@@ -64,6 +64,12 @@ func (a *API) Routes() http.Handler {
 	// photograph - media_never_arrived is the list of ones that never came.
 	mux.Handle("POST /v1/photos/{objectId}/arrived", a.identified(a.photoArrived))
 
+	// Separate from the day itself, and called only when somebody is about to look. Every
+	// link here costs a signing call and cannot be withdrawn once minted, so a day read
+	// that produced them whether or not anybody opened a photograph would be handing out
+	// links nobody asked for.
+	mux.Handle("GET /v1/residents/{id}/days/{date}/photos", a.identified(a.dayPhotos))
+
 	// /healthz is not ours to use. Cloud Run's frontend answers it before a request
 	// reaches the container, with an HTML 404 - so a probe against a deployed service
 	// tests Google's load balancer and reports the service as broken. Found by deploying
@@ -214,6 +220,23 @@ func (a *API) offerPhoto(w http.ResponseWriter, r *http.Request, c db.Caller) {
 		return
 	}
 	a.ok(w, r, http.StatusCreated, up)
+}
+
+func (a *API) dayPhotos(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	if a.media == nil {
+		a.fail(w, r, http.StatusServiceUnavailable, "photographs are not set up on this server", nil)
+		return
+	}
+	id, on, ok := a.residentAndDate(w, r)
+	if !ok {
+		return
+	}
+	photos, err := a.media.ForDay(r.Context(), c, id, on)
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "could not read the photographs", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, photos)
 }
 
 func (a *API) photoArrived(w http.ResponseWriter, r *http.Request, c db.Caller) {

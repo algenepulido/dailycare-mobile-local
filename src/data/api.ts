@@ -232,6 +232,27 @@ export interface PhotoPlace {
  * locally and fails at the bucket is better than one that quietly replaces a photograph
  * already attached to a filed day.
  */
+export interface DayPhoto {
+  id: string;
+  url: string;
+  expiresAt: string;
+}
+
+/**
+ * Links to the photographs filed for a day.
+ *
+ * Asked for separately from the day, and only when somebody opens them. Each link costs
+ * the server a signing call and cannot be withdrawn once it exists, so reading a day
+ * should not mint links nobody is going to look at.
+ *
+ * The links are short-lived by design. A screen holding one for a long time will find it
+ * stops working, and asking again is the answer rather than caching it.
+ */
+export async function fetchDayPhotos(residentId: string, date: string): Promise<DayPhoto[]> {
+  const body = (await authed(`/v1/residents/${residentId}/days/${date}/photos`)) as DayPhoto[];
+  return Array.isArray(body) ? body : [];
+}
+
 export async function uploadPhoto(
   residentId: string,
   uri: string,

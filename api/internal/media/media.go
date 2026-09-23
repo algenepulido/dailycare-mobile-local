@@ -38,6 +38,7 @@ var ErrNotVisible = errors.New("media: no such resident, or not one this session
 // - which is what makes iam.disableServiceAccountKeyCreation possible to enforce.
 type Signer interface {
 	SignedPutURL(ctx context.Context, bucket, object, contentType string, until time.Time) (string, error)
+	SignedGetURL(ctx context.Context, bucket, object string, until time.Time) (string, error)
 }
 
 type Store struct {
@@ -169,4 +170,89 @@ func (s *Store) Arrived(ctx context.Context, c db.Caller, object uuid.UUID) erro
 		}
 		return nil
 	})
+}
+
+// How long a link to look at a photograph lasts.
+//
+// Short because it cannot be taken back. media_read decides who may have one and is
+// consulted before it is minted, but a link already handed out keeps working whatever
+// happens to that row afterwards - so the lifetime is the control, and it is the only one.
+const viewFor = 5 * time.Minute
+
+type Photograph struct {
+	ID        uuid.UUID `json:"id"`
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// ForDay returns links to the photographs filed for a resident on a date.
+//
+// Resolved by the resident and the date rather than by one care_days row. A correction
+// makes a new row and the photograph stays attached to the one it was filed against, so
+// `WHERE care_day_id = <the current row>` returns nothing the moment somebody fixes a
+// typo - which is exactly the trap schema-invariants.sql names and tests.
+//
+// Only photographs that actually arrived, and are not deleted. A row whose upload never
+// finished describes an object that is not there, and a link to it is a broken image in
+// front of a family.
+func (s *Store) ForDay(ctx context.Context, c db.Caller, resident uuid.UUID,
+	on time.Time) ([]Photograph, error) {
+	type found struct {
+		id     uuid.UUID
+		bucket string
+		path   string
+	}
+	var rows []found
+
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		// audit_read first, in the same transaction, so a read that is not in the trail is
+		// a read that did not happen. It is also the access check: it refuses to record a
+		// read of a resident this session cannot see, and it does that before any row is
+		// fetched and long before any link is minted.
+		//
+		// This was missing on the first attempt and the package's own source-level guard
+		// caught it - looking at a family's photographs is exactly the read HIPAA's audit
+		// controls are about, and it would have left no trace.
+		if _, err := tx.Exec(ctx, `SELECT audit_read($1, $2)`, resident, "media_objects"); err != nil {
+			return ErrNotVisible
+		}
+
+		// media_read is what admits the caller to the rows themselves.
+		r, err := tx.Query(ctx, `
+			SELECT m.id, m.bucket, m.object_path
+			FROM media_objects m
+			JOIN care_days cd ON cd.id = m.care_day_id
+			WHERE cd.resident_id = $1 AND cd.care_date = $2
+			  AND m.uploaded_at IS NOT NULL AND m.deleted_at IS NULL
+			ORDER BY m.uploaded_at`, resident, on)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var f found
+			if err := r.Scan(&f.id, &f.bucket, &f.path); err != nil {
+				return err
+			}
+			rows = append(rows, f)
+		}
+		return r.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Signing outside the transaction. Each one is a network call to IAM, and holding a
+	// database session open across them would keep a connection for the length of the
+	// slowest thing in the request.
+	until := time.Now().Add(viewFor)
+	out := make([]Photograph, 0, len(rows))
+	for _, f := range rows {
+		url, err := s.signer.SignedGetURL(ctx, f.bucket, f.path, until)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Photograph{ID: f.id, URL: url, ExpiresAt: until})
+	}
+	return out, nil
 }

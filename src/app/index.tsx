@@ -247,7 +247,14 @@ function CareReport({
         <CareDateButton careDate={draft.careDate} onChange={form.selectDate} />
       </View>
 
-      {filed ? <AlreadyFiled summary={filed} residentName={resident.displayName} /> : null}
+      {filed && remoteId ? (
+        <AlreadyFiled
+          summary={filed}
+          residentName={resident.displayName}
+          residentId={remoteId}
+          careDate={draft.careDate}
+        />
+      ) : null}
 
       <Card title="Meals">
         {MEALS.map((meal) => (

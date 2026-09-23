@@ -1,6 +1,9 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 
+import { fetchDayPhotos } from '@/data/api';
+import type { DayPhoto } from '@/data/api';
 import type { FiledSummary } from '@/data/wire';
 import { MEAL_AMOUNT_LABEL } from '@/domain/types';
 import { color, radii, sizes, type } from '@/theme/tokens';
@@ -11,6 +14,9 @@ import { Sheet } from './Sheet';
 interface AlreadyFiledProps {
   summary: FiledSummary;
   residentName: string;
+  /** Asked for only when the sheet opens - see fetchDayPhotos. */
+  residentId: string;
+  careDate: string;
 }
 
 /**
@@ -27,9 +33,42 @@ interface AlreadyFiledProps {
  * its own, so a loaded day would show a blank medication list that the caregiver would
  * reasonably read as "not given".
  */
-export function AlreadyFiled({ summary, residentName }: AlreadyFiledProps) {
+export function AlreadyFiled({
+  summary,
+  residentName,
+  residentId,
+  careDate,
+}: AlreadyFiledProps) {
   const [open, setOpen] = useState(false);
   const at = timeOfDay(summary.filedAt);
+
+  /**
+   * The photographs, fetched when the sheet opens and not before.
+   *
+   * `undefined` is "not asked yet", an empty array is "asked, and there are none", and
+   * those are different things on screen: one is a spinner and the other is silence.
+   */
+  const [photos, setPhotos] = useState<DayPhoto[] | undefined>();
+  const [photosFailed, setPhotosFailed] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setPhotosFailed(false);
+    fetchDayPhotos(residentId, careDate)
+      .then((found) => {
+        if (!cancelled) setPhotos(found);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPhotos([]);
+          setPhotosFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, residentId, careDate]);
 
   return (
     <>
@@ -95,12 +134,32 @@ export function AlreadyFiled({ summary, residentName }: AlreadyFiledProps) {
             </>
           ) : null}
 
-          {/* Said rather than left to be noticed. Both are on the phone that filed the
-              day and neither is sent, so their absence here is not the record being
-              incomplete. */}
+          <Text style={styles.heading}>PHOTOS</Text>
+          {photos === undefined ? (
+            <ActivityIndicator style={styles.spinner} />
+          ) : photosFailed ? (
+            <Text style={styles.nothing}>The photos could not be loaded just now.</Text>
+          ) : photos.length === 0 ? (
+            <Text style={styles.nothing}>None</Text>
+          ) : (
+            <View style={styles.photos}>
+              {photos.map((photo) => (
+                <Image
+                  key={photo.id}
+                  source={{ uri: photo.url }}
+                  style={styles.photo}
+                  contentFit="cover"
+                  accessibilityLabel="Photo filed with this day"
+                />
+              ))}
+            </View>
+          )}
+
+          {/* Medication is the one thing here that genuinely never leaves the phone: a
+              tick is a caregiver saying they gave it, and medication_events is a record
+              that it was dispensed, and the schema is careful about the difference. */}
           <Text style={styles.footnote}>
-            Medication and photos stay on the phone that recorded them, so they are not
-            shown here.
+            Medication stays on the phone that recorded it and is not sent.
           </Text>
         </ScrollView>
       </Sheet>
@@ -165,5 +224,8 @@ const styles = StyleSheet.create({
   rowValue: { ...type.body, color: color.ink, flexShrink: 1, textAlign: 'right' },
   body: { ...type.body, color: color.ink },
   nothing: { ...type.body, color: color.ink3 },
-  footnote: { ...type.body, color: color.ink3, marginTop: 24, marginBottom: 4 },
+  footnote: { ...type.body, color: color.ink3, marginTop: 20 },
+  spinner: { alignSelf: 'flex-start', marginTop: 4 },
+  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  photo: { width: 104, height: 104, borderRadius: radii.photoThumb, backgroundColor: color.paper2 },
 });
