@@ -241,16 +241,27 @@ export async function uploadPhoto(
     }),
   })) as PhotoPlace;
 
+  // The body is a Blob with its type set, not a Blob plus a header.
+  //
+  // React Native derives the Content-Type from the blob when one is given, and appends a
+  // charset - so a header saying image/png arrives as "image/png; charset=utf-8". The
+  // signature covers content-type exactly, so the bucket answers SignatureDoesNotMatch:
+  // a 403 that reads like a permissions problem and is not one. Confirmed by sending the
+  // same URL three ways with curl - bare works, either charset spelling does not.
+  //
+  // Setting it on the blob instead means there is one place the type comes from and
+  // nothing left to append to it.
   const put = await fetch(place.url, {
     method: 'PUT',
-    // The same type that was signed for. A different one and the bucket refuses the URL.
-    headers: { 'Content-Type': contentType },
-    body: bytes,
+    body: bytes.slice(0, bytes.size, contentType),
   });
   if (!put.ok) {
     // Deliberately not the bucket's XML. It says SignatureDoesNotMatch when the content
     // type is wrong and AccessDenied for an overwrite, and both read to a caregiver like
     // they have done something wrong.
+    // Deliberately not the bucket's XML. It says SignatureDoesNotMatch when the content
+    // type is not exactly what was signed and AccessDenied for an overwrite, and both
+    // read to a caregiver like they have done something wrong.
     throw new ApiError(put.status, 'the photograph did not upload');
   }
 
