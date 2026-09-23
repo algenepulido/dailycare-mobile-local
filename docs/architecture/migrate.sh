@@ -44,6 +44,27 @@ q () { psql -q -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
 # applied and never be checked. So the list is compared against what is actually on disk in
 # both directions before anything is applied.
 mapfile -t WANTED < <(grep -v '^#' "$HERE/model.list" | grep -v '^[[:space:]]*$')
+
+# Compared in the shell rather than by piping the list into grep -q.
+#
+# `printf ... | grep -qx` looks equivalent and is not, under `set -o pipefail`: grep -q
+# exits the moment it matches, which closes the pipe while printf is still writing to it,
+# and printf dies of SIGPIPE. pipefail then reports the pipeline as failed even though the
+# name was found - so the check said a file was missing from model.list while it was
+# sitting in model.list, and the migration stopped.
+#
+# It is timing, so it is rare and it moves: three runs of review.sh named three different
+# files. Measured in the container the suites run in, it was about one lookup in six
+# hundred, which over fourteen suites is roughly one run in three refusing to migrate for
+# no reason. A guard that fails at random teaches people to re-run it until it passes,
+# which is the opposite of what this one is for.
+in_model_list() {
+  local want="$1" have
+  for have in "${WANTED[@]}"; do
+    [ "$have" = "$want" ] && return 0
+  done
+  return 1
+}
 missing=0
 for f in "${WANTED[@]}"; do
   [ -f "$HERE/$f" ] || { echo "model.list names $f and it is not here" >&2; missing=1; }
@@ -57,7 +78,7 @@ for f in "$HERE"/*.sql; do
   case "$b" in
     *-invariants.sql|roles.sql|checks-support.sql|cloudsql-iam.sql) continue ;;
   esac
-  printf '%s\n' "${WANTED[@]}" | grep -qx "$b" || {
+  in_model_list "$b" || {
     echo "$b is in this directory and not in model.list, so it would never be applied" >&2
     missing=1; }
 done
