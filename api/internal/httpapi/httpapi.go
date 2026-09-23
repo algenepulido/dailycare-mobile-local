@@ -44,6 +44,11 @@ func (a *API) Routes() http.Handler {
 	mux.Handle("GET /v1/residents", a.identified(a.listResidents))
 	mux.Handle("GET /v1/residents/{id}/days/{date}", a.identified(a.careDay))
 
+	// POST rather than PUT, and the difference is the point. A second one is not a replay
+	// that should be swallowed; it is a correction, and the database records it as a new
+	// row pointing back at what it corrected.
+	mux.Handle("POST /v1/residents/{id}/days/{date}", a.identified(a.fileDay))
+
 	// No identity and nothing about the system: a health check that reported the database
 	// version or the migration state would be a free map for anybody who found the port.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -158,15 +163,33 @@ func (a *API) listResidents(w http.ResponseWriter, r *http.Request, c db.Caller)
 	a.ok(w, r, http.StatusOK, list)
 }
 
-func (a *API) careDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+func (a *API) fileDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, on, ok := a.residentAndDate(w, r)
+	if !ok {
 		return
 	}
-	on, err := time.Parse("2006-01-02", r.PathValue("date"))
+	var filing records.Filing
+	if !a.read(w, r, &filing) {
+		return
+	}
+	filed, err := a.records.File(r.Context(), c, id, on, filing)
 	if err != nil {
-		a.fail(w, r, http.StatusBadRequest, "the date should look like 2026-09-22", nil)
+		if errors.Is(err, records.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
+		// A mood the enum does not have, a meal slot that is not a meal, an amount
+		// without the meal. All of them are the caller sending something the model
+		// refuses, and the model's message is not the caller's business.
+		a.fail(w, r, http.StatusBadRequest, "that day was not something the record accepts", err)
+		return
+	}
+	a.ok(w, r, http.StatusCreated, map[string]string{"careDayId": filed.String()})
+}
+
+func (a *API) careDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, on, ok := a.residentAndDate(w, r)
+	if !ok {
 		return
 	}
 	day, err := a.records.Day(r.Context(), c, id, on)
@@ -181,4 +204,21 @@ func (a *API) careDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
 		return
 	}
 	a.ok(w, r, http.StatusOK, day)
+}
+
+// Both day handlers take the same two path values, and a resident id that is not a uuid
+// is answered the same way as one that is: a 404 saying no such resident. Telling a caller
+// that their uuid was well-formed but unknown is half of an enumeration oracle.
+func (a *API) residentAndDate(w http.ResponseWriter, r *http.Request) (uuid.UUID, time.Time, bool) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return uuid.Nil, time.Time{}, false
+	}
+	on, err := time.Parse("2006-01-02", r.PathValue("date"))
+	if err != nil {
+		a.fail(w, r, http.StatusBadRequest, "the date should look like 2026-09-23", nil)
+		return uuid.Nil, time.Time{}, false
+	}
+	return id, on, true
 }

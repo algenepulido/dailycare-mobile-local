@@ -241,3 +241,64 @@ func errorOf(t *testing.T, body []byte) string {
 	}
 	return fmt.Sprint(m["error"])
 }
+
+// Filing over HTTP, and the two ways it can be refused.
+func TestFilingADayOverHTTP(t *testing.T) {
+	h := serve(t)
+	s := h.signIn(t)
+
+	// No resident is assigned to this account, so the only thing worth checking here is
+	// that an unknown one is refused the same way an invisible one is - the seeding for a
+	// full ward lives in the records tests, where it belongs.
+	body := map[string]any{
+		"mood": "calm", "appetite": "fair", "sleep": "restless",
+		"note": "settled evening", "shower": true, "grooming": false,
+		"meals":    []map[string]any{{"slot": "breakfast", "happened": true, "amount": "most"}},
+		"concerns": []string{"pain"},
+	}
+	resp, out := h.do(t, "POST", "/v1/residents/"+uuid.NewString()+"/days/2026-09-23", s.AccessToken, body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("filing for an unknown resident gave %d, want 404: %s", resp.StatusCode, out)
+	}
+	if got := errorOf(t, out); got != "no such resident" {
+		t.Fatalf("the refusal says %q", got)
+	}
+}
+
+func TestFilingWithoutATokenIsRefused(t *testing.T) {
+	h := serve(t)
+	resp, _ := h.do(t, "POST", "/v1/residents/"+uuid.NewString()+"/days/2026-09-23", "",
+		map[string]any{"mood": "calm"})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("got %d, want 401", resp.StatusCode)
+	}
+}
+
+// A mood the enum does not have. The model refuses it and the caller is told that the day
+// was not accepted, not which constraint said so.
+func TestAnImpossibleDayIsRefusedWithoutSayingWhy(t *testing.T) {
+	h := serve(t)
+	s := h.signIn(t)
+	resp, out := h.do(t, "POST", "/v1/residents/"+uuid.NewString()+"/days/2026-09-23", s.AccessToken,
+		map[string]any{"mood": "cheerful", "appetite": "fair", "sleep": "restless"})
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		t.Fatalf("a mood that is not in the enum was accepted")
+	}
+	for _, leak := range []string{"enum", "SQLSTATE", "invalid input value", "care_days", "cheerful"} {
+		if strings.Contains(string(out), leak) {
+			t.Errorf("the response mentions %q: %s", leak, out)
+		}
+	}
+}
+
+// A path value that is not a uuid is the same answer as one that is and is unknown.
+// Otherwise a caller learns which of their guesses were well-formed.
+func TestABadResidentIdAnswersLikeAnUnknownOne(t *testing.T) {
+	h := serve(t)
+	s := h.signIn(t)
+	_, bad := h.do(t, "GET", "/v1/residents/not-a-uuid/days/2026-09-23", s.AccessToken, nil)
+	_, unknown := h.do(t, "GET", "/v1/residents/"+uuid.NewString()+"/days/2026-09-23", s.AccessToken, nil)
+	if errorOf(t, bad) != errorOf(t, unknown) {
+		t.Fatalf("two answers: %q and %q", errorOf(t, bad), errorOf(t, unknown))
+	}
+}

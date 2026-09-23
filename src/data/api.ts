@@ -7,6 +7,7 @@
  * should stop somebody working.
  */
 
+import type { WireDay } from '@/data/wire';
 import {
   currentAccessToken,
   forgetTokens,
@@ -179,4 +180,20 @@ export async function signOut(): Promise<void> {
   } catch {
     // Offline. Nothing to do and nothing worth saying.
   }
+}
+
+/**
+ * Send a day to the server.
+ *
+ * POST, not PUT, and a second one for the same date is not a mistake to swallow — it is a
+ * correction, and the database records it as a new row pointing back at what it corrected.
+ * Which is why this is not retried on anything but a 401: a retry that the server had
+ * already applied would file the same day twice and read as two corrections.
+ */
+export async function fileDay(residentId: string, date: string, day: WireDay): Promise<string> {
+  const body = (await authed(`/v1/residents/${residentId}/days/${date}`, {
+    method: 'POST',
+    body: JSON.stringify(day),
+  })) as { careDayId: string };
+  return body.careDayId;
 }
