@@ -15,16 +15,33 @@ const path = require('path');
 
 const RESOURCE = 'network_security_config';
 
+/**
+ * Two files, one name, and the build type decides which one is in the APK.
+ *
+ * src/main holds the configuration that ships: cleartext off everywhere. src/debug holds
+ * the one with the emulator exception. The Android resource merger prefers the build
+ * type's copy, so a debug build gets the exception and a release build has no way to -
+ * there is no flag to set and nothing to remember.
+ *
+ * The exception used to be in the single shared file, so it shipped. It named 10.0.2.2,
+ * which is the emulator's alias for its host and is also an ordinary private address that
+ * a care home's network can really have.
+ */
 function withConfigFile(config) {
   return withDangerousMod(config, [
     'android',
     async (cfg) => {
-      const dir = path.join(cfg.modRequest.platformProjectRoot, 'app/src/main/res/xml');
-      fs.mkdirSync(dir, { recursive: true });
-      fs.copyFileSync(
-        path.join(cfg.modRequest.projectRoot, 'network-security', `${RESOURCE}.xml`),
-        path.join(dir, `${RESOURCE}.xml`),
-      );
+      const from = path.join(cfg.modRequest.projectRoot, 'network-security');
+      const into = cfg.modRequest.platformProjectRoot;
+
+      for (const [source, variant] of [
+        [`${RESOURCE}.xml`, 'main'],
+        [`${RESOURCE}.debug.xml`, 'debug'],
+      ]) {
+        const dir = path.join(into, `app/src/${variant}/res/xml`);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.copyFileSync(path.join(from, source), path.join(dir, `${RESOURCE}.xml`));
+      }
       return cfg;
     },
   ]);

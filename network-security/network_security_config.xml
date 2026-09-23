@@ -1,16 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Cleartext is off everywhere, which is Android's default and the correct one: the API is
-  HTTPS and a build that would speak plain HTTP to an arbitrary host can be pointed at a
-  proxy on a ward's wifi.
+  The configuration that ships.
 
-  The exception is 10.0.2.2, which is not a real address. It exists only inside the Android
-  emulator as an alias for the machine running it, so a build carrying this exception still
-  cannot be talked into a cleartext conversation with anything that exists.
+  Cleartext is off, everywhere, with no exceptions. That is Android's default and the
+  correct one here: the API is HTTPS, and a build that will speak plain HTTP to any host
+  can be pointed at a proxy on a ward's wifi and made to hand over a shift's worth of PHI.
+
+  The emulator exception that used to be here is in the debug copy beside this file. It
+  named 10.0.2.2, which inside the emulator is an alias for the machine running it - but
+  it is also an ordinary private address, and a care home running 10.0.0.0/8 can have a
+  real host at exactly that number. "It is not a real address" was too strong, and a
+  release build is the wrong place to find out.
+
+  Which build gets which file is decided by the Android resource merger from the build
+  type, not by a flag anybody has to remember to set.
 -->
 <network-security-config>
   <base-config cleartextTrafficPermitted="false" />
-  <domain-config cleartextTrafficPermitted="true">
-    <domain includeSubdomains="false">10.0.2.2</domain>
-  </domain-config>
 </network-security-config>

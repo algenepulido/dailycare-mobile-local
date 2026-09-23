@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only. The Android resource merger prefers src/debug over src/main, so this
+  file exists in a debug build and is absent from a release one - there is no runtime
+  check and no build flag, so it cannot be switched on by accident.
+
+  10.0.2.2 is the emulator's alias for the machine running it, which is where the API runs
+  during local work. It is still a plain-HTTP hole, which is why it lives here and not in
+  the configuration that ships.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false" />
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">10.0.2.2</domain>
+  </domain-config>
+</network-security-config>
