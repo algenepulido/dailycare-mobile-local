@@ -54,6 +54,28 @@ func bootstrap(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	// Environment as well as flags, because this runs as a Cloud Run job and a job's
+	// arguments are fixed when it is created - `gcloud run jobs execute` can override the
+	// environment and not the command line. Flags win, so the same binary is usable by
+	// hand without the environment getting a say it was not asked for.
+	fallback(facility, "BOOTSTRAP_FACILITY")
+	fallback(email, "BOOTSTRAP_EMAIL")
+	fallback(name, "BOOTSTRAP_NAME")
+	fallback(by, "BOOTSTRAP_BY")
+	if *role == "caregiver" {
+		fallback(role, "BOOTSTRAP_ROLE")
+	}
+	if len(residents) == 0 {
+		for _, r := range strings.Split(os.Getenv("BOOTSTRAP_RESIDENTS"), ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				if err := residents.Set(r); err != nil {
+					return fmt.Errorf("BOOTSTRAP_RESIDENTS: %w", err)
+				}
+			}
+		}
+	}
+
 	if *facility == "" || *email == "" || *name == "" {
 		fs.Usage()
 		return errors.New("facility, email and name are all required")
@@ -171,4 +193,10 @@ func bootstrap(ctx context.Context, args []string) error {
 			"seven days, admits one person, and is how they choose their own password:\n\n")
 	fmt.Println(link)
 	return nil
+}
+
+func fallback(flagValue *string, env string) {
+	if *flagValue == "" {
+		*flagValue = os.Getenv(env)
+	}
 }
