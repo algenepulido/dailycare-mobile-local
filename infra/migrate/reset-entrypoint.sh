@@ -23,6 +23,19 @@ psql -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 psql -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA public TO dailycare_app, dailycare_retention, dailycare_integration, dailycare_backup;"
 echo "schema dropped and recreated"
 
+# What this does not do, said here rather than discovered later: the bucket is untouched.
+# Dropping the schema removes every media_objects row, and the objects those rows described
+# stay in Cloud Storage with nothing left that knows whose they were - which is the exact
+# state the retention handshake exists to prevent, arrived at from the other direction.
+# Counted after a reset: six objects, no rows.
+#
+# It is not fixed here on purpose. This job runs as the api account, which holds
+# objectCreator and objectViewer and deliberately not delete - taking an object out of a
+# bucket is retention's, through the handshake, and a reset job quietly holding that
+# privilege would be a larger hole than the one it tidied. So dev buckets are emptied
+# deliberately, by somebody who means to, and this says so.
+echo "note: the bucket is not touched. Objects from before this reset now have no rows."
+
 cd /model && ./migrate.sh -d "$DB_NAME" --with-roles
 psql -v ON_ERROR_STOP=1 \
   -c "SET dailycare.project = '${GCP_PROJECT}'; SET dailycare.env = '${GCP_ENV}';" \
