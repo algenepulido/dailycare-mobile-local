@@ -41,8 +41,17 @@ cp -r "$HERE/../../docs/architecture" "$HERE/architecture"
 # the command, so one image serves all of them - and when it did not, the reset and seed
 # jobs ended up pinned to one-off tags built by hand, which is how a job comes to be
 # running a copy of the model nobody can name.
-cp "$HERE"/*-entrypoint.sh "$HERE/entrypoint.sh" "$HERE/architecture/"
+cp "$HERE"/*-entrypoint.sh "$HERE/entrypoint.sh" "$HERE/connect.sh" "$HERE/architecture/"
 trap 'rm -rf "$HERE/architecture"' EXIT
+
+# Everything an entrypoint sources has to be in the image, and finding that out at run
+# time means a job that fails five minutes after somebody started it. Twice now something
+# was left out: the entrypoints themselves, and then connect.sh.
+for needed in "$HERE"/*-entrypoint.sh "$HERE/entrypoint.sh" "$HERE/connect.sh"; do
+  b="$(basename "$needed")"
+  [ -f "$HERE/architecture/$b" ] || {
+    echo "$b is not in the build context. The cp above missed it." >&2; exit 1; }
+done
 
 docker build -t "$IMAGE" "$HERE"
 docker push "$IMAGE"

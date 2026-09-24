@@ -12,7 +12,7 @@
 # instance is a managed one. Nobody gets a superuser there, and a superuser bypasses every
 # policy under test - which has already made 193 checks pass here for the wrong reason once.
 set -uo pipefail
-export PGHOST="/cloudsql/${INSTANCE_CONNECTION_NAME}" PGUSER="$DB_USER"
+. "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
 until psql -d postgres -c 'SELECT 1' >/dev/null 2>&1; do sleep 2; done
 
 echo "connected to ${INSTANCE_CONNECTION_NAME} as $(psql -At -d postgres -c 'SELECT current_user')"

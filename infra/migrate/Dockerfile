@@ -14,6 +14,14 @@ FROM postgres:14-bookworm
 # The same files verify.sh runs its checks against, applied by the same migrate.sh.
 # Nothing is rebuilt for the occasion - a container that applies a different copy of the
 # model is the thing this is supposed to prevent.
+# curl, for one thing: fetching the OAuth token that Cloud SQL's IAM authentication puts
+# where the password goes. bash can speak HTTP to the metadata server through /dev/tcp and
+# the base image has it, but hand-rolled request framing and response parsing on the path
+# that fetches a credential is the kind of cleverness that is fine until it is not.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY architecture /model
 
 # psql, createdb and bash are all in the base image. Nothing else is needed, and a smaller

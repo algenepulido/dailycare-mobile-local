@@ -15,7 +15,7 @@ set -euo pipefail
 : "${WITH_ROLES:=0}"
 
 # Cloud Run mounts the Cloud SQL socket here when the instance is attached to the job.
-export PGHOST="/cloudsql/${INSTANCE_CONNECTION_NAME}"
+. "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
 export PGUSER="$DB_USER"
 export PGDATABASE="$DB_NAME"
 # PGPASSWORD comes from a secret the job mounts, or is absent for IAM authentication.

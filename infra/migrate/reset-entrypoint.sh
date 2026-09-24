@@ -8,8 +8,7 @@
 #
 # Not for staging and not for production. It drops the schema.
 set -euo pipefail
-export PGHOST="/cloudsql/${INSTANCE_CONNECTION_NAME}" PGUSER="$DB_USER" PGDATABASE="$DB_NAME"
-until psql -c 'SELECT 1' >/dev/null 2>&1; do sleep 2; done
+. "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
 
 if [ "${GCP_ENV:-}" != "dev" ]; then
   echo "refusing: this drops the schema and is for dev only, not ${GCP_ENV:-unset}" >&2

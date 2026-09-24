@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Grants each Cloud SQL IAM user the model role it corresponds to. Runs once per instance.
 set -euo pipefail
-export PGHOST="/cloudsql/${INSTANCE_CONNECTION_NAME}" PGUSER="$DB_USER" PGDATABASE="$DB_NAME"
-until psql -c 'SELECT 1' >/dev/null 2>&1; do sleep 2; done
+. "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
 psql -v ON_ERROR_STOP=1 \
   -c "SET dailycare.project = '${GCP_PROJECT}'; SET dailycare.env = '${GCP_ENV}';" \
   -f /model/cloudsql-iam.sql

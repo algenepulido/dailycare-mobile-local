@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PGHOST="/cloudsql/${INSTANCE_CONNECTION_NAME}" PGUSER="$DB_USER" PGDATABASE="$DB_NAME"
-until psql -c 'SELECT 1' >/dev/null 2>&1; do sleep 2; done
+. "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
 # FORCE row-level security applies to the table owner too, which is the point of it - and
 # on Cloud SQL the postgres user is not a superuser, so it is subject to the policies like
 # anybody else. Seeding is not something the policies have a story for: there is no session

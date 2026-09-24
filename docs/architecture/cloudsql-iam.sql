@@ -60,3 +60,50 @@ BEGIN
     RAISE NOTICE 'granted % to %', pairs[i][2], iam_user;
   END LOOP;
 END $$;
+
+
+-- The migration identity.
+--
+-- Separate from the loop above because it is not one of the four the running system
+-- connects as. Those four read and write rows under the policies; this one owns the
+-- schema and is the only thing that changes it, and the whole reason it exists is that
+-- those two jobs were the same account holding the same superuser password.
+DO $$
+DECLARE
+  project text := current_setting('dailycare.project', true);
+  env     text := current_setting('dailycare.env', true);
+  u       text;
+BEGIN
+  IF project IS NULL OR env IS NULL THEN
+    RAISE EXCEPTION 'set dailycare.project and dailycare.env first';
+  END IF;
+  u := format('dc-%s-migrate@%s.iam', env, project);
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = u) THEN
+    RAISE EXCEPTION 'no database user %. Add the service account to the instance first.', u;
+  END IF;
+
+  IF NOT pg_has_role(u, 'dailycare_owner', 'MEMBER') THEN
+    EXECUTE format('GRANT dailycare_owner TO %I', u);
+    RAISE NOTICE 'granted dailycare_owner to %', u;
+  END IF;
+
+  -- Every session starts as the owner, so whatever a migration or a reset creates belongs
+  -- to the role rather than to the login. This is the line that makes a reset renew the
+  -- ownership instead of undoing it - without it, the first reset after an ownership
+  -- handover puts every table back on whoever ran it, which is what happened on this
+  -- instance on 23 September, twenty minutes after the handover.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole
+    WHERE r.rolname = u AND 'role=dailycare_owner' = ANY (s.setconfig)) THEN
+    EXECUTE format('ALTER ROLE %I SET role = ''dailycare_owner''', u);
+    RAISE NOTICE '% now starts every session as dailycare_owner', u;
+  END IF;
+
+  -- verify.sh builds a database per suite. CREATEDB is not inherited through membership
+  -- and is checked against the current role, which after the line above is the owner.
+  IF NOT (SELECT rolcreatedb FROM pg_roles WHERE rolname = 'dailycare_owner') THEN
+    ALTER ROLE dailycare_owner CREATEDB;
+    RAISE NOTICE 'dailycare_owner may create databases';
+  END IF;
+END $$;

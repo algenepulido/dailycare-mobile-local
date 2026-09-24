@@ -6,8 +6,7 @@
 # turned out to need looking at instead: the seed's row-security drift was invisible for a
 # day because nothing ever asked the deployed database what it thought.
 set -euo pipefail
-export PGHOST="/cloudsql/${INSTANCE_CONNECTION_NAME}" PGUSER="$DB_USER" PGDATABASE="$DB_NAME"
-until psql -c 'SELECT 1' >/dev/null 2>&1; do sleep 2; done
+. "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
 
 echo "── who is here"
 psql -c "SELECT email, display_name, password_hash IS NOT NULL AS has_password,
