@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/connect.sh"
+
+# Not production. Ever.
+#
+# This had no guard at all, which meant the one job that writes Cedar House and a resident
+# called Cathy would have run against production and said nothing. reset refuses outside
+# dev because it drops the schema; this refuses outside dev and staging because of what it
+# writes.
+#
+# Staging is deliberately included, and that is a reading of two instructions that collide
+# on their face. Inktree asked to "keep reset and seed dev-only"; Milestone 2 asks for
+# "synthetic data only outside production, enforced rather than agreed", which puts
+# synthetic data in staging and makes this guard the enforcement. A seed that cannot reach
+# staging means staging can never be shown working, which is the thing that was asked for.
+#
+# Either way this is strictly more protection than before, because before there was none.
+case "${GCP_ENV:-}" in
+  dev|stg|staging) ;;
+  *) echo "refusing: this writes made-up residents and is for dev and staging only." >&2
+     echo "GCP_ENV is '${GCP_ENV:-unset}'. Production data does not come from here." >&2
+     exit 1 ;;
+esac
 # FORCE row-level security applies to the table owner too, which is the point of it - and
 # on Cloud SQL the postgres user is not a superuser, so it is subject to the policies like
 # anybody else. Seeding is not something the policies have a story for: there is no session
