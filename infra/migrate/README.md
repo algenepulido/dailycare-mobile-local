@@ -58,3 +58,46 @@ environment, which is why `bootstrap` reads both. Flags win when it is run by ha
 It connects as `postgres` through the `seed_pw` secret, like the migration jobs do. That
 is the credential path Trevor is replacing with a dedicated migration identity; nothing
 here removes it.
+
+## The postgres password, and why there isn't one
+
+After the cutover nothing in normal operation needs it. The five jobs, the API and
+bootstrap all authenticate as the service account they run as; Cloud SQL's IAM
+authentication puts a short-lived token where the password goes, and there is nothing to
+store, rotate, or leave in a secret nobody remembers creating.
+
+Two things still need it, and neither is normal operation:
+
+**iam-grant** runs `cloudsql-iam.sql`, which grants each IAM database user its model role.
+That needs `CREATEROLE`, which the migration login deliberately does not have — on
+PostgreSQL 14 a `CREATEROLE` role may set any non-superuser role's password, which would
+make the migration identity a route to every other identity in the cluster.
+
+**handover** moves the schema to `dailycare_owner`. Once per instance, and only the
+current owner can do it.
+
+Both are per-instance setup rather than something that runs again, so they are not left
+standing wired to a credential. When a new instance is built, or a service account is
+added to an existing one, recreate them:
+
+    # A password that exists for one run.
+    gcloud sql users set-password postgres --instance=dc-<env>-pg --prompt-for-password
+    printf '%s' "<that password>" | gcloud secrets create <env>_bootstrap_pw --data-file=-
+    gcloud secrets add-iam-policy-binding <env>_bootstrap_pw \
+      --member=serviceAccount:dc-<env>-api@<project>.iam.gserviceaccount.com \
+      --role=roles/secretmanager.secretAccessor
+
+    # Then the job, from this directory's image, with --command pointing at the
+    # entrypoint you need. See the two gcloud run jobs create lines in git history for
+    # dc-dev-iam-grant and dc-dev-handover.
+
+    # And afterwards, both of these:
+    gcloud secrets delete <env>_bootstrap_pw
+    gcloud sql users set-password postgres --instance=dc-<env>-pg --prompt-for-password
+
+The last line is the point. The password is rotated to a value nobody keeps, so the
+credential does not exist between the moments somebody deliberately creates it.
+
+A job left wired to a secret that has been deleted goes into an error state and stays
+there quietly: dc-dev-iam-grant sat like that for a day, and the refusal only surfaced
+when something tried to run it. That is why these are removed rather than disabled.
