@@ -55,9 +55,9 @@ stored — so if it is lost, the answer is another invitation rather than a look
 A job's command line is fixed when the job is created and `execute` can only override the
 environment, which is why `bootstrap` reads both. Flags win when it is run by hand.
 
-It connects as `postgres` through the `seed_pw` secret, like the migration jobs do. That
-is the credential path Trevor is replacing with a dedicated migration identity; nothing
-here removes it.
+It connects as the migration identity, like every other job here, and holds no password:
+the token comes from the service account the job runs as. It creates the account with no
+`password_hash` at all, so the invitation is the only way in until somebody accepts it.
 
 ## The postgres password, and why there isn't one
 
