@@ -50,14 +50,25 @@ BEGIN
       RAISE EXCEPTION 'no database user %. Add the service account to the instance first.', iam_user;
     END IF;
 
-    EXECUTE format('GRANT %I TO %I', pairs[i][2], iam_user);
+    IF NOT pg_has_role(iam_user, pairs[i][2], 'MEMBER') THEN
+      EXECUTE format('GRANT %I TO %I', pairs[i][2], iam_user);
+      RAISE NOTICE 'granted % to %', pairs[i][2], iam_user;
+    END IF;
 
     -- Inherited rather than assumed with SET ROLE. A connection that has to remember to
     -- become somebody is a connection that will one day forget, and the forgetting looks
     -- like a policy refusing a caregiver rather than like a bug.
-    EXECUTE format('ALTER ROLE %I INHERIT', iam_user);
-
-    RAISE NOTICE 'granted % to %', pairs[i][2], iam_user;
+    --
+    -- Guarded, because ALTER ROLE needs CREATEROLE and the migration login does not have
+    -- it - deliberately: on PostgreSQL 14 a CREATEROLE role may set any non-superuser
+    -- role's password, which would make this identity a route to every other one. So on a
+    -- second run, by the login rather than by the administrator, this has to not execute
+    -- rather than fail. It ran unguarded and took a whole reset down with it after the
+    -- model had already applied.
+    IF NOT (SELECT rolinherit FROM pg_roles WHERE rolname = iam_user) THEN
+      EXECUTE format('ALTER ROLE %I INHERIT', iam_user);
+      RAISE NOTICE '% now inherits', iam_user;
+    END IF;
   END LOOP;
 END $$;
 

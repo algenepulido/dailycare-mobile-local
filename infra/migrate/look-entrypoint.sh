@@ -42,7 +42,14 @@ echo "── anything the model does not declare"
 psql -c "SELECT rolname FROM pg_roles
          WHERE rolname LIKE 'dailycare%'
            AND rolname NOT IN ('dailycare_app','dailycare_retention',
-                               'dailycare_integration','dailycare_backup')"
+                               'dailycare_integration','dailycare_backup',
+                               'dailycare_owner')"
+
+echo "── and the two that decide whether a reset renews ownership or undoes it"
+psql -c "SELECT r.rolname AS login, s.setconfig AS starts_every_session_with
+         FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole
+         WHERE r.rolname LIKE '%migrate%'"
+psql -c "SELECT rolname, rolcreatedb FROM pg_roles WHERE rolname = 'dailycare_owner'"
 
 echo "── migrations applied"
 psql -c "SELECT count(*) AS files, max(applied_at) AS most_recent FROM schema_migrations"
