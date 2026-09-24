@@ -21,7 +21,12 @@ INSTANCE="$(terraform output -raw instance_connection_name)"
 # directory. They are the same for dev and they are not for staging, whose resources are
 # all dc-stg-*: taking the directory name asked for dc-staging-docker and got a repository
 # that does not exist.
-ENV_SHORT="$(terraform output -raw environment 2>/dev/null || echo "$ENVIRONMENT")"
+ENV_SHORT="$(terraform output -raw environment 2>/dev/null || true)"
+[ -n "$ENV_SHORT" ] || {
+  echo "terraform has no 'environment' output in this state." >&2
+  echo "Run terraform apply in infra/$ENVIRONMENT first - the output exists in the" >&2
+  echo "configuration and reaches the state only when it is applied." >&2
+  exit 1; }
 PROJECT="${INSTANCE%%:*}"
 REGION="${INSTANCE#*:}"; REGION="${REGION%%:*}"
 cd "$HERE"

@@ -30,7 +30,12 @@ REGION="${INSTANCE#*:}"; REGION="${REGION%%:*}"
 # where everything is dc-stg-*: four lines below took the directory name and would have
 # looked for dc-staging-docker, dc-staging-api and dc-staging-bootstrap, none of which
 # exist.
-ENV_SHORT="$(terraform output -raw environment 2>/dev/null || echo "$ENVIRONMENT")"
+ENV_SHORT="$(terraform output -raw environment 2>/dev/null || true)"
+[ -n "$ENV_SHORT" ] || {
+  echo "terraform has no 'environment' output in this state." >&2
+  echo "Run terraform apply in infra/$ENVIRONMENT first - the output exists in the" >&2
+  echo "configuration and reaches the state only when it is applied." >&2
+  exit 1; }
 cd "$HERE"
 
 if [ -n "$(git -C "$HERE/.." status --porcelain)" ]; then
