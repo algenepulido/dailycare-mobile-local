@@ -35,6 +35,30 @@ type Caller struct {
 
 var ErrNoCaller = errors.New("db: a query was attempted without a caller")
 
+// Authenticate puts a token where the password goes, when the user is an IAM one and no
+// password was given.
+//
+// Open uses it for the pool the API serves from. bootstrap uses it for a single
+// connection, and it has to be the same code: an administrative command that authenticates
+// differently from the thing it is administering is a second way in, and the second way is
+// the one nobody tests.
+func Authenticate(ctx context.Context, cfg *pgx.ConnConfig) error {
+	if cfg.Password != "" || !strings.HasSuffix(cfg.User, ".iam") {
+		return nil
+	}
+	source, err := google.DefaultTokenSource(ctx,
+		"https://www.googleapis.com/auth/sqlservice.login")
+	if err != nil {
+		return fmt.Errorf("db: no identity to authenticate as: %w", err)
+	}
+	token, err := source.Token()
+	if err != nil {
+		return fmt.Errorf("db: getting a database token: %w", err)
+	}
+	cfg.Password = token.AccessToken
+	return nil
+}
+
 func Open(ctx context.Context, dsn string) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -48,19 +72,12 @@ func Open(ctx context.Context, dsn string) (*DB, error) {
 	// The token is fetched per connection rather than once. They last an hour and the pool
 	// outlives that, so a token read at start-up would work until the first idle stretch
 	// and then fail in a way that looks like the database going away.
+	// Per connection rather than once here, because a token lasts an hour and the pool
+	// outlives that: reading one at start-up works until the first idle stretch and then
+	// fails in a way that looks like the database going away.
 	if cfg.ConnConfig.Password == "" && strings.HasSuffix(cfg.ConnConfig.User, ".iam") {
-		source, err := google.DefaultTokenSource(ctx,
-			"https://www.googleapis.com/auth/sqlservice.login")
-		if err != nil {
-			return nil, fmt.Errorf("db: no identity to authenticate as: %w", err)
-		}
 		cfg.BeforeConnect = func(ctx context.Context, c *pgx.ConnConfig) error {
-			token, err := source.Token()
-			if err != nil {
-				return fmt.Errorf("db: getting a database token: %w", err)
-			}
-			c.Password = token.AccessToken
-			return nil
+			return Authenticate(ctx, c)
 		}
 	}
 	// Small. Cloud SQL counts connections, and a caregiver app's traffic is a few requests

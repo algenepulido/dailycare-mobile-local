@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/dailycare-hq/dailycare-api/internal/auth"
+	"github.com/dailycare-hq/dailycare-api/internal/db"
 )
 
 type residentList []string
@@ -103,7 +104,7 @@ func bootstrap(ctx context.Context, args []string) error {
 	if dsn == "" {
 		return errors.New("DATABASE_URL is not set")
 	}
-	conn, err := pgx.Connect(ctx, dsn)
+	conn, err := connect(ctx, dsn)
 	if err != nil {
 		return err
 	}
@@ -231,7 +232,7 @@ func issueReset(ctx context.Context, email string) error {
 	if dsn == "" {
 		return errors.New("DATABASE_URL is not set")
 	}
-	conn, err := pgx.Connect(ctx, dsn)
+	conn, err := connect(ctx, dsn)
 	if err != nil {
 		return err
 	}
@@ -269,4 +270,20 @@ func issueReset(ctx context.Context, email string) error {
 		"session they have open now will end when they use it:\n\n", email)
 	fmt.Println(link)
 	return nil
+}
+
+// One connection, authenticated the way the API authenticates.
+//
+// This runs as a Cloud Run job with no password when the migration identity is in play,
+// and with one while the old path is still there. db.Authenticate decides by looking at
+// what it was given rather than by a flag.
+func connect(ctx context.Context, dsn string) (*pgx.Conn, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: %w", err)
+	}
+	if err := db.Authenticate(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return pgx.ConnectConfig(ctx, cfg)
 }
