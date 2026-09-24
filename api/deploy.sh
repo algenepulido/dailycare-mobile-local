@@ -25,6 +25,12 @@ cd "$HERE/../infra/$ENVIRONMENT"
 INSTANCE="$(terraform output -raw instance_connection_name)"
 PROJECT="${INSTANCE%%:*}"
 REGION="${INSTANCE#*:}"; REGION="${REGION%%:*}"
+# The short name the resources carry, read from Terraform rather than taken from the
+# directory this script was pointed at. They match for dev and they do not for staging,
+# where everything is dc-stg-*: four lines below took the directory name and would have
+# looked for dc-staging-docker, dc-staging-api and dc-staging-bootstrap, none of which
+# exist.
+ENV_SHORT="$(terraform output -raw environment 2>/dev/null || echo "$ENVIRONMENT")"
 cd "$HERE"
 
 if [ -n "$(git -C "$HERE/.." status --porcelain)" ]; then
@@ -34,8 +40,8 @@ if [ -n "$(git -C "$HERE/.." status --porcelain)" ]; then
 fi
 
 TAG="$(git -C "$HERE/.." rev-parse --short HEAD)"
-IMAGE="$REGION-docker.pkg.dev/$PROJECT/dc-$ENVIRONMENT-docker/api:$TAG"
-SERVICE="dc-$ENVIRONMENT-api"
+IMAGE="$REGION-docker.pkg.dev/$PROJECT/dc-$ENV_SHORT-docker/api:$TAG"
+SERVICE="dc-$ENV_SHORT-api"
 
 docker build -t "$IMAGE" "$HERE"
 docker push "$IMAGE"
@@ -50,7 +56,7 @@ gcloud run services update "$SERVICE" \
 # ran with an old build, could not see the environment variables the newer one reads, and
 # reported that its arguments were missing. The job and the service are the same program
 # and there is no version of this where they should differ.
-for job in "dc-$ENVIRONMENT-bootstrap"; do
+for job in "dc-$ENV_SHORT-bootstrap"; do
   if gcloud run jobs describe "$job" --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
     gcloud run jobs update "$job" --image "$IMAGE" \
       --project "$PROJECT" --region "$REGION" --quiet >/dev/null

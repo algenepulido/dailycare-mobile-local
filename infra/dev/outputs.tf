@@ -11,3 +11,10 @@ output "migrate_note" {
   description = "The model still has to be applied. The instance is empty until it is."
   value       = "docs/architecture/migrate.sh -d dailycare --with-roles, through the proxy"
 }
+
+# The short name the resources actually carry, which is not always the directory's.
+# infra/staging holds dc-stg-*, and a script that took the directory name got
+# dc-staging-docker and a repository that does not exist.
+output "environment" {
+  value = var.environment
+}

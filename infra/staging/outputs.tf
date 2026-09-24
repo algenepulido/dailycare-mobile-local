@@ -11,3 +11,9 @@ output "migrate_note" {
   description = "The model still has to be applied. The instance is empty until it is."
   value       = "docs/architecture/migrate.sh -d dailycare --with-roles, through the proxy"
 }
+
+# The short name the resources actually carry, which is not always the directory's.
+# This directory is "staging" and everything in it is dc-stg-*.
+output "environment" {
+  value = var.environment
+}

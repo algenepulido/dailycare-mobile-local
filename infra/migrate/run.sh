@@ -17,7 +17,13 @@ VERIFY=0
 
 cd "$HERE/$ENVIRONMENT" 2>/dev/null || cd "$HERE/../$ENVIRONMENT"
 INSTANCE="$(terraform output -raw instance_connection_name)"
+# The short name the resources carry, read from Terraform rather than taken from the
+# directory. They are the same for dev and they are not for staging, whose resources are
+# all dc-stg-*: taking the directory name asked for dc-staging-docker and got a repository
+# that does not exist.
+ENV_SHORT="$(terraform output -raw environment 2>/dev/null || echo "$ENVIRONMENT")"
 PROJECT="${INSTANCE%%:*}"
+REGION="${INSTANCE#*:}"; REGION="${REGION%%:*}"
 cd "$HERE"
 
 # The same guard deploy.sh has, and this did not. An image tagged with a commit has to
@@ -31,7 +37,7 @@ if [ -n "$(git -C "$HERE/../.." status --porcelain)" ]; then
 fi
 
 TAG="$(git -C "$HERE/../.." rev-parse --short HEAD)"
-IMAGE="us-central1-docker.pkg.dev/$PROJECT/dc-$ENVIRONMENT-docker/migrate:$TAG"
+IMAGE="$REGION-docker.pkg.dev/$PROJECT/dc-$ENV_SHORT-docker/migrate:$TAG"
 
 # The model as it is in the working tree, not a copy kept beside this file. A container
 # that applies a different copy is the thing all of this is meant to prevent.
