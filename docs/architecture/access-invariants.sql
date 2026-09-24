@@ -855,6 +855,27 @@ SELECT expect_rows('and reaches no policy-protected table through a view', 0,
 SELECT expect_rows('row security is forced on exactly the tables that declare it', 0,
   'SELECT * FROM rls_drift_at_start');
 
+-- PostgreSQL 14 grants CREATE on schema public to PUBLIC at initdb, so until
+-- schema-privileges.sql ran, every role in the cluster could create objects in the schema
+-- the application reads. Tested before it existed: as dailycare_app, CREATE TABLE in
+-- public was accepted and the table came back owned by dailycare_app - a place to put
+-- rows where no policy, no column grant and no audit trigger in this directory applies.
+SELECT expect_rows('PUBLIC cannot create in the schema the application reads', 0,
+  'SELECT * FROM schema_privilege_drift');
+
+SET ROLE dailycare_app;
+SELECT expect_refused('the application creating a table of its own', $$
+  CREATE TABLE somewhere_outside_the_model (id int, note text)
+$$);
+SELECT expect_refused('or a function, which would run as whoever called it', $$
+  CREATE FUNCTION somewhere_outside_the_model() RETURNS int LANGUAGE sql AS 'SELECT 1'
+$$);
+RESET ROLE;
+
+-- It reads what it is granted, which is the half that has to keep working.
+SELECT expect('and it can still read the schema it was granted USAGE on',
+  has_schema_privilege('dailycare_app', 'public', 'USAGE'));
+
 
 SELECT expect('the baseline is not empty, which would make all four of those cheap',
   (SELECT count(*) >= 30 FROM app_privileges));

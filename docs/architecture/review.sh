@@ -80,6 +80,22 @@ docker exec -u postgres "$NAME" psql -q -c \
   "CREATE ROLE reviewer LOGIN CREATEDB CREATEROLE PASSWORD 'review';" >/dev/null \
   || { echo "could not create the reviewer role" >&2; exit 1; }
 
+# Every suite database is created from template1, so shaping template1 once is what makes
+# fourteen of them come out like a deployed instance rather than like an initdb default.
+#
+# Two things, and the second is the point. The reviewer role owns the schema, so
+# schema-privileges.sql can revoke on it - only an owner may. And PUBLIC loses CREATE,
+# which PostgreSQL 14 grants at initdb and which let dailycare_app create a table in the
+# schema it reads: tested, accepted, and the table came back owned by the application.
+#
+# Done here as postgres rather than in the model, because a model file that needed to own
+# the schema would refuse to apply on any database where it did not - which is every
+# database until somebody had already done this.
+docker exec -u postgres "$NAME" psql -q -d template1 \
+  -c "ALTER SCHEMA public OWNER TO reviewer;" \
+  -c "REVOKE CREATE ON SCHEMA public FROM PUBLIC;" >/dev/null \
+  || { echo "could not prepare template1" >&2; exit 1; }
+
 run() {
   docker exec -u postgres -w /sql \
     -e PGUSER=reviewer -e PGPASSWORD=review -e PGHOST=127.0.0.1 "$NAME" "$@"

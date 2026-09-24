@@ -45,8 +45,23 @@ SELECT expect('the positions run from one with no gaps',
 SELECT expect('no file went in twice',
   (SELECT count(*) = count(DISTINCT filename) FROM schema_migrations));
 
+-- Named rather than derived, because the suite cannot read model.list and because which
+-- file is last is a decision rather than an accident: schema-privileges.sql revokes CREATE
+-- on the schema from PUBLIC, and every file before it has been relying on having it.
+--
+-- So this going red means one of two things. Either a file was appended after it, in which
+-- case whoever did that has to say why their file may run without CREATE - or the order
+-- changed and the revoke is no longer last, which is the thing that would make the
+-- application able to create a table in the schema it reads.
 SELECT expect('the last thing applied is the last thing in the list',
-  (SELECT filename = 'grants.sql' FROM schema_migrations ORDER BY position DESC LIMIT 1));
+  (SELECT filename = 'schema-privileges.sql'
+     FROM schema_migrations ORDER BY position DESC LIMIT 1));
+
+SELECT expect('and the grants it narrows went in before it',
+  (SELECT p_grants < p_priv FROM
+     (SELECT max(position) FILTER (WHERE filename = 'grants.sql')            AS p_grants,
+             max(position) FILTER (WHERE filename = 'schema-privileges.sql') AS p_priv
+        FROM schema_migrations) x));
 
 SELECT expect('every row carries the digest of the file as applied',
   (SELECT bool_and(sha256 ~ '^[0-9a-f]{64}$') FROM schema_migrations));

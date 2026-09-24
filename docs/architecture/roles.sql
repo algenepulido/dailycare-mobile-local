@@ -46,6 +46,44 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- The role that owns the schema and everything in it.
+  --
+  -- None of the four above owns anything - app_owns_something is the check that says so -
+  -- and until this existed the owner was whoever applied the model. On a managed instance
+  -- that is the built-in administrator, which meant its password had to exist somewhere
+  -- for every migration, and every job that ran one held it.
+  --
+  -- NOLOGIN, and deliberately no CREATEROLE. On PostgreSQL 14 a CREATEROLE role may alter
+  -- any non-superuser role including setting its password, so giving it here would make
+  -- the migration identity a route to every other identity in the cluster.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dailycare_owner') THEN
+    BEGIN
+      CREATE ROLE dailycare_owner NOLOGIN;
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE EXCEPTION 'cannot create dailycare_owner'
+        USING HINT = 'CREATE ROLE dailycare_owner NOLOGIN;';
+    END;
+  END IF;
+
+  -- WITH ADMIN OPTION so the owner can run cloudsql-iam.sql, which grants each application
+  -- role to the Cloud SQL IAM user that connects as it. Without it that file needs the
+  -- instance administrator every time a service account is added.
+  FOREACH r IN ARRAY wanted LOOP
+    EXECUTE format('GRANT %I TO dailycare_owner WITH ADMIN OPTION', r);
+  END LOOP;
+
+  -- So a container run, where the applying role is not dailycare_owner, still produces a
+  -- database shaped like the deployed one. A notice rather than an exception: a cluster
+  -- where this cannot be granted still gets a working suite, and schema-privileges.sql
+  -- says what it could not do.
+  IF NOT pg_has_role(current_user, 'dailycare_owner', 'MEMBER') THEN
+    BEGIN
+      EXECUTE format('GRANT dailycare_owner TO %I', current_user);
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE NOTICE 'dailycare_owner exists but could not be granted to %', current_user;
+    END;
+  END IF;
+
   -- A logical export is the one operation FORCE ROW LEVEL SECURITY breaks. pg_dump run by
   -- the owner fails on every PHI table, and run with --enable-row-security it succeeds
   -- while quietly dumping only the rows the policies let it see, which is worse. So the

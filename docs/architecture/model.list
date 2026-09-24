@@ -26,3 +26,4 @@ encryption-and-secrets.sql
 boundary.sql
 gcp-iam.sql
 grants.sql
+schema-privileges.sql
