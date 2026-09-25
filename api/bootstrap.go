@@ -69,8 +69,23 @@ func bootstrap(ctx context.Context, args []string) error {
 	fallback(email, "BOOTSTRAP_EMAIL")
 	fallback(name, "BOOTSTRAP_NAME")
 	fallback(by, "BOOTSTRAP_BY")
+	// Not fallback(). That reads the environment only when the flag is empty, and this
+	// flag has a default, so it never is - which meant BOOTSTRAP_ROLE was read by nobody
+	// and every account this job created came out a caregiver whatever it was told. A job's
+	// arguments are fixed when it is created and execute can only override the environment,
+	// so the -role flag could not reach it either: there was no way to make a care manager
+	// in a deployed environment at all. Found by running it and reading what it made.
 	if *role == "caregiver" {
-		fallback(role, "BOOTSTRAP_ROLE")
+		if v := os.Getenv("BOOTSTRAP_ROLE"); v != "" {
+			*role = v
+		}
+	}
+	// The database would refuse an unknown value anyway - facility_role is an enum - but it
+	// would refuse it after the user row was written, leaving an account with no membership.
+	switch *role {
+	case "caregiver", "care_manager":
+	default:
+		return fmt.Errorf("role %q is not one this creates: caregiver or care_manager", *role)
 	}
 	if len(residents) == 0 {
 		for _, r := range strings.Split(os.Getenv("BOOTSTRAP_RESIDENTS"), ",") {
