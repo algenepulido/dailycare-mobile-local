@@ -53,3 +53,14 @@ psql -c "SELECT rolname, rolcreatedb FROM pg_roles WHERE rolname = 'dailycare_ow
 
 echo "── migrations applied"
 psql -c "SELECT count(*) AS files, max(applied_at) AS most_recent FROM schema_migrations"
+
+echo "── the audit trail, most recent first"
+# Readable from here because dc-<env>-migrate connects as dailycare_owner, which inherits
+# dailycare_retention, whose policy on audit_events is USING (true). Measured rather than
+# assumed: with the table forced, dailycare_owner sees every row and dailycare_app sees
+# none. That the migration identity can read the whole trail is a consequence of the role
+# grant rather than a decision anybody made, and it is written down in the deferred list.
+psql -c "SELECT to_char(occurred_at, 'Mon DD HH24:MI:SS') AS at, action, actor_role,
+                left(coalesce(actor_user_id::text, 'none'), 8) AS actor
+         FROM audit_events ORDER BY occurred_at DESC LIMIT 12"
+psql -c "SELECT count(*) AS rows_in_the_trail FROM audit_events"
