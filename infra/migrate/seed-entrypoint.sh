@@ -53,6 +53,14 @@ ON CONFLICT (facility_id, user_id, role) DO NOTHING;
 INSERT INTO residents (id, facility_id, display_name) VALUES
  ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111','Cathy')
 ON CONFLICT (id) DO NOTHING;
+-- A second resident, and deliberately nobody's assignment. Until this existed the
+-- building held one resident and the one caregiver was assigned to them, so "a care
+-- manager sees every resident rather than only their own" could not be shown to be true -
+-- both roles would have returned the same single row and the check would have passed
+-- without the policy doing anything. Walter is the difference between the two answers.
+INSERT INTO residents (id, facility_id, display_name) VALUES
+ ('55555555-5555-5555-5555-555555555555','11111111-1111-1111-1111-111111111111','Walter')
+ON CONFLICT (id) DO NOTHING;
 -- The membership this refers to, whichever uuid it has. ON CONFLICT DO NOTHING above
 -- keeps whatever row is already there, so a second run with a fresh id leaves the new one
 -- unwritten and a hardcoded reference to it points at nothing.
