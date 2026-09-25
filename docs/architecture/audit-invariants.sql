@@ -160,6 +160,53 @@ SELECT expect('the original is still readable, which is the point of amending by
      AND superseded_at IS NOT NULL));
 
 
+-- ── the trail while the table is forced ────────────────────────────────────────
+--
+-- checks_begin() lifted FORCE at the top of this file, so every check above ran with the
+-- owner exempt from the policies on audit_events. That is right for the checks above and
+-- wrong for this one: the question here is what happens when the owner is *not* exempt,
+-- which is production. Asking it with FORCE lifted would answer yes no matter what the
+-- policies said - the check would pass because the condition it tests was switched off.
+--
+-- So force it for the length of the check and put it back. audit_phi_write() is SECURITY
+-- DEFINER and runs as the owner; under FORCE it needs a policy that lets the row land, and
+-- if there is none the trail stops being written the moment the table is hardened.
+
+\echo ''
+\echo '── the trail is still written when the owner is subject to its own policies'
+
+-- Counted while the table is readable, because FORCE blinds this session to the trail as
+-- well as gating writes to it - the read policy is a care manager's and this session is
+-- not one. A count taken with FORCE on reads zero whether or not the row was written, so
+-- comparing two of those compares nothing. FORCE is on for the write, which is what is
+-- under test, and off for the two measurements around it.
+SELECT count(*) AS before_forced FROM audit_events \gset
+
+ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note, filed_by)
+VALUES ('cd000000-0000-0000-0000-000000000003',
+        'f1000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000001',
+        '2026-09-15', 'calm', 'good', 'slept_well', '',
+        'a0000000-0000-0000-0000-00000000000a');
+
+-- Back to how checks_begin() left it, so this session can see what landed and so the
+-- checks after this one find the state they expect.
+ALTER TABLE audit_events NO FORCE ROW LEVEL SECURITY;
+
+SELECT expect('forcing the table does not stop the definer writing the trail',
+  (SELECT count(*) > :before_forced FROM audit_events));
+
+SELECT expect('and the row that landed is the one the write should have produced',
+  EXISTS (SELECT 1 FROM audit_events
+          WHERE action = 'care_days.insert'
+            AND subject_id = 'cd000000-0000-0000-0000-000000000003'));
+
+SELECT expect('audit_events is declared as a table that must be forced',
+  EXISTS (SELECT 1 FROM forced_row_security WHERE table_name = 'audit_events'));
+
+
 -- ── an update that changed nothing ─────────────────────────────────────────────
 
 \echo ''
@@ -245,7 +292,28 @@ SELECT expect_refused('deleting an audit row', $$
   DELETE FROM audit_events WHERE action = 'residents.insert'
 $$);
 
+-- And cannot read somebody else's, which has to be asked as the application rather than as
+-- the login running this file.
+--
+-- roles.sql grants all four application roles to whoever applies the model, so that login
+-- is a member of dailycare_retention - and audit_events_retention is FOR ALL TO
+-- dailycare_retention USING (true). Asked as that login, every row of the trail is visible
+-- no matter what the care manager policy says. A check written that way reports on the
+-- retention role while reading as though it reports on the owner, and passes whether or not
+-- the policy it names does anything. One did: it was written while forcing this table and
+-- it was measuring nothing.
+--
+-- SET ROLE is what makes the question honest, because the memberships do not follow.
+SELECT expect('the session identity here is a caregiver, so the next check means something',
+  NOT app_is_care_manager('f1000000-0000-0000-0000-000000000001'));
+
+SELECT expect('a caregiver reads none of the trail, though the application may select from it',
+  (SELECT count(*) = 0 FROM audit_events));
+
 RESET ROLE;
+
+SELECT expect('and the trail was not empty, which is what makes the line above a result',
+  (SELECT count(*) > 0 FROM audit_events));
 
 \echo ''
 \echo '── the trail as it stands'

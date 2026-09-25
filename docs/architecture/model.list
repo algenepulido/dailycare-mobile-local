@@ -17,6 +17,7 @@ emergency-and-program.sql
 data-classification.sql
 access-matrix.sql
 audit-logging.sql
+care-history.sql
 retention.sql
 environments.sql
 vendors.sql
