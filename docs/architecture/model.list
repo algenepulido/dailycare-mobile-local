@@ -17,7 +17,6 @@ emergency-and-program.sql
 data-classification.sql
 access-matrix.sql
 audit-logging.sql
-care-history.sql
 retention.sql
 environments.sql
 vendors.sql
@@ -28,3 +27,14 @@ boundary.sql
 gcp-iam.sql
 grants.sql
 schema-privileges.sql
+
+# Appended, not inserted. schema_migrations.position is the primary key and a database that
+# has already run the model holds positions 1..20, so a file slipped into the middle of this
+# list claims a position another file is recorded under and the migration fails on a
+# duplicate key. Forward changes go at the end.
+#
+# After schema-privileges.sql, which the migration checks name as the last thing applied.
+# That check asks whoever appends past it to say why their file may run without CREATE on
+# the schema: this one alters a table it already owns and creates a policy, neither of which
+# needs it.
+care-history.sql

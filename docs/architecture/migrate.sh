@@ -123,6 +123,19 @@ for f in "${WANTED[@]}"; do
     exit 1
   fi
 
+  # position is the primary key of schema_migrations, so a file new to this database whose
+  # place in the list is already held by another file collides on insert. Raw, that reads
+  # as a duplicate key five minutes into a job and says nothing about the cause - which is
+  # that a forward change was inserted into the middle of model.list instead of appended.
+  # A database that has already run the model holds every position up to its own length.
+  holder="$(psql -At -d "$DB" -c "SELECT filename FROM schema_migrations WHERE position = $pos" 2>/dev/null)"
+  if [ -n "$holder" ] && [ "$holder" != "$f" ]; then
+    echo "$f would go in at position $pos, and $holder is already recorded there." >&2
+    echo "A file keeps the position it was first applied under, so adding one to the" >&2
+    echo "middle of model.list collides with whatever followed it. Append it instead." >&2
+    exit 1
+  fi
+
   # The file and its record go in together, so a failure leaves neither.
   { cat "$HERE/$f"
     printf "\nINSERT INTO schema_migrations (position, filename, sha256) VALUES (%d, '%s', '%s');\n" \
