@@ -206,7 +206,17 @@ func bootstrap(ctx context.Context, args []string) error {
 	// stdout, so it can be piped somewhere without the commentary and so a log that
 	// captures one stream does not necessarily capture both.
 	fmt.Fprintf(os.Stderr, "\n%s is %s, %s in %s\n", *name, userID, *role, *facility)
-	if len(residents) == 0 {
+	if *role == "care_manager" {
+		// A care manager is not assigned to anybody and does not need to be: the policies
+		// give them every resident in their own facility. Printed separately because the
+		// line below is written for a caregiver and is wrong here in both directions - it
+		// asks for assignments that do nothing, and it says they can see nothing when they
+		// can see the building. Measured on staging: a care manager with no assignments
+		// reads two residents, and a caregiver with no assignments reads none.
+		fmt.Fprintf(os.Stderr,
+			"As a care manager they see every resident in this facility. Assignments are\n"+
+				"for caregivers and are not needed here.\n")
+	} else if len(residents) == 0 {
 		fmt.Fprintf(os.Stderr,
 			"They can see no residents yet. Run this again with --resident to assign them,\n"+
 				"or they will sign in to an empty list and reasonably assume it is broken.\n")
