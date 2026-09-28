@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 
 import { Button, Screen, Sheet } from '@/components';
 import { RevisionsSheet } from '@/components/RevisionsSheet';
-import { fetchDayRevisions, fetchHistory } from '@/data/api';
+import { SignedOut, fetchDayRevisions, fetchHistory } from '@/data/api';
 import type { HistoryDay } from '@/data/api';
 import type { FiledSummary } from '@/data/wire';
 import { useSession } from '@/state/session';
@@ -49,7 +49,7 @@ export default function HistoryScreen() {
   const remoteId = resident?.remoteId;
 
   const [days, setDays] = useState<HistoryDay[] | null>(null);
-  const [refused, setRefused] = useState(false);
+  const [problem, setProblem] = useState<'refused' | 'signedOut' | null>(null);
   const [openDate, setOpenDate] = useState<string | null>(null);
   const [revisions, setRevisions] = useState<FiledSummary[] | null>(null);
 
@@ -60,10 +60,14 @@ export default function HistoryScreen() {
       try {
         const got = await fetchHistory(remoteId);
         if (live) setDays(got);
-      } catch {
-        // One state for every refusal. A caregiver who can tell "no such resident" from
-        // "not yours" learns something about a building they were not given.
-        if (live) setRefused(true);
+      } catch (error) {
+        // Two states, not one. Every refusal says the same thing - a caregiver who can
+        // tell "no such resident" from "not yours" learns something about a building
+        // they were not given - but a session that has ended is a third case and telling
+        // somebody their resident is unavailable when they only need to sign in again is
+        // how a working app gets reported as broken. Seen on a device: a password reset
+        // revoked the session and this screen said the record was not theirs.
+        if (live) setProblem(error instanceof SignedOut ? 'signedOut' : 'refused');
       }
     })();
     return () => {
@@ -96,7 +100,11 @@ export default function HistoryScreen() {
           about, and saying "no history" would be a claim this screen cannot support. */}
       {!remoteId ? (
         <Text style={styles.empty}>This resident is not on the server yet.</Text>
-      ) : refused ? (
+      ) : problem === 'signedOut' ? (
+        <Text style={styles.empty}>
+          Your session has ended. Sign in again to see this.
+        </Text>
+      ) : problem === 'refused' ? (
         <Text style={styles.empty}>This record is not available to you.</Text>
       ) : days === null ? (
         <View style={styles.loading}>
