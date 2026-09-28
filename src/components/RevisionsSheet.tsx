@@ -13,11 +13,26 @@ interface RevisionsSheetProps {
   /** Oldest first, the way the server returns them. The last one is what stands. */
   revisions: FiledSummary[];
   dateLabel: string;
+  /** The day being looked at, as 2026-09-25. Decides whether a stamp needs its date. */
+  careDate: string;
 }
 
-function at(iso: string): string {
+/**
+ * A time, with the date in front of it when it is not the day being looked at.
+ *
+ * Without the date this read "Filed 2:17 PM, replaced 1:19 PM" for a day filed on the
+ * Friday and corrected on the Monday - which looks like time running backwards, and a
+ * record that appears to contradict itself is worse than one that is simply long. Most
+ * corrections happen on the same day and stay short; the ones that do not say so.
+ */
+function at(iso: string, careDate: string): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const sameDay =
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` ===
+    careDate;
+  if (sameDay) return time;
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
 }
 
 function eaten(summary: FiledSummary): string {
@@ -39,7 +54,7 @@ function eaten(summary: FiledSummary): string {
  * note saying one existed - and the one that stands is marked rather than assumed to be
  * the one on top, because a list read quickly is a list read from the top.
  */
-export function RevisionsSheet({ open, onClose, revisions, dateLabel }: RevisionsSheetProps) {
+export function RevisionsSheet({ open, onClose, revisions, dateLabel, careDate }: RevisionsSheetProps) {
   const single = revisions.length === 1;
   return (
     <Sheet open={open} onClose={onClose} footer={<Button label="Done" onPress={onClose} />}>
@@ -55,9 +70,9 @@ export function RevisionsSheet({ open, onClose, revisions, dateLabel }: Revision
         return (
           <View key={`${revision.filedAt}-${i}`} style={[styles.row, stands && styles.rowStands]}>
             <View style={styles.rowHead}>
-              <Text style={styles.when}>Filed {at(revision.filedAt)}</Text>
+              <Text style={styles.when}>Filed {at(revision.filedAt, careDate)}</Text>
               <Text style={stands ? styles.badgeStands : styles.badgeReplaced}>
-                {stands ? 'This is what stands' : `Replaced ${at(revision.supersededAt!)}`}
+                {stands ? 'This is what stands' : `Replaced ${at(revision.supersededAt!, careDate)}`}
               </Text>
             </View>
             <Text style={styles.detail}>{eaten(revision)}</Text>

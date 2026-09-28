@@ -133,6 +133,7 @@ export default function HistoryScreen() {
           }}
           revisions={revisions}
           dateLabel={dayLabel(openDate)}
+          careDate={openDate}
         />
       ) : openDate ? (
         <Sheet open onClose={() => setOpenDate(null)}>
