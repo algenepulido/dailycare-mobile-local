@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -246,6 +247,20 @@ function CareReport({
         <Text style={styles.separator}>·</Text>
         <CareDateButton careDate={draft.careDate} onChange={form.selectDate} />
       </View>
+
+      {/* Only when the server knows this resident. Offering history for somebody who
+          exists on this phone and nowhere else would open a screen that can only say
+          there is nothing, which reads as a fault rather than as an answer. */}
+      {remoteId ? (
+        <Pressable
+          onPress={() => router.push('/history')}
+          accessibilityRole="button"
+          accessibilityLabel={`See ${resident.displayName}'s last three weeks`}
+          style={({ pressed }) => [styles.historyLink, pressed && styles.pressed]}
+        >
+          <Text style={styles.historyLinkText}>See the last three weeks</Text>
+        </Pressable>
+      ) : null}
 
       {filed && remoteId ? (
         <AlreadyFiled
@@ -541,6 +556,8 @@ const styles = StyleSheet.create({
   },
   avatarSmallText: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 11, color: color.ink2 },
   clientName: { fontFamily: type.chip.fontFamily, fontSize: 15, color: color.ink },
+  historyLink: { alignSelf: 'flex-start', paddingVertical: 8, marginTop: 2, marginBottom: 6 },
+  historyLinkText: { ...type.chip, color: color.clay },
   separator: { color: color.ink4 },
 
   sectionGap: { marginTop: 14 },

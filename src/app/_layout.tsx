@@ -8,9 +8,10 @@ import { SessionProvider } from '@/state/session';
 import { color, fontAssets } from '@/theme/tokens';
 
 /**
- * One screen. The names sheet and the review sheet are sheets over it, not routes, so
- * the report stays visible underneath and closing puts something down rather than
- * navigating away.
+ * Two screens. The names sheet and the review sheet are sheets over the day, not routes,
+ * so the report stays visible underneath and closing puts something down rather than
+ * navigating away. History is a route because it is somewhere you go and come back from,
+ * and because a sheet that scrolls three weeks is a screen wearing a sheet's clothes.
  */
 export default function RootLayout() {
   const [fontsReady] = useFonts(fontAssets);
@@ -31,6 +32,7 @@ export default function RootLayout() {
         <StatusBar style="dark" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.paper } }}>
           <Stack.Screen name="index" />
+          <Stack.Screen name="history" />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>

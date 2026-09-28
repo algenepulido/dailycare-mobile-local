@@ -232,6 +232,60 @@ export async function fetchDay(residentId: string, date: string): Promise<FiledS
   return fromWire(body);
 }
 
+/** One day in a resident's history: the date, and what stands on it. */
+export interface HistoryDay {
+  on: string;
+  summary: FiledSummary;
+}
+
+/**
+ * A resident's history, most recent first.
+ *
+ * Only days somebody filed. The server returns the current version of each, so a day
+ * corrected three times appears once, as it now reads - fetchDayRevisions is where the
+ * versions of one day live. Days nobody touched are absent rather than present and empty:
+ * a screen showing three weeks of blanks tells a caregiver nothing they did not know, and
+ * the gaps are the point.
+ *
+ * The range is the server's to decide when it is not given. Twenty-one days is what the
+ * screen shows; sending it from here as well would be two places to change it.
+ */
+export async function fetchHistory(residentId: string): Promise<HistoryDay[]> {
+  const body = (await authed(`/v1/residents/${residentId}/days`)) as {
+    days: FiledDay[];
+  };
+  const out: HistoryDay[] = [];
+  for (const day of body.days ?? []) {
+    const summary = fromWire(day);
+    // fromWire returns null for a day with no filedAt, which the history does not return
+    // - but a shape that cannot arrive today is still a shape to not crash on.
+    if (summary) out.push({ on: day.on.slice(0, 10), summary });
+  }
+  return out;
+}
+
+/**
+ * Every version of one day, oldest first.
+ *
+ * A day filed once comes back as a list of one, so "was this corrected" is the length
+ * rather than a flag. The last entry is the one that stands; the ones before it are what
+ * it replaced, each with the time it was superseded.
+ */
+export async function fetchDayRevisions(
+  residentId: string,
+  date: string,
+): Promise<FiledSummary[]> {
+  const body = (await authed(`/v1/residents/${residentId}/days/${date}/history`)) as {
+    revisions: FiledDay[];
+  };
+  const out: FiledSummary[] = [];
+  for (const revision of body.revisions ?? []) {
+    const summary = fromWire(revision);
+    if (summary) out.push(summary);
+  }
+  return out;
+}
+
 export async function fileDay(residentId: string, date: string, day: WireDay): Promise<string> {
   const body = (await authed(`/v1/residents/${residentId}/days/${date}`, {
     method: 'POST',

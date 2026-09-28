@@ -58,6 +58,11 @@ type CareDay struct {
 	// Set on a revision that a later one replaced. Absent on the day as it currently
 	// stands, which is how a client tells the two apart without a second field saying so.
 	SupersededAt *time.Time `json:"supersededAt,omitempty"`
+	// Whether this row replaced an earlier one - amends_id, as a boolean, because the id
+	// of the row it replaced is no use to a client that reads the chain by date. It is
+	// what lets a history mark the days that were corrected without asking for the
+	// revisions of every day on the screen.
+	Corrected bool `json:"corrected"`
 }
 
 // read runs fn after recording that the resident's data was looked at. Unexported, and the
@@ -160,7 +165,8 @@ func (s *Store) History(ctx context.Context, c db.Caller, resident uuid.UUID,
 		var err error
 		out, err = loadDays(ctx, tx, `
 			SELECT id, resident_id, care_date, mood, appetite, sleep, note,
-			       hygiene_shower, hygiene_grooming, filed_by, filed_at, superseded_at
+			       hygiene_shower, hygiene_grooming, filed_by, filed_at, superseded_at,
+			       amends_id IS NOT NULL
 			FROM care_days
 			WHERE resident_id = $1 AND care_date BETWEEN $2 AND $3
 			  AND superseded_at IS NULL
@@ -189,7 +195,8 @@ func (s *Store) Chain(ctx context.Context, c db.Caller, resident uuid.UUID,
 		var err error
 		out, err = loadDays(ctx, tx, `
 			SELECT id, resident_id, care_date, mood, appetite, sleep, note,
-			       hygiene_shower, hygiene_grooming, filed_by, filed_at, superseded_at
+			       hygiene_shower, hygiene_grooming, filed_by, filed_at, superseded_at,
+			       amends_id IS NOT NULL
 			FROM care_days
 			WHERE resident_id = $1 AND care_date = $2
 			ORDER BY filed_at ASC`, resident, on)
@@ -223,7 +230,8 @@ func loadDays(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Care
 		var id uuid.UUID
 		d := CareDay{Meals: []Meal{}, Concerns: []string{}}
 		if err := rows.Scan(&id, &d.ResidentID, &d.On, &d.Mood, &d.Appetite, &d.Sleep,
-			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt, &d.SupersededAt); err != nil {
+			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt, &d.SupersededAt,
+			&d.Corrected); err != nil {
 			rows.Close()
 			return nil, err
 		}

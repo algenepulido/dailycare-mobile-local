@@ -121,12 +121,22 @@ export interface FiledDay {
   concerns: string[];
   filedBy?: string;
   filedAt?: string;
+  /** Present on a revision a later one replaced. Absent on the day as it now stands. */
+  supersededAt?: string;
+  /** True when this version replaced an earlier one. */
+  corrected?: boolean;
 }
 
 /** What the app shows for a day somebody else already filed. Domain values, which are
  *  also the words on the screen. */
 export interface FiledSummary {
   filedAt: string;
+  /** When a correction replaced this one. Null on the version that currently stands, so
+   *  a list of revisions tells you which is live without a second field saying so. */
+  supersededAt: string | null;
+  /** Whether what stands here replaced something. A history marks these without having to
+   *  ask for the revisions of every day it shows. */
+  corrected: boolean;
   mood: Mood | null;
   appetite: Appetite | null;
   sleep: Sleep | null;
@@ -171,6 +181,8 @@ export function fromWire(day: FiledDay): FiledSummary | null {
   if (!day.filedAt) return null;
   return {
     filedAt: day.filedAt,
+    supersededAt: day.supersededAt ?? null,
+    corrected: day.corrected ?? false,
     mood: (day.mood && MOOD_BACK[day.mood]) || null,
     appetite: (day.appetite && APPETITE_BACK[day.appetite]) || null,
     sleep: (day.sleep && SLEEP_BACK[day.sleep]) || null,
