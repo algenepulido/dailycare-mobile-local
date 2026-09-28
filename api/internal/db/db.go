@@ -28,8 +28,11 @@ type DB struct{ pool *pgxpool.Pool }
 // read, so an audit row can say which request wrote it without the handler remembering to
 // pass anything along.
 type Caller struct {
-	UserID    uuid.UUID
-	Role      string // the application role name, for the audit row
+	UserID uuid.UUID
+	// Only a job sets this, and only a job is believed: app_role_in() reads the acting
+	// person's membership and ignores what the session claims. Empty for anybody who
+	// signed in, because for them it is not the application's answer to give.
+	Role      string
 	RequestID string
 }
 

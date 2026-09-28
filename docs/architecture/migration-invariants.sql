@@ -60,13 +60,21 @@ SELECT expect('no file went in twice',
 -- how this was found - care-history.sql was inserted after audit-logging.sql and collided
 -- with retention.sql at position 11 on an instance that had been running since September.
 --
--- What an appended file may not do is need CREATE on the schema, because by then PUBLIC has
--- lost it. So the set below is the one that has been read and found not to need it:
--- care-history.sql alters a table it already owns and creates a policy on it.
+-- What an appended file may not do is need CREATE on the schema from PUBLIC, because by
+-- then PUBLIC has lost it. The set below has each been read against that:
 --
--- This going red means a file was appended and nobody said why it may run without CREATE.
+--   care-history.sql      alters a table it owns and creates a policy on it. Neither
+--                         needs CREATE on the schema at all.
+--   audit-attribution.sql creates a function, which does need it - and has it, because
+--                         the revoke took CREATE from PUBLIC and the migration runs as
+--                         the role that owns the schema. Worth writing down rather than
+--                         leaving to be rediscovered: this one is fine for a different
+--                         reason than the one above it, and a file appended here that
+--                         runs as anything but the owner would not be.
+--
+-- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));

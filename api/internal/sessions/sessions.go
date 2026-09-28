@@ -187,7 +187,12 @@ func (s *Store) Identify(accessToken, requestID string) (db.Caller, error) {
 	if err != nil {
 		return db.Caller{}, err
 	}
-	return db.Caller{UserID: user, Role: "caregiver", RequestID: requestID}, nil
+	// No role. This used to say "caregiver" for every caller there was, and the trail
+	// believed it - a care manager reading a whole building was written down as a
+	// caregiver doing it. The database decides it now, from the membership that grants
+	// the access, so there is nothing true for this to say and a guess would only be
+	// waiting to be trusted again. See audit-attribution.sql.
+	return db.Caller{UserID: user, RequestID: requestID}, nil
 }
 
 func (s *Store) issue(ctx context.Context, user uuid.UUID, device string) (*Session, error) {

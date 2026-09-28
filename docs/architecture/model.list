@@ -38,3 +38,4 @@ schema-privileges.sql
 # the schema: this one alters a table it already owns and creates a policy, neither of which
 # needs it.
 care-history.sql
+audit-attribution.sql

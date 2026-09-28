@@ -63,9 +63,14 @@ INSERT INTO facilities (id, name, timezone) VALUES
 INSERT INTO users (id, email, display_name) VALUES
   ('a0000000-0000-0000-0000-00000000000a', 'maria@example.test', 'Maria');
 
+INSERT INTO users (id, email, display_name) VALUES
+  ('a0000000-0000-0000-0000-00000000000b', 'harriet@example.test', 'Harriet');
+
 INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
   ('fa000000-0000-0000-0000-00000000000a', 'f1000000-0000-0000-0000-000000000001',
-   'a0000000-0000-0000-0000-00000000000a', 'caregiver', 'active');
+   'a0000000-0000-0000-0000-00000000000a', 'caregiver', 'active'),
+  ('fa000000-0000-0000-0000-00000000000b', 'f1000000-0000-0000-0000-000000000001',
+   'a0000000-0000-0000-0000-00000000000b', 'care_manager', 'active');
 
 SELECT set_config('app.user_id',    'a0000000-0000-0000-0000-00000000000a', false);
 SELECT set_config('app.role',       'caregiver', false);
@@ -319,6 +324,64 @@ SELECT expect('and the trail was not empty, which is what makes the line above a
 \echo '── the trail as it stands'
 SELECT action, subject_type, coalesce(detail -> 'columns', '[]'::jsonb) AS columns_changed
 FROM audit_events ORDER BY id;
+
+-- ── what capacity the trail says somebody was acting in ───────────────────────
+--
+-- Every row above carries actor_role 'caregiver', which used to be true by construction:
+-- the application set that string for every caller there was. It is what the trail is for
+-- that makes it worth checking - "who read this record" is half an answer without "as
+-- what", and a care manager reading a whole building is a different event from a caregiver
+-- reading the one resident they are assigned to.
+
+\echo ''
+\echo '── the trail records the capacity somebody holds, not the one they claim'
+
+SELECT count(*) AS before_role_checks FROM audit_events \gset
+
+-- The caregiver, telling the trail she is a care manager. app.role is still set and still
+-- writable by anybody who can open a transaction, which is why nothing may depend on it.
+SELECT set_config('app.role', 'care_manager', false);
+SELECT audit_read('e1000000-0000-0000-0000-000000000001', 'residents');
+
+SELECT expect('a caregiver claiming to be a care manager is still recorded as a caregiver',
+  (SELECT actor_role = 'caregiver' FROM audit_events ORDER BY id DESC LIMIT 1));
+
+-- The care manager, telling it she is a caregiver.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000b', false);
+SELECT set_config('app.role',    'caregiver', false);
+SELECT audit_read('e1000000-0000-0000-0000-000000000001', 'residents');
+
+SELECT expect('and a care manager claiming to be a caregiver is recorded as a care manager',
+  (SELECT actor_role = 'care_manager' FROM audit_events ORDER BY id DESC LIMIT 1));
+
+SELECT expect('both reads reached the trail, so neither line above passed on an empty table',
+  (SELECT count(*) = :before_role_checks + 2 FROM audit_events));
+
+-- And a job, which has nobody in the session at all. retention_confirm_media names itself
+-- 'retention' and then stamps a photograph deleted, and that update is audited like any
+-- other. Reading the membership unconditionally would have found no person, returned null,
+-- and quietly turned retention's own rows in the trail from 'retention' into nothing -
+-- losing the attribution at the other end while fixing it at this one.
+SELECT set_config('app.user_id', '', false);
+SELECT set_config('app.role',    'retention', false);
+
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note, filed_by)
+VALUES ('cd000000-0000-0000-0000-000000000009',
+        'f1000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000001',
+        '2026-09-18', 'calm', 'good', 'slept_well', '',
+        'a0000000-0000-0000-0000-00000000000a');
+
+SELECT expect('a job, with nobody in the session, is recorded as what it says it is',
+  (SELECT actor_role = 'retention' FROM audit_events ORDER BY id DESC LIMIT 1));
+
+SELECT expect('and it is the write that just happened, not an older row',
+  (SELECT subject_id = 'cd000000-0000-0000-0000-000000000009'
+     FROM audit_events ORDER BY id DESC LIMIT 1));
+
+-- Back to who the rest of this file is about.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+SELECT set_config('app.role',    'caregiver', false);
 
 \set QUIET on
 SELECT checks_end();
