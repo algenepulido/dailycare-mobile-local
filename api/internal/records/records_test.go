@@ -161,7 +161,14 @@ func TestEveryUnauditedQueryInThisPackageIsDeclared(t *testing.T) {
 			end = m[1] + next[0]
 		}
 		body := src[m[0]:end]
-		queries := strings.Contains(body, "tx.Query") || strings.Contains(body, "tx.Exec")
+		// loadDays counts as a query, because it is one. History and Chain moved their
+		// SQL into it to read three weeks of days in two round trips instead of forty-two,
+		// and that move took the query out of the method body - which is the only thing
+		// this test was looking at. A method calling loadDays without read() would have
+		// been unaudited and invisible here at the same time.
+		queries := strings.Contains(body, "tx.Query") ||
+			strings.Contains(body, "tx.Exec") ||
+			strings.Contains(body, "loadDays(")
 		audits := strings.Contains(body, "s.read(")
 		if queries && !audits {
 			if why, ok := declared[name]; !ok {

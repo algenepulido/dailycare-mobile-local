@@ -55,6 +55,9 @@ type CareDay struct {
 	Concerns []string   `json:"concerns"`
 	FiledBy  *uuid.UUID `json:"filedBy,omitempty"`
 	FiledAt  *time.Time `json:"filedAt,omitempty"`
+	// Set on a revision that a later one replaced. Absent on the day as it currently
+	// stands, which is how a client tells the two apart without a second field saying so.
+	SupersededAt *time.Time `json:"supersededAt,omitempty"`
 }
 
 // read runs fn after recording that the resident's data was looked at. Unexported, and the
@@ -139,6 +142,144 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 		return nil, err
 	}
 	return &d, nil
+}
+
+// History is a resident's days over a range, most recent first.
+//
+// The current revision of each, the same rule Day() follows: a corrected day appears once,
+// as it now stands. Chain() is where the versions of one day live.
+//
+// One audit row for the request, not one per day. read() calls audit_read once and the
+// range is read inside it, so three weeks of history is recorded as somebody opening three
+// weeks of history. A row per day would say the same thing twenty-one times and bury the
+// reads that are about one person on one date.
+func (s *Store) History(ctx context.Context, c db.Caller, resident uuid.UUID,
+	from, to time.Time) ([]CareDay, error) {
+	var out []CareDay
+	err := s.read(ctx, c, resident, "care_days", func(tx pgx.Tx) error {
+		var err error
+		out, err = loadDays(ctx, tx, `
+			SELECT id, resident_id, care_date, mood, appetite, sleep, note,
+			       hygiene_shower, hygiene_grooming, filed_by, filed_at, superseded_at
+			FROM care_days
+			WHERE resident_id = $1 AND care_date BETWEEN $2 AND $3
+			  AND superseded_at IS NULL
+			ORDER BY care_date DESC`, resident, from, to)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Chain is every revision of one day, oldest first.
+//
+// The original, then each correction that replaced it. Ordered by when they were filed
+// rather than by amends_id: the link says which row a correction replaced and the order
+// says when, and reading the chain by time means a row whose link is missing still appears
+// in the right place instead of vanishing from the history.
+//
+// Empty for a day nobody has filed. One row for a day filed once - a day with no
+// corrections is a chain of length one, not a special case.
+func (s *Store) Chain(ctx context.Context, c db.Caller, resident uuid.UUID,
+	on time.Time) ([]CareDay, error) {
+	var out []CareDay
+	err := s.read(ctx, c, resident, "care_days", func(tx pgx.Tx) error {
+		var err error
+		out, err = loadDays(ctx, tx, `
+			SELECT id, resident_id, care_date, mood, appetite, sleep, note,
+			       hygiene_shower, hygiene_grooming, filed_by, filed_at, superseded_at
+			FROM care_days
+			WHERE resident_id = $1 AND care_date = $2
+			ORDER BY filed_at ASC`, resident, on)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// loadDays runs a query that returns care day rows and fills in their meals and concerns.
+//
+// Two queries for the children rather than two per day. Twenty-one days through the
+// per-day path in Day() is forty-two round trips to say something that fits in two, and
+// the count is set by how much history somebody scrolls rather than by anything the
+// database is doing.
+func loadDays(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]CareDay, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	// Indexed by care day id, because that is what the child tables reference. The slice
+	// keeps the order the query asked for; the map is only how the children find their day.
+	var (
+		days []CareDay
+		ids  []uuid.UUID
+		byID = map[uuid.UUID]int{}
+	)
+	for rows.Next() {
+		var id uuid.UUID
+		d := CareDay{Meals: []Meal{}, Concerns: []string{}}
+		if err := rows.Scan(&id, &d.ResidentID, &d.On, &d.Mood, &d.Appetite, &d.Sleep,
+			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt, &d.SupersededAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		byID[id] = len(days)
+		days = append(days, d)
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(days) == 0 {
+		return []CareDay{}, nil
+	}
+
+	meals, err := tx.Query(ctx,
+		`SELECT care_day_id, slot, happened, amount FROM care_day_meals
+		 WHERE care_day_id = ANY($1) ORDER BY care_day_id, slot`, ids)
+	if err != nil {
+		return nil, err
+	}
+	for meals.Next() {
+		var id uuid.UUID
+		var m Meal
+		if err := meals.Scan(&id, &m.Slot, &m.Happened, &m.Amount); err != nil {
+			meals.Close()
+			return nil, err
+		}
+		if i, ok := byID[id]; ok {
+			days[i].Meals = append(days[i].Meals, m)
+		}
+	}
+	meals.Close()
+	if err := meals.Err(); err != nil {
+		return nil, err
+	}
+
+	concerns, err := tx.Query(ctx,
+		`SELECT care_day_id, concern FROM care_day_concerns
+		 WHERE care_day_id = ANY($1) ORDER BY care_day_id, concern`, ids)
+	if err != nil {
+		return nil, err
+	}
+	for concerns.Next() {
+		var id uuid.UUID
+		var name string
+		if err := concerns.Scan(&id, &name); err != nil {
+			concerns.Close()
+			return nil, err
+		}
+		if i, ok := byID[id]; ok {
+			days[i].Concerns = append(days[i].Concerns, name)
+		}
+	}
+	concerns.Close()
+	return days, concerns.Err()
 }
 
 // Residents is the list a caregiver sees. No audit_read: the list is who they are

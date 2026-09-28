@@ -54,6 +54,8 @@ func (a *API) Routes() http.Handler {
 
 	mux.Handle("DELETE /v1/sessions/all", a.identified(a.signOutEverywhere))
 	mux.Handle("GET /v1/residents", a.identified(a.listResidents))
+	mux.Handle("GET /v1/residents/{id}/days", a.identified(a.history))
+	mux.Handle("GET /v1/residents/{id}/days/{date}/history", a.identified(a.dayHistory))
 	mux.Handle("GET /v1/residents/{id}/days/{date}", a.identified(a.careDay))
 
 	// POST rather than PUT, and the difference is the point. A second one is not a replay
@@ -336,6 +338,79 @@ func (a *API) careDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
 		return
 	}
 	a.ok(w, r, http.StatusOK, day)
+}
+
+// history is a resident's days over a range: GET .../days?from=&to=
+//
+// Both bounds are optional. to defaults to today and from to three weeks before it, which
+// is the span the product shows and the span a caregiver backdates within. A range is
+// capped rather than refused when it is too wide - a client asking for a year gets the
+// most recent ninety days rather than an error, because the honest failure here is a slow
+// query, not a malformed request.
+func (a *API) history(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	to := time.Now().UTC().Truncate(24 * time.Hour)
+	if v := r.URL.Query().Get("to"); v != "" {
+		if to, err = time.Parse("2006-01-02", v); err != nil {
+			a.fail(w, r, http.StatusBadRequest, "to is a date, as 2006-01-02", nil)
+			return
+		}
+	}
+	from := to.AddDate(0, 0, -20) // twenty-one days inclusive
+	if v := r.URL.Query().Get("from"); v != "" {
+		if from, err = time.Parse("2006-01-02", v); err != nil {
+			a.fail(w, r, http.StatusBadRequest, "from is a date, as 2006-01-02", nil)
+			return
+		}
+	}
+	if from.After(to) {
+		a.fail(w, r, http.StatusBadRequest, "from is after to", nil)
+		return
+	}
+	if earliest := to.AddDate(0, 0, -89); from.Before(earliest) {
+		from = earliest
+	}
+
+	days, err := a.records.History(r.Context(), c, id, from, to)
+	if err != nil {
+		if errors.Is(err, records.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read the history", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, map[string]any{
+		"from": from.Format("2006-01-02"),
+		"to":   to.Format("2006-01-02"),
+		"days": days,
+	})
+}
+
+// dayHistory is every revision of one day, oldest first: GET .../days/{date}/history
+//
+// A day filed once is a list of one. The client does not have to special-case a day with
+// no corrections, and "has this been corrected" is answered by the length rather than by a
+// flag somebody has to remember to set.
+func (a *API) dayHistory(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, on, ok := a.residentAndDate(w, r)
+	if !ok {
+		return
+	}
+	revisions, err := a.records.Chain(r.Context(), c, id, on)
+	if err != nil {
+		if errors.Is(err, records.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read the day", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, map[string]any{"revisions": revisions})
 }
 
 // Both day handlers take the same two path values, and a resident id that is not a uuid
