@@ -31,7 +31,7 @@ import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS } from '@/domain/rules';
 import type { CheckIn, Meal } from '@/domain/types';
 import { APPETITES, CONCERNS, DEFAULT_BASELINE, MEALS, MOODS, SLEEPS } from '@/domain/types';
 import type { CheckInDraft } from '@/state/checkInForm';
-import { useCheckInForm } from '@/state/checkInForm';
+import { draftFromFiled, useCheckInForm } from '@/state/checkInForm';
 import { longLabel } from '@/domain/dates';
 import { useSession } from '@/state/session';
 import { color, radii, sizes, type } from '@/theme/tokens';
@@ -268,6 +268,12 @@ function CareReport({
           residentName={resident.displayName}
           residentId={remoteId}
           careDate={draft.careDate}
+          onCorrect={() =>
+            form.dispatch({
+              type: 'replace',
+              draft: draftFromFiled(filed, draft.careDate, resident.baseline),
+            })
+          }
         />
       ) : null}
 

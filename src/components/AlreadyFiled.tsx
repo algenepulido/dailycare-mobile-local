@@ -17,6 +17,8 @@ interface AlreadyFiledProps {
   /** Asked for only when the sheet opens - see fetchDayPhotos. */
   residentId: string;
   careDate: string;
+  /** Loads what stands into the form so a correction starts from it. */
+  onCorrect: () => void;
 }
 
 /**
@@ -38,6 +40,7 @@ export function AlreadyFiled({
   residentName,
   residentId,
   careDate,
+  onCorrect,
 }: AlreadyFiledProps) {
   const [open, setOpen] = useState(false);
   const at = timeOfDay(summary.filedAt);
@@ -161,6 +164,19 @@ export function AlreadyFiled({
           <Text style={styles.footnote}>
             Medication stays on the phone that recorded it and is not sent.
           </Text>
+
+          {/* The only safe way in to a correction. Sending the form without this loads
+              nothing on a phone that did not file the day, and what is not ticked is not
+              kept: a day filed with breakfast, a shower and a note, corrected from an
+              empty form, came back as whatever the second phone ticked and nothing else.
+              Starting from what stands is the difference. */}
+          <View style={styles.correct}>
+            <Button label="Correct this day" variant="secondary" onPress={onCorrect} />
+            <Text style={styles.correctHint}>
+              This fills the form with what is on the record now. Medication is not part
+              of it and is not filled in - it stays on the phone that gave it.
+            </Text>
+          </View>
         </ScrollView>
       </Sheet>
     </>
@@ -224,6 +240,8 @@ const styles = StyleSheet.create({
   rowValue: { ...type.body, color: color.ink, flexShrink: 1, textAlign: 'right' },
   body: { ...type.body, color: color.ink },
   nothing: { ...type.body, color: color.ink3 },
+  correct: { marginTop: 18 },
+  correctHint: { ...type.hint, marginTop: 8 },
   footnote: { ...type.body, color: color.ink3, marginTop: 20 },
   spinner: { alignSelf: 'flex-start', marginTop: 4 },
   photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },

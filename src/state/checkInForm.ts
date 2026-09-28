@@ -28,6 +28,7 @@ import type {
   Sleep,
 } from '@/domain/types';
 import { EMPTY_HYGIENE, EMPTY_MEALS, EMPTY_MEDICATION } from '@/domain/types';
+import type { FiledSummary } from '@/data/wire';
 
 export interface CheckInDraft {
   careDate: string;
@@ -76,6 +77,51 @@ function draftFrom(checkIn: CheckIn): CheckInDraft {
     supplementalMedication: checkIn.supplementalMedication,
     note: checkIn.note,
     photoUri: checkIn.photoUri,
+  };
+}
+
+/**
+ * A draft built from what the server has, for correcting a day this phone did not file.
+ *
+ * loadDay reads the local store, which is the right answer on the phone that filed the
+ * day and no answer at all on any other. Two caregivers on one shift is the ordinary
+ * case and neither phone knows about the other, so a second phone opening a filed day
+ * found an empty form - and sending it replaced the whole day with whatever was ticked.
+ * Measured on staging: a day filed with breakfast, a shower and a note, corrected with
+ * only lunch, came back as lunch and nothing else. The chain kept the original, which is
+ * the point of amending rather than overwriting, but what stood was wrong.
+ *
+ * Medication is absent here because it is absent from the wire: it is recorded on the
+ * phone that gave it and never sent. That is why a day was not loaded into this form
+ * before - a blank medication list reads as "not given" rather than as "not ours to
+ * say". The screen states it rather than leaving it to be inferred, which is the whole
+ * difference between the two.
+ */
+export function draftFromFiled(
+  summary: FiledSummary,
+  careDate: string,
+  baseline: Baseline,
+): CheckInDraft {
+  const meals = { ...EMPTY_MEALS };
+  for (const meal of summary.meals) {
+    meals[meal.slot] = { done: meal.happened, amount: meal.amount };
+  }
+  return {
+    careDate,
+    meals,
+    // Never sent, so never returned. See above.
+    medication: { ...EMPTY_MEDICATION },
+    hygiene: { shower: summary.shower, grooming: summary.grooming },
+    // The baseline is what a day means when nobody moved it, so it is the right answer
+    // for a value the server could not name rather than a wrong one picked at random.
+    mood: summary.mood ?? baseline.mood,
+    appetite: summary.appetite ?? baseline.appetite,
+    sleep: summary.sleep ?? baseline.sleep,
+    concerns: [...summary.concerns],
+    supplementalMedication: '',
+    note: summary.note,
+    // A photograph belongs to the revision it was filed against and has its own path.
+    photoUri: null,
   };
 }
 
