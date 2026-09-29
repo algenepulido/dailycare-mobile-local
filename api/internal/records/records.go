@@ -208,6 +208,82 @@ func (s *Store) Chain(ctx context.Context, c db.Caller, resident uuid.UUID,
 	return out, nil
 }
 
+// TrailEntry is one line of the answer to "who opened this resident's record".
+//
+// The actor is a name rather than an identifier, because a care manager reading their own
+// building already knows the people in it and a column of uuids is not an answer. Absent
+// for a job: retention has no name to give.
+type TrailEntry struct {
+	At      time.Time `json:"at"`
+	Action  string    `json:"action"`
+	Actor   *string   `json:"actor,omitempty"`
+	Role    *string   `json:"role,omitempty"`
+	Subject string    `json:"subject"`
+}
+
+// ErrNotTheirTrail is a caregiver asking who has read a record. They may read the record;
+// who else has read it is a question the facility asks about its own building.
+var ErrNotTheirTrail = errors.New("records: the trail is a care manager's to read")
+
+// Trail is who opened this resident's record, most recent first.
+//
+// Refused for anybody but a care manager of the resident's own facility. The policy on
+// audit_events already says so and would return nothing - but nothing is the same shape as
+// "no-one has opened it", and those are different answers. A caregiver shown an empty trail
+// would reasonably conclude the record had never been read.
+//
+// The check runs inside the transaction, before the select and after audit_read has
+// already written a row saying this resident's trail was read. That order looks wrong and
+// is deliberate: a refusal returns an error, InSession rolls back, and the audit row goes
+// with it. Checking first and auditing second would be the same outcome by a longer route;
+// what neither may do is leave a row claiming somebody read something they were refused.
+func (s *Store) Trail(ctx context.Context, c db.Caller, resident uuid.UUID,
+	from, to time.Time) ([]TrailEntry, error) {
+	var out []TrailEntry
+	err := s.read(ctx, c, resident, "audit_events", func(tx pgx.Tx) error {
+		var manager bool
+		if err := tx.QueryRow(ctx, `
+			SELECT app_is_care_manager(r.facility_id)
+			FROM residents r WHERE r.id = $1`, resident).Scan(&manager); err != nil {
+			return err
+		}
+		if !manager {
+			return ErrNotTheirTrail
+		}
+
+		// The actor's name through a join the policies decide: users_colleagues lets a
+		// manager see the people at their own building, and nothing lets them see anybody
+		// else - so a row written by somebody who has since left the facility comes back
+		// without a name rather than with one this reader should not have.
+		rows, err := tx.Query(ctx, `
+			SELECT a.occurred_at, a.action, u.display_name, a.actor_role, a.subject_type
+			FROM audit_events a
+			LEFT JOIN users u ON u.id = a.actor_user_id
+			WHERE a.resident_id = $1 AND a.occurred_at >= $2 AND a.occurred_at < $3
+			ORDER BY a.occurred_at DESC
+			LIMIT 200`, resident, from, to)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var e TrailEntry
+			if err := rows.Scan(&e.At, &e.Action, &e.Actor, &e.Role, &e.Subject); err != nil {
+				return err
+			}
+			out = append(out, e)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []TrailEntry{}
+	}
+	return out, nil
+}
+
 // loadDays runs a query that returns care day rows and fills in their meals and concerns.
 //
 // Two queries for the children rather than two per day. Twenty-one days through the

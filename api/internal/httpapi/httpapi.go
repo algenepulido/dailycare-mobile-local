@@ -54,6 +54,7 @@ func (a *API) Routes() http.Handler {
 
 	mux.Handle("DELETE /v1/sessions/all", a.identified(a.signOutEverywhere))
 	mux.Handle("GET /v1/residents", a.identified(a.listResidents))
+	mux.Handle("GET /v1/residents/{id}/trail", a.identified(a.trail))
 	mux.Handle("GET /v1/residents/{id}/days", a.identified(a.history))
 	mux.Handle("GET /v1/residents/{id}/days/{date}/history", a.identified(a.dayHistory))
 	mux.Handle("GET /v1/residents/{id}/days/{date}", a.identified(a.careDay))
@@ -338,6 +339,43 @@ func (a *API) careDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
 		return
 	}
 	a.ok(w, r, http.StatusOK, day)
+}
+
+// trail is who opened this resident's record: GET .../trail?from=&to=
+//
+// A caregiver gets 403 rather than an empty list. The list would be empty - the policy on
+// the table sees to that - but empty reads as "nobody has opened it", and that is a
+// different statement from "this is not yours to ask". 404 is wrong here too: they can see
+// the resident, so pretending otherwise would be a lie in the other direction.
+func (a *API) trail(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	to := time.Now().UTC().Add(24 * time.Hour)
+	from := to.AddDate(0, 0, -91)
+	if v := r.URL.Query().Get("from"); v != "" {
+		if from, err = time.Parse("2006-01-02", v); err != nil {
+			a.fail(w, r, http.StatusBadRequest, "from is a date, as 2006-01-02", nil)
+			return
+		}
+	}
+
+	entries, err := a.records.Trail(r.Context(), c, id, from, to)
+	switch {
+	case errors.Is(err, records.ErrNotTheirTrail):
+		a.fail(w, r, http.StatusForbidden,
+			"who has opened a record is a care manager's question", nil)
+		return
+	case errors.Is(err, records.ErrNotVisible):
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	case err != nil:
+		a.fail(w, r, http.StatusInternalServerError, "could not read the trail", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, map[string]any{"entries": entries})
 }
 
 // history is a resident's days over a range: GET .../days?from=&to=
