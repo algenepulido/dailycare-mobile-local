@@ -262,6 +262,20 @@ function CareReport({
         </Pressable>
       ) : null}
 
+      {/* Whoever signed in, not whoever this phone is set up for. A caregiver sees their
+          assignments and a care manager sees the building, and which one this is gets
+          decided by the server rather than guessed here. */}
+      {signedIn ? (
+        <Pressable
+          onPress={() => router.push('/residents')}
+          accessibilityRole="button"
+          accessibilityLabel="Everyone this account may see"
+          style={({ pressed }) => [styles.historyLink, pressed && styles.pressed]}
+        >
+          <Text style={styles.historyLinkText}>Everyone this account may see</Text>
+        </Pressable>
+      ) : null}
+
       {filed && remoteId ? (
         <AlreadyFiled
           summary={filed}

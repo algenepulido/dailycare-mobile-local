@@ -232,6 +232,29 @@ export async function fetchDay(residentId: string, date: string): Promise<FiledS
   return fromWire(body);
 }
 
+/** One line of who opened a resident's record. */
+export interface TrailEntry {
+  at: string;
+  action: string;
+  actor?: string;
+  role?: string;
+  subject: string;
+}
+
+/**
+ * Who has opened this resident's record, most recent first.
+ *
+ * A care manager's question. Anyone else is refused rather than handed an empty list -
+ * the server is explicit about it, and the difference matters: nothing found and not
+ * allowed to look are different answers and only one of them is about the record.
+ */
+export async function fetchTrail(residentId: string): Promise<TrailEntry[]> {
+  const body = (await authed(`/v1/residents/${residentId}/trail`)) as {
+    entries: TrailEntry[];
+  };
+  return body.entries ?? [];
+}
+
 /** One day in a resident's history: the date, and what stands on it. */
 export interface HistoryDay {
   on: string;

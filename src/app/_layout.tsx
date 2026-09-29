@@ -33,6 +33,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.paper } }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="history" />
+          <Stack.Screen name="residents" />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>

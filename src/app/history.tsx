@@ -1,11 +1,12 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Screen, Sheet } from '@/components';
 import { RevisionsSheet } from '@/components/RevisionsSheet';
-import { SignedOut, fetchDayRevisions, fetchHistory } from '@/data/api';
-import type { HistoryDay } from '@/data/api';
+import { TrailSheet } from '@/components/TrailSheet';
+import { SignedOut, fetchDayRevisions, fetchHistory, fetchTrail } from '@/data/api';
+import type { HistoryDay, TrailEntry } from '@/data/api';
 import type { FiledSummary } from '@/data/wire';
 import { useSession } from '@/state/session';
 import { color, radii, type } from '@/theme/tokens';
@@ -46,12 +47,21 @@ function oneLine(summary: FiledSummary): string {
  */
 export default function HistoryScreen() {
   const { resident } = useSession();
-  const remoteId = resident?.remoteId;
+  // Reached from the residents list for somebody this phone is not set up for, and from
+  // the day screen for the one it is. The parameters win when they are there.
+  const params = useLocalSearchParams<{ id?: string; name?: string }>();
+  const remoteId = params.id ?? resident?.remoteId;
+  const who = params.name ?? resident?.displayName;
 
   const [days, setDays] = useState<HistoryDay[] | null>(null);
   const [problem, setProblem] = useState<'refused' | 'signedOut' | null>(null);
   const [openDate, setOpenDate] = useState<string | null>(null);
   const [revisions, setRevisions] = useState<FiledSummary[] | null>(null);
+  // Null until the answer is known, and stays null for anybody the server refuses. The
+  // control appears only for somebody it will work for, rather than appearing and then
+  // saying no - a caregiver has no use for a button that exists to be refused.
+  const [trail, setTrail] = useState<TrailEntry[] | null>(null);
+  const [trailOpen, setTrailOpen] = useState(false);
 
   useEffect(() => {
     if (!remoteId) return;
@@ -68,6 +78,23 @@ export default function HistoryScreen() {
         // how a working app gets reported as broken. Seen on a device: a password reset
         // revoked the session and this screen said the record was not theirs.
         if (live) setProblem(error instanceof SignedOut ? 'signedOut' : 'refused');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [remoteId]);
+
+  useEffect(() => {
+    if (!remoteId) return;
+    let live = true;
+    void (async () => {
+      try {
+        const got = await fetchTrail(remoteId);
+        if (live) setTrail(got);
+      } catch {
+        // Refused, which is the ordinary answer for a caregiver. Nothing to show and
+        // nothing to say: the history above is what they came for.
       }
     })();
     return () => {
@@ -93,7 +120,7 @@ export default function HistoryScreen() {
     <Screen footer={<Button label="Back" variant="secondary" onPress={() => router.back()} />}>
       <Text style={styles.title}>History</Text>
       <Text style={styles.blurb}>
-        {resident ? `${resident.displayName}, the last three weeks.` : 'The last three weeks.'}
+        {who ? `${who}, the last three weeks.` : 'The last three weeks.'}
       </Text>
 
       {/* A resident the app has locally but the server has never heard of. Nothing to ask
@@ -131,6 +158,21 @@ export default function HistoryScreen() {
           </Pressable>
         ))
       )}
+
+      {trail ? (
+        <Pressable
+          onPress={() => setTrailOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Who has opened this record"
+          style={({ pressed }) => [styles.trailLink, pressed && { opacity: 0.6 }]}
+        >
+          <Text style={styles.trailLinkText}>Who has opened this record</Text>
+        </Pressable>
+      ) : null}
+
+      {trail && trailOpen ? (
+        <TrailSheet open onClose={() => setTrailOpen(false)} entries={trail} who={who ?? ''} />
+      ) : null}
 
       {openDate && revisions ? (
         <RevisionsSheet
@@ -175,4 +217,6 @@ const styles = StyleSheet.create({
   rowDate: { ...type.checklistItem, color: color.ink },
   rowSummary: { ...type.meta, marginTop: 2 },
   corrected: { ...type.chip, color: color.clay },
+  trailLink: { alignSelf: 'flex-start', paddingVertical: 10, marginTop: 6 },
+  trailLinkText: { ...type.chip, color: color.clay },
 });
