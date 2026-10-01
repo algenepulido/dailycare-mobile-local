@@ -134,9 +134,21 @@ export function ReviewSheet({
           )}
         </DayReport>
 
-        <Text style={styles.footnote}>
-          Preview only. Nothing is sent, and every resident here is made up.
-        </Text>
+        {/* Only when nothing can leave. The sentence is milestone one's, when there was
+            no server to send to and the residents were seeded - and it stayed on the sheet
+            after both stopped being true, so a caregiver filing a real day was told it was
+            a preview of a made-up person. */}
+        {onSend ? (
+          <Text style={styles.footnote}>
+            This is what the family sees. Medication is not part of it and stays on this
+            phone.
+          </Text>
+        ) : (
+          <Text style={styles.footnote}>
+            Nothing is sent from this phone until somebody signs in. The day is saved here
+            either way.
+          </Text>
+        )}
       </ScrollView>
     </Sheet>
   );

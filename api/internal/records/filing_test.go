@@ -355,3 +355,42 @@ func grantFamily(t *testing.T, resident uuid.UUID) db.Caller {
 	}
 	return db.Caller{UserID: user, RequestID: "t"}
 }
+
+// A day that was corrected says so on the day itself, not only in the history.
+//
+// The history selected amends_id and the single day did not, so the one screen a family
+// member actually opens was the only place that could not tell them the record had changed.
+// Which is the sentence this package's own comment makes - that a family can be shown a
+// correction happened rather than a different past.
+func TestADayThatWasCorrectedSaysSo(t *testing.T) {
+	s, caller, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	if _, err := s.File(ctx, caller, resident, on, aDay()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Corrected {
+		t.Error("a day filed once reports itself as corrected")
+	}
+
+	corrected := aDay()
+	corrected.Note = "and a second look at it"
+	if _, err := s.File(ctx, caller, resident, on, corrected); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Corrected {
+		t.Error("a day that replaced an earlier one does not report itself as corrected")
+	}
+	if after.Note == nil || *after.Note != "and a second look at it" {
+		t.Errorf("the day that stands is not the correction: %+v", after.Note)
+	}
+}

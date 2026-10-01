@@ -123,14 +123,21 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 		// The current revision only. A corrected day has an older row with the same
 		// resident and date, and showing that one would be showing a past that was
 		// withdrawn - which is the opposite of what amends_id is for.
+		//
+		// amends_id comes back as a boolean, same as the history does it. It was missing
+		// here and the history had it, so the one day a family member actually opens was
+		// the one place that could not say a correction had happened - which is the
+		// sentence this file already claims two paragraphs down, that a family can be shown
+		// that a correction happened rather than a different past.
 		var id uuid.UUID
 		if err := tx.QueryRow(ctx, `
 			SELECT id, resident_id, care_date, mood, appetite, sleep, note,
-			       hygiene_shower, hygiene_grooming, filed_by, filed_at
+			       hygiene_shower, hygiene_grooming, filed_by, filed_at,
+			       amends_id IS NOT NULL
 			FROM care_days
 			WHERE resident_id = $1 AND care_date = $2 AND superseded_at IS NULL`,
 			resident, on).Scan(&id, &d.ResidentID, &d.On, &d.Mood, &d.Appetite, &d.Sleep,
-			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt); err != nil {
+			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt, &d.Corrected); err != nil {
 			return err
 		}
 
