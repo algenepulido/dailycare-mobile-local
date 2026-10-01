@@ -200,6 +200,26 @@ func bootstrap(ctx context.Context, args []string) error {
 	}
 
 	if *role == "family" {
+		// The grant is made as the person making it, not as whatever role this job
+		// connects with.
+		//
+		// resident_contacts is forced, so the owner of the schema is subject to its
+		// policies like anybody else, and contacts_insert admits a care manager of that
+		// facility and nobody else. Refused here at first, correctly: a migration identity
+		// is not a care manager and a family grant is not a migration. facility_members is
+		// not forced, which is why the caregiver path never met this.
+		//
+		// So -by stops being only a column. It is who this is being done as, and if they
+		// are not a care manager of this facility the database refuses - which is the
+		// check that was always written down and had nothing asking it.
+		if actor == nil {
+			return fmt.Errorf("-role family needs -by: a grant is made by a named care manager")
+		}
+		if _, err := tx.Exec(ctx,
+			`SELECT set_config('app.user_id', $1, true)`, actor.String()); err != nil {
+			return fmt.Errorf("identifying %s: %w", *by, err)
+		}
+
 		// Not a facility member. A family member works for nobody; they hold a grant
 		// against one resident, and resident_contacts is where that lives.
 		//
