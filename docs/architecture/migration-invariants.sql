@@ -71,10 +71,14 @@ SELECT expect('no file went in twice',
 --                         leaving to be rediscovered: this one is fine for a different
 --                         reason than the one above it, and a file appended here that
 --                         runs as anything but the owner would not be.
+--   family-access.sql     replaces a function that already exists, which needs ownership
+--                         of that function and not CREATE on the schema at all. A third
+--                         reason, and the narrowest of the three: it would still work if
+--                         the owner had no CREATE anywhere.
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));

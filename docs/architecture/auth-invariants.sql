@@ -475,7 +475,50 @@ SELECT expect('and no table-level grant on users quietly puts it back',
 \echo '   sessions on record:'
 SELECT email, active, revoked, expired FROM session_inventory ORDER BY email;
 
+-- ── a family grant waits for the person to accept it ──────────────────────────
+--
+-- The one state transition the model described and nothing could produce. A caregiver's
+-- membership is written straight to 'active' because for staff the only open question is
+-- whether they have a password. A family grant is a disclosure, so a facility that has
+-- sent an invitation and one that has a reader are different things for it to see.
+
+\echo ''
+\echo '── a family grant allows nothing until the invitation is accepted'
+
 \set QUIET on
+INSERT INTO users (id, email, display_name) VALUES
+  ('9a000000-0000-0000-0000-00000000009a', 'priya@example.test', 'Priya');
+INSERT INTO resident_contacts
+  (id, facility_id, resident_id, user_id, relation, state, granted_by, granted_at) VALUES
+  ('9c000000-0000-0000-0000-00000000009c', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '9a000000-0000-0000-0000-00000000009a',
+   'child', 'invited', 'a0000000-0000-0000-0000-00000000000a', now());
+INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
+  ('9a000000-0000-0000-0000-00000000009a', 'invitation', h('priya'), now() + interval '7 days');
+SELECT set_config('app.user_id', '9a000000-0000-0000-0000-00000000009a', false);
+\set QUIET off
+
+SELECT expect('an invited grant is not yet a reader',
+  NOT app_is_contact('e1000000-0000-0000-0000-000000000001'));
+
+SELECT expect('accepting the invitation is what makes it one',
+  (SELECT redeem_token(h('priya'), 'invitation',
+     '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$3sYhZ0ZQZxQKqUk0gq7Wc2Dk8Q0rKvVQe0GJ5m1wXyz')
+     = '9a000000-0000-0000-0000-00000000009a'));
+
+SELECT expect('and now they are',
+  app_is_contact('e1000000-0000-0000-0000-000000000001'));
+
+SELECT expect('the facility''s own decision is still dated from when it was made',
+  (SELECT granted_at IS NOT NULL AND granted_by = 'a0000000-0000-0000-0000-00000000000a'
+     FROM resident_contacts WHERE id = '9c000000-0000-0000-0000-00000000009c'));
+
+SELECT expect('and a second grant to somebody else is untouched by any of it',
+  (SELECT count(*) = 0 FROM resident_contacts
+    WHERE user_id <> '9a000000-0000-0000-0000-00000000009a' AND state = 'active'));
+
+\set QUIET on
+SELECT set_config('app.user_id', '', false);
 SELECT checks_end();
 DROP FUNCTION expect(text, boolean);
 DROP FUNCTION expect_rejected(text, text);

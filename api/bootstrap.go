@@ -48,7 +48,9 @@ func bootstrap(ctx context.Context, args []string) error {
 	facility := fs.String("facility", "", "the facility this caregiver works in (uuid)")
 	email := fs.String("email", "", "the address they will sign in with")
 	name := fs.String("name", "", "the name a family sees on a day they filed")
-	role := fs.String("role", "caregiver", "caregiver or care_manager")
+	role := fs.String("role", "caregiver", "caregiver, care_manager or family")
+	relation := fs.String("relation", "",
+		"for -role family: spouse, child, sibling, other_family, friend, power_of_attorney or self")
 	by := fs.String("by", "", "the address of the person doing this, recorded against the grant")
 	reset := fs.Bool("reset", false,
 		"issue a password reset for an account that already exists, instead of creating one")
@@ -80,12 +82,29 @@ func bootstrap(ctx context.Context, args []string) error {
 			*role = v
 		}
 	}
-	// The database would refuse an unknown value anyway - facility_role is an enum - but it
-	// would refuse it after the user row was written, leaving an account with no membership.
+	fallback(relation, "BOOTSTRAP_RELATION")
+
+	// The database would refuse an unknown value anyway - both of these are enums - but it
+	// would refuse it after the user row was written, leaving an account attached to
+	// nothing. Checked here, before anything is created.
 	switch *role {
 	case "caregiver", "care_manager":
+	case "family":
+		switch *relation {
+		case "self", "spouse", "child", "sibling", "other_family", "friend", "power_of_attorney":
+		case "":
+			return fmt.Errorf("-role family needs -relation: how this person is related to the resident")
+		default:
+			return fmt.Errorf("relation %q is not one resident_relation has", *relation)
+		}
+		if len(residents) != 1 {
+			// A grant names one resident. Two parents of one resident, or one person
+			// linked to two, are both ordinary - and both are more than one row, written
+			// one at a time, because authorisation is per resident and never per family.
+			return fmt.Errorf("-role family needs exactly one -resident, and got %d", len(residents))
+		}
 	default:
-		return fmt.Errorf("role %q is not one this creates: caregiver or care_manager", *role)
+		return fmt.Errorf("role %q is not one this creates: caregiver, care_manager or family", *role)
 	}
 	if len(residents) == 0 {
 		for _, r := range strings.Split(os.Getenv("BOOTSTRAP_RESIDENTS"), ",") {
@@ -175,19 +194,39 @@ func bootstrap(ctx context.Context, args []string) error {
 		return err
 	}
 
-	var memberID uuid.UUID
-	if err := tx.QueryRow(ctx,
-		`INSERT INTO facility_members (facility_id, user_id, role, state, invited_by)
-		 VALUES ($1,$2,$3,'active',$4) RETURNING id`,
-		*facility, userID, *role, actor).Scan(&memberID); err != nil {
-		return err
-	}
-
-	for _, r := range residents {
+	if *role == "family" {
+		// Not a facility member. A family member works for nobody; they hold a grant
+		// against one resident, and resident_contacts is where that lives.
+		//
+		// 'invited' rather than 'active', which is the state the enum has always described
+		// and nothing could produce until now. A caregiver's membership opens active
+		// because for staff the only open question is whether they have a password. A
+		// family grant is a disclosure, and a facility that has sent an invitation and one
+		// that has a reader are different things for it to see. redeem_token moves it when
+		// they accept - see family-access.sql - and app_is_contact() reads nothing until
+		// it does.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
-			 VALUES ($1,$2,$3,$4)`, *facility, r, memberID, actor); err != nil {
-			return fmt.Errorf("assigning %s: %w", r, err)
+			`INSERT INTO resident_contacts
+			   (facility_id, resident_id, user_id, relation, state, granted_by, granted_at)
+			 VALUES ($1,$2,$3,$4,'invited',$5, now())`,
+			*facility, residents[0], userID, *relation, actor); err != nil {
+			return fmt.Errorf("granting access to %s: %w", residents[0], err)
+		}
+	} else {
+		var memberID uuid.UUID
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO facility_members (facility_id, user_id, role, state, invited_by)
+			 VALUES ($1,$2,$3,'active',$4) RETURNING id`,
+			*facility, userID, *role, actor).Scan(&memberID); err != nil {
+			return err
+		}
+
+		for _, r := range residents {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+				 VALUES ($1,$2,$3,$4)`, *facility, r, memberID, actor); err != nil {
+				return fmt.Errorf("assigning %s: %w", r, err)
+			}
 		}
 	}
 
@@ -206,7 +245,11 @@ func bootstrap(ctx context.Context, args []string) error {
 	// stdout, so it can be piped somewhere without the commentary and so a log that
 	// captures one stream does not necessarily capture both.
 	fmt.Fprintf(os.Stderr, "\n%s is %s, %s in %s\n", *name, userID, *role, *facility)
-	if *role == "care_manager" {
+	if *role == "family" {
+		fmt.Fprintf(os.Stderr,
+			"They read this one resident and nothing else, and cannot record anything.\n"+
+				"The grant is not live until they accept the invitation below.\n")
+	} else if *role == "care_manager" {
 		// A care manager is not assigned to anybody and does not need to be: the policies
 		// give them every resident in their own facility. Printed separately because the
 		// line below is written for a caregiver and is wrong here in both directions - it

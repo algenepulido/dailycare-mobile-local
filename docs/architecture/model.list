@@ -39,3 +39,4 @@ schema-privileges.sql
 # needs it.
 care-history.sql
 audit-attribution.sql
+family-access.sql
