@@ -7,6 +7,7 @@ import type { Change, ChecklistGroup } from '@/domain/rules';
 import { color, radii, type } from '@/theme/tokens';
 
 import { Button } from './Button';
+import { DayReport } from './DayReport';
 import { Icon } from './Icon';
 import { Sheet } from './Sheet';
 
@@ -29,10 +30,10 @@ interface ReviewSheetProps {
 /**
  * What the family would receive, read back before anything leaves.
  *
- * Sections, order and copy follow the web app's sheet — what changed, the care checklist,
- * the note, the photo. Milestone 1 removes sending, not the heading the caregiver already
- * knows this surface by, so the title stays and the footer is the only thing that differs;
- * the footnote below says plainly that nothing leaves the device.
+ * The body of it is DayReport, which the family's own screen renders too - so the sentence
+ * above stays true rather than being a claim about two blocks of markup that have to be
+ * kept in step by hand. What is left here is the part that belongs to a caregiver: the
+ * heading they know this surface by, the send button, and what to say when a send fails.
  */
 export function ReviewSheet({
   open,
@@ -116,105 +117,28 @@ export function ReviewSheet({
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>What changed today</Text>
-        {changes.length === 0 ? (
-          <View style={styles.steady}>
-            <Icon name="check" size={18} color={color.sage} />
-            <Text style={styles.steadyText}>A steady day — everything as usual.</Text>
-          </View>
-        ) : (
-          <View style={styles.stack}>
-            {changes.map((change) => (
-              <ChangeRow key={`${change.kind}-${change.value}`} change={change} />
-            ))}
-          </View>
-        )}
-
-        <Text style={styles.sectionLabel}>Care checklist</Text>
-        <View style={styles.stack}>
-          {checklist.map((group) => (
-            <ChecklistCard key={group.label} group={group} />
-          ))}
-        </View>
-
-        {note.trim() ? (
-          <>
-            <Text style={styles.sectionLabel}>Note</Text>
-            <View style={styles.card}>
-              <Text style={styles.note}>{note.trim()}</Text>
+        <DayReport changes={changes} checklist={checklist} note={note}>
+          {photoUri ? (
+            <View style={styles.photoRow}>
+              <Image source={{ uri: photoUri }} style={styles.thumb} contentFit="cover" />
+              <View style={styles.photoPill}>
+                <Icon name="camera" size={15} color={color.sage} />
+                <Text style={styles.photoPillText}>Photo attached</Text>
+              </View>
             </View>
-          </>
-        ) : null}
-
-        {photoUri ? (
-          <View style={styles.photoRow}>
-            <Image source={{ uri: photoUri }} style={styles.thumb} contentFit="cover" />
-            <View style={styles.photoPill}>
-              <Icon name="camera" size={15} color={color.sage} />
-              <Text style={styles.photoPillText}>Photo attached</Text>
+          ) : (
+            <View style={styles.noPhotoRow}>
+              <Icon name="camera" size={15} color={color.ink3} />
+              <Text style={styles.noPhotoText}>No photo attached</Text>
             </View>
-          </View>
-        ) : (
-          <View style={styles.noPhotoRow}>
-            <Icon name="camera" size={15} color={color.ink3} />
-            <Text style={styles.noPhotoText}>No photo attached</Text>
-          </View>
-        )}
+          )}
+        </DayReport>
 
         <Text style={styles.footnote}>
           Preview only. Nothing is sent, and every resident here is made up.
         </Text>
       </ScrollView>
     </Sheet>
-  );
-}
-
-function ChangeRow({ change }: { change: Change }) {
-  const tone = change.alert ? color.flag : color.warn;
-  return (
-    <View style={[styles.changeRow, { borderColor: tone }]}>
-      <View style={[styles.dot, { backgroundColor: tone }]} />
-      <Text style={styles.changeText}>
-        <Text style={styles.changeKind}>{change.kind}: </Text>
-        {change.value}
-        {change.baselineNote ? (
-          <Text style={styles.changeNote}> · {change.baselineNote}</Text>
-        ) : null}
-      </Text>
-      <Icon name="flag" size={16} color={tone} />
-    </View>
-  );
-}
-
-function ChecklistCard({ group }: { group: ChecklistGroup }) {
-  const missed = group.missedItems.length > 0;
-  return (
-    <View style={styles.card}>
-      <View style={styles.checklistHead}>
-        <Text style={styles.checklistLabel}>{group.label}</Text>
-        <Text style={[styles.checklistCount, { color: missed ? color.flag : color.sage }]}>
-          {group.done}/{group.total} done
-        </Text>
-      </View>
-      {group.doneItems.length > 0 ? (
-        <View style={styles.line}>
-          <Icon name="check" size={14} color={color.sage} />
-          <Text style={styles.lineText}>{group.doneItems.join(', ')}</Text>
-        </View>
-      ) : null}
-      {missed ? (
-        <View style={styles.line}>
-          <Icon name="flag" size={14} color={color.flag} />
-          <Text style={styles.lineMuted}>Not done: {group.missedItems.join(', ')}</Text>
-        </View>
-      ) : null}
-      {group.extra ? (
-        <View style={styles.line}>
-          <Icon name="plus" size={13} color={color.ink3} />
-          <Text style={styles.lineText}>Supplemental: {group.extra}</Text>
-        </View>
-      ) : null}
-    </View>
   );
 }
 
@@ -233,51 +157,6 @@ const styles = StyleSheet.create({
   headerText: { flexShrink: 1 },
   title: { ...type.sheetTitle, color: color.ink },
   subtitle: { ...type.meta, marginTop: 3 },
-
-  sectionLabel: { ...type.sectionLabel, marginTop: 22, marginBottom: 10, marginHorizontal: 2 },
-  stack: { gap: 8 },
-
-  steady: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 14,
-    borderRadius: radii.innerCard,
-    backgroundColor: color.sageSoft,
-  },
-  steadyText: { fontFamily: type.chip.fontFamily, fontSize: 14, color: color.ink },
-
-  changeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: radii.innerCard,
-    borderWidth: 1.5,
-    backgroundColor: color.white,
-  },
-  dot: { width: 9, height: 9, borderRadius: radii.chip },
-  changeText: { flex: 1, fontFamily: type.body.fontFamily, fontSize: 14, color: color.ink },
-  changeKind: { fontFamily: type.buttonPrimary.fontFamily },
-  changeNote: { fontSize: 12, color: color.ink3 },
-
-  card: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: radii.innerCard,
-    borderWidth: 1.5,
-    borderColor: color.line,
-    backgroundColor: color.white,
-  },
-  checklistHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  checklistLabel: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 15, color: color.ink },
-  checklistCount: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 12 },
-  line: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 },
-  lineText: { flex: 1, fontFamily: type.meta.fontFamily, fontSize: 13, color: color.ink2 },
-  lineMuted: { flex: 1, fontFamily: type.meta.fontFamily, fontSize: 13, color: color.ink3 },
-
-  note: { fontFamily: type.meta.fontFamily, fontSize: 14, lineHeight: 20, color: color.ink2 },
 
   photoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   thumb: {

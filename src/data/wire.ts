@@ -14,6 +14,7 @@
 
 import type {
   Appetite,
+  Baseline,
   CheckIn,
   Concern,
   Meal,
@@ -21,6 +22,7 @@ import type {
   Mood,
   Sleep,
 } from '@/domain/types';
+import { DEFAULT_BASELINE } from '@/domain/types';
 
 export const MOOD_WIRE: Record<Mood, string> = {
   Calm: 'calm',
@@ -197,5 +199,30 @@ export function fromWire(day: FiledDay): FiledSummary | null {
         amount: (m.amount && AMOUNT_BACK[m.amount]) || null,
       })),
     concerns: (day.concerns ?? []).map((c) => CONCERN_BACK[c]).filter(Boolean),
+  };
+}
+
+/**
+ * A resident's baseline as the building has it.
+ *
+ * Only a family member needs this translated: a caregiver's phone has its own copy, typed
+ * during setup and stored in domain words already. The family app has nothing to compare
+ * today against until this arrives, and "what changed" is the whole of what it shows.
+ *
+ * Unlike fromWire this falls back rather than returning null, because a baseline nobody can
+ * read would silently turn every observation into a change - a day that was entirely normal
+ * would be reported to a daughter as three things to worry about. DEFAULT_BASELINE is the
+ * same one the setup sheet opens with, so the failure is a wrong comparison and not an
+ * alarming one.
+ */
+export function baselineFromWire(wire: {
+  mood: string;
+  appetite: string;
+  sleep: string;
+}): Baseline {
+  return {
+    mood: MOOD_BACK[wire.mood] ?? DEFAULT_BASELINE.mood,
+    appetite: APPETITE_BACK[wire.appetite] ?? DEFAULT_BASELINE.appetite,
+    sleep: SLEEP_BACK[wire.sleep] ?? DEFAULT_BASELINE.sleep,
   };
 }

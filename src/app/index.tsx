@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -43,8 +43,9 @@ const MEAL_LABEL: Record<Meal, string> = {
 };
 
 export default function CareReportScreen() {
-  const { caregiver, resident, ready, startSession } = useSession();
+  const { kind, caregiver, resident, ready, startSession } = useSession();
   const [namesOpen, setNamesOpen] = useState(false);
+  const [invited, setInvited] = useState(false);
 
   if (!ready) {
     return (
@@ -54,21 +55,44 @@ export default function CareReportScreen() {
     );
   }
 
-  // First run has no report to show behind the sheet, and no way to dismiss it either.
+  /**
+   * A family member's phone is not a filing phone.
+   *
+   * Decided before anything below renders, because everything below is the form - and the
+   * setup sheet under it would otherwise ask a daughter to type her mother's name and what
+   * a normal day looks like for her, which is a caregiver's job and not hers.
+   *
+   * On the remembered answer, not on a round trip: see session.tsx. A device that was never
+   * told anything shows the form, which is right - it is either a caregiver's phone or a
+   * phone nobody has signed in on, and both of those file days.
+   */
+  if (kind === 'family') {
+    return <Redirect href="/family" />;
+  }
+
+  // First run has no report to show behind the sheet, and no way to dismiss it either -
+  // which is why the sign-in sheet replaces it rather than opening over it. Somebody who was
+  // invited has an account and no round to set up, and they are the only person for whom
+  // this screen is the wrong question.
   if (!caregiver || !resident) {
     return (
       <View style={styles.centered}>
-        <SetupSheet
-          open
-          firstRun
-          caregiverName=""
-          residentName=""
-          baseline={DEFAULT_BASELINE}
-          onClose={() => {}}
-          onSave={(caregiverName, residentName, baseline) =>
-            void startSession({ caregiverName, residentName, baseline })
-          }
-        />
+        {invited ? (
+          <SignInSheet open onClose={() => setInvited(false)} />
+        ) : (
+          <SetupSheet
+            open
+            firstRun
+            caregiverName=""
+            residentName=""
+            baseline={DEFAULT_BASELINE}
+            onClose={() => {}}
+            onSignIn={() => setInvited(true)}
+            onSave={(caregiverName, residentName, baseline) =>
+              void startSession({ caregiverName, residentName, baseline })
+            }
+          />
+        )}
       </View>
     );
   }

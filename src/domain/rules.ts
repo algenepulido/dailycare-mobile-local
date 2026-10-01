@@ -5,7 +5,17 @@
  * collect the data and apart from the ones that display it.
  */
 
-import type { Appetite, Baseline, CheckIn, Meal, MealEntry, Mood, Sleep } from './types';
+import type {
+  Appetite,
+  Baseline,
+  CheckIn,
+  Concern,
+  Meal,
+  MealAmount,
+  MealEntry,
+  Mood,
+  Sleep,
+} from './types';
 import { MEALS, MEAL_AMOUNT_LABEL } from './types';
 
 /* ------------------------------------------------------------------ alert values */
@@ -42,12 +52,27 @@ export interface Change {
 }
 
 /**
+ * The parts of a day that can differ from a baseline, and nothing else.
+ *
+ * Narrower than CheckIn on purpose. A day read back from the server is this shape without
+ * being a CheckIn - it has no id, no caregiver, no photo on this device and no medication,
+ * because a tick for a tablet never leaves the phone that recorded it. A full CheckIn still
+ * satisfies this, so every caller that had one keeps working.
+ */
+export interface Observed {
+  mood: Mood;
+  appetite: Appetite;
+  sleep: Sleep;
+  concerns: Concern[];
+}
+
+/**
  * Builds the "what changed today" list.
  *
  * An observation only appears when it differs from this resident's baseline. Concerns
  * always appear, and always as an alert.
  */
-export function buildChanges(checkIn: CheckIn, baseline: Baseline): Change[] {
+export function buildChanges(checkIn: Observed, baseline: Baseline): Change[] {
   const changes: Change[] = [];
 
   if (checkIn.mood !== baseline.mood) {
@@ -165,6 +190,58 @@ export function buildChecklist(checkIn: CheckIn): ChecklistGroup[] {
       doneItems: meds.done,
       missedItems: meds.missed,
       extra: checkIn.supplementalMedication.trim() || undefined,
+    },
+    {
+      label: 'Hygiene',
+      done: hygiene.done.length,
+      total: 2,
+      doneItems: hygiene.done,
+      missedItems: hygiene.missed,
+    },
+  ];
+}
+
+/**
+ * The checklist a family member is shown. Meals and hygiene, and deliberately not
+ * medication.
+ *
+ * A caregiver's medication tick is recorded on the phone and never sent - medication_events
+ * is a record that a dose was dispensed, which belongs to a clinical system and not to a
+ * tick - so the server holds no medication for this day. A group built from what the server
+ * has would therefore read "Medication 0/2", and a daughter reading that would conclude
+ * nobody gave her mother her tablets. It would be the worst sentence on the screen and it
+ * would not be true. So the group is absent, and the family screen says where medication is
+ * recorded rather than leaving its absence to be guessed at.
+ *
+ * Built from a filed day rather than a draft, which is why the meals arrive as a list: that
+ * is the shape the record comes back in, and converting it here keeps mealCounts as the one
+ * place that decides how a meal reads.
+ */
+export function buildFamilyChecklist(day: {
+  meals: { slot: Meal; happened: boolean; amount: MealAmount | null }[];
+  shower: boolean;
+  grooming: boolean;
+}): ChecklistGroup[] {
+  const entries = {} as Record<Meal, MealEntry>;
+  for (const meal of MEALS) {
+    const filed = day.meals.find((m) => m.slot === meal);
+    // A meal the record does not mention is not done. The server returns all three slots
+    // for a filed day, so this is the shape rather than the usual case.
+    entries[meal] = { done: filed?.happened ?? false, amount: filed?.amount ?? null };
+  }
+  const meals = mealCounts(entries);
+  const hygiene = split([
+    ['Shower', day.shower],
+    ['Grooming', day.grooming],
+  ]);
+
+  return [
+    {
+      label: 'Meals',
+      done: meals.done,
+      total: MEALS.length,
+      doneItems: meals.items,
+      missedItems: meals.missed,
     },
     {
       label: 'Hygiene',

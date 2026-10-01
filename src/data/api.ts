@@ -188,10 +188,33 @@ export interface RemoteResident {
   id: string;
   displayName: string;
   facilityId: string;
+  /** Wire words, not screen words. baselineFromWire translates them. */
+  baseline: { mood: string; appetite: string; sleep: string };
 }
 
 export async function listResidents(): Promise<RemoteResident[]> {
   return (await authed('/v1/residents')) as RemoteResident[];
+}
+
+/**
+ * Which face of the app belongs to the person holding this session.
+ *
+ * `staff` file care, `family` read it, and `none` is an account linked to nobody - a
+ * caregiver whose membership ended, or a family member whose last grant was withdrawn.
+ * Asked of the server rather than worked out here: the database holds the memberships and
+ * the grants, and in milestone three the app telling the database what a caller was is
+ * exactly how the audit trail came to say "caregiver" for everybody.
+ */
+export type AccountKind = 'staff' | 'family' | 'none';
+
+export interface RemoteAccount {
+  userId: string;
+  displayName: string;
+  kind: AccountKind;
+}
+
+export async function fetchAccount(): Promise<RemoteAccount> {
+  return (await authed('/v1/me')) as RemoteAccount;
 }
 
 export async function signOut(): Promise<void> {

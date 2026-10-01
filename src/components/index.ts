@@ -4,6 +4,7 @@ export { Card } from './Card';
 export { CareCheck } from './CareCheck';
 export { CareDateButton } from './CareDateButton';
 export { Chip } from './Chip';
+export { DayReport } from './DayReport';
 export { ChipGroup } from './ChipGroup';
 export { Field } from './Field';
 export { Icon } from './Icon';

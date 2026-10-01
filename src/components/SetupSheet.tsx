@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { Appetite, Baseline, Mood, Sleep } from '@/domain/types';
 import { APPETITES, MOODS, SLEEPS } from '@/domain/types';
@@ -19,6 +19,17 @@ interface SetupSheetProps {
   onClose: () => void;
   /** First run introduces the app; every later visit is an edit to what is stored. */
   firstRun?: boolean;
+  /**
+   * Offered on a first run only: this is a phone belonging to somebody who was invited
+   * rather than somebody setting up a round.
+   *
+   * Without it a family member could not sign in at all. The first-run sheet cannot be
+   * dismissed - correctly, there is nothing behind it - and the sign-in sheet lives inside
+   * the day screen, so the only route to it was to invent a caregiver and a resident first.
+   * A daughter was being asked to name her mother and describe her normal day before she
+   * could type the invitation she had been sent.
+   */
+  onSignIn?: () => void;
 }
 
 /**
@@ -36,6 +47,7 @@ export function SetupSheet({
   onSave,
   onClose,
   firstRun = false,
+  onSignIn,
 }: SetupSheetProps) {
   const [caregiver, setCaregiver] = useState(caregiverName);
   const [resident, setResident] = useState(residentName);
@@ -56,12 +68,24 @@ export function SetupSheet({
       open={open}
       onClose={firstRun ? () => {} : onClose}
       footer={
-        <Button
-          label={complete ? (firstRun ? 'Start daily care' : 'Save changes') : 'Add both names to continue'}
-          disabled={!complete}
-          disabledAppearance="muted"
-          onPress={() => onSave(caregiver.trim(), resident.trim(), usual)}
-        />
+        <View style={styles.footer}>
+          <Button
+            label={complete ? (firstRun ? 'Start daily care' : 'Save changes') : 'Add both names to continue'}
+            disabled={!complete}
+            disabledAppearance="muted"
+            onPress={() => onSave(caregiver.trim(), resident.trim(), usual)}
+          />
+          {firstRun && onSignIn ? (
+            <Pressable
+              onPress={onSignIn}
+              accessibilityRole="button"
+              accessibilityLabel="I was sent an invitation"
+              style={({ pressed }) => [styles.invited, pressed && styles.invitedPressed]}
+            >
+              <Text style={styles.invitedText}>I was sent an invitation</Text>
+            </Pressable>
+          ) : null}
+        </View>
       }
     >
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -158,6 +182,11 @@ function UsualRow<T extends string>({
 }
 
 const styles = StyleSheet.create({
+  footer: { gap: 4 },
+  invited: { alignItems: 'center', paddingVertical: 12, minHeight: 44, justifyContent: 'center' },
+  invitedPressed: { opacity: 0.6 },
+  invitedText: { ...type.body, color: color.clay, textDecorationLine: 'underline' },
+
   title: { ...type.setupTitle, color: color.ink },
   blurb: { ...type.blurb, marginTop: 6, marginBottom: 20 },
   label: { ...type.fieldLabel, marginBottom: 8 },
