@@ -127,7 +127,7 @@ export default function FamilyScreen() {
             ? 'This session has ended. Sign in again to see today.'
             : 'Sign in to see how your person is doing today.'}
         </Text>
-        <SignInSheet open={signInOpen} onClose={() => setSignInOpen(false)} />
+        <SignInSheet open={signInOpen} opened="family" onClose={() => setSignInOpen(false)} />
       </Screen>
     );
   }

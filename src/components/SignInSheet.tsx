@@ -19,19 +19,21 @@ interface SignInSheetProps {
   open: boolean;
   onClose: () => void;
   /**
-   * Opened on a device nobody has set up, by somebody who said they were invited.
+   * Who opened it, which decides what it opens on and what it says.
    *
-   * Changes two things, and both were wrong the first time this path was walked on a phone.
-   * It opens on the invitation rather than on a password, because that is what the person
-   * said they had. And the line under the title stops being a caregiver's - "you can keep
-   * filing days without signing in" is true for a caregiver with a half-written day
-   * underneath and reads, to a daughter on the first screen she ever sees, as an invitation
-   * to start recording her mother's care.
+   * There are three places, and the default used to serve all of them. "You can keep filing
+   * days without signing in" is true for a caregiver with a half-written day underneath, and
+   * it is the first sentence a daughter reads on her own phone - where it is not true and
+   * reads as an invitation to start recording her mother's care. Both wrong places were
+   * found by walking the path on a device rather than by reading it.
+   *
+   * 'invitation' also opens on the invitation field rather than on a password, because that
+   * is what the person who got there said they had.
    */
-  firstRun?: boolean;
+  opened?: 'caregiver' | 'invitation' | 'family';
 }
 
-export function SignInSheet({ open, onClose, firstRun = false }: SignInSheetProps) {
+export function SignInSheet({ open, onClose, opened = 'caregiver' }: SignInSheetProps) {
   const { signIn, redeem, signingIn } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -45,7 +47,7 @@ export function SignInSheet({ open, onClose, firstRun = false }: SignInSheetProp
    * would have to be told about. The same path accepts a reset link, because a reset is
    * the same act: a link, and a password they choose.
    */
-  const [invited, setInvited] = useState(firstRun);
+  const [invited, setInvited] = useState(opened === 'invitation');
   const [link, setLink] = useState('');
 
   const submit = async () => {
@@ -100,9 +102,9 @@ export function SignInSheet({ open, onClose, firstRun = false }: SignInSheetProp
         <Text style={styles.note}>
           {invited
             ? 'Paste the invitation you were given. It works once, and the password you choose is yours — nobody else sees it.'
-            : firstRun
-              ? 'Sign in with the email the care home has for you.'
-              : 'You can keep filing days without signing in. Signing in is what lets them reach the rest of your team.'}
+            : opened === 'caregiver'
+              ? 'You can keep filing days without signing in. Signing in is what lets them reach the rest of your team.'
+              : 'Sign in with the email the care home has for you.'}
         </Text>
 
         {invited ? (
