@@ -2,6 +2,7 @@ package records
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -283,4 +284,74 @@ func TestAnUnfiledDayIsEmptyRatherThanMissing(t *testing.T) {
 	if len(got.Meals) != 0 || len(got.Concerns) != 0 {
 		t.Errorf("an unfiled day has no meals and no concerns: %+v", got)
 	}
+}
+
+// A family member reads the record and cannot write to it, and the database is what says so.
+//
+// The point of the test is not that filing fails - it is which failure. Until M4 the policy
+// refusal came back as "that day was not something the record accepts", which is what a
+// malformed mood gets, so a daughter was told her data was wrong when the truth was that
+// recording care is not hers to do. Both are errors; only one of them is true.
+//
+// Also the other half of the same answer: she can read the day she cannot file.
+func TestFamilyMayReadTheRecordAndNotWriteToIt(t *testing.T) {
+	s, caregiver, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	// Something to read, filed by the caregiver whose job it is.
+	if _, err := s.File(ctx, caregiver, resident, on, aDay()); err != nil {
+		t.Fatalf("the caregiver filing: %v", err)
+	}
+
+	daughter := grantFamily(t, resident)
+
+	if _, err := s.Day(ctx, daughter, resident, on); err != nil {
+		t.Fatalf("a family member reading the day they hold a grant for: %v", err)
+	}
+
+	// A day nobody has filed, and the one that is already there. Both go through the
+	// insert, by different routes - the second retires the standing row first - and the
+	// answer has to be the same refusal either way.
+	for _, when := range []time.Time{
+		time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC),
+		on,
+	} {
+		if _, err := s.File(ctx, daughter, resident, when, aDay()); !errors.Is(err, ErrNotTheirsToFile) {
+			t.Errorf("a family member filing %s: got %v, want ErrNotTheirsToFile",
+				when.Format("2006-01-02"), err)
+		}
+	}
+}
+
+// A second account on the same resident, holding an active family grant and no membership.
+// Seeded as the owner, like everything else here: creating a user and granting access are
+// administrative acts and the application has no handler for either.
+func grantFamily(t *testing.T, resident uuid.UUID) db.Caller {
+	t.Helper()
+	ctx := context.Background()
+	c, err := pgx.Connect(ctx, os.Getenv("DAILYCARE_TEST_ADMIN_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(ctx)
+
+	var facility uuid.UUID
+	if err := c.QueryRow(ctx,
+		`SELECT facility_id FROM residents WHERE id = $1`, resident).Scan(&facility); err != nil {
+		t.Fatal(err)
+	}
+
+	user := uuid.New()
+	if _, err := c.Exec(ctx,
+		`INSERT INTO users (id, email, display_name) VALUES ($1, $2, 'A Daughter')`,
+		user, uuid.NewString()+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Exec(ctx,
+		`INSERT INTO resident_contacts (facility_id, resident_id, user_id, relation, state)
+		 VALUES ($1, $2, $3, 'child', 'active')`, facility, resident, user); err != nil {
+		t.Fatal(err)
+	}
+	return db.Caller{UserID: user, RequestID: "t"}
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/dailycare-hq/dailycare-api/internal/db"
 )
@@ -33,6 +34,36 @@ type Store struct{ db *db.DB }
 func New(d *db.DB) *Store { return &Store{db: d} }
 
 var ErrNotVisible = errors.New("records: no such resident, or not one this session may read")
+
+// ErrNotTheirsToFile is somebody who may read a resident's record trying to write to it.
+//
+// Family, in practice. Reading and writing are separate predicates in the policies -
+// app_may_read_resident and the insert policies on care_days - and this is the gap between
+// them, which is the whole shape of a family member: they receive care, they do not record
+// it. Separate from ErrNotVisible because the answers differ: a resident they cannot see is
+// 404 so that uuids cannot be used to enumerate a building, and a resident they can see is
+// not hidden now just because they tried to write to it.
+var ErrNotTheirsToFile = errors.New("records: this record is not theirs to write to")
+
+// policyRefusal turns a row-level security refusal into the error that says so.
+//
+// Only safe to call after read(), which calls audit_read and fails closed - so the caller
+// has already been shown to be somebody who may see this resident, and a 42501 past that
+// point is the narrower refusal rather than the broad one.
+//
+// Measured before it was written, twice: a family member filing a day nobody had filed and
+// a family member correcting one that existed both came back 42501 on care_days, so the
+// policy is checked before the partial unique index and this does not need to tell them
+// apart. Until M4 both were served as 400 "that day was not something the record accepts",
+// which told a daughter her data was malformed when the truth was that recording care is
+// not hers to do.
+func policyRefusal(err error) error {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "42501" {
+		return ErrNotTheirsToFile
+	}
+	return err
+}
 
 // CareDay is what a caregiver files at the end of a shift.
 // A day as it reads back. The pointers are the difference between a day nobody has filed
@@ -373,14 +404,17 @@ func (s *Store) Residents(ctx context.Context, c db.Caller) ([]Resident, error) 
 	var out []Resident
 	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id, display_name, facility_id FROM residents ORDER BY display_name`)
+			SELECT id, display_name, facility_id,
+			       baseline_mood, baseline_appetite, baseline_sleep
+			  FROM residents ORDER BY display_name`)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var r Resident
-			if err := rows.Scan(&r.ID, &r.DisplayName, &r.FacilityID); err != nil {
+			if err := rows.Scan(&r.ID, &r.DisplayName, &r.FacilityID,
+				&r.Baseline.Mood, &r.Baseline.Appetite, &r.Baseline.Sleep); err != nil {
 				return err
 			}
 			out = append(out, r)
@@ -451,7 +485,7 @@ func (s *Store) File(ctx context.Context, c db.Caller, resident uuid.UUID, on ti
 				// for exactly that reason.
 				`UPDATE care_days SET superseded_at = now() WHERE id = $1`,
 				*previous); err != nil {
-				return err
+				return policyRefusal(err)
 			}
 		}
 
@@ -463,21 +497,21 @@ func (s *Store) File(ctx context.Context, c db.Caller, resident uuid.UUID, on ti
 			RETURNING id`,
 			facility, resident, on, f.Mood, f.Appetite, f.Sleep, f.Note,
 			f.Shower, f.Grooming, c.UserID, previous).Scan(&id); err != nil {
-			return err
+			return policyRefusal(err)
 		}
 
 		for _, m := range f.Meals {
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO care_day_meals (care_day_id, slot, happened, amount)
 				 VALUES ($1, $2, $3, $4)`, id, m.Slot, m.Happened, m.Amount); err != nil {
-				return err
+				return policyRefusal(err)
 			}
 		}
 		for _, name := range f.Concerns {
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO care_day_concerns (care_day_id, concern) VALUES ($1, $2)`,
 				id, name); err != nil {
-				return err
+				return policyRefusal(err)
 			}
 		}
 		return nil
@@ -489,4 +523,17 @@ type Resident struct {
 	ID          uuid.UUID `json:"id"`
 	DisplayName string    `json:"displayName"`
 	FacilityID  uuid.UUID `json:"facilityId"`
+	Baseline    Baseline  `json:"baseline"`
+}
+
+// What a normal day looks like for this person.
+//
+// Served because "today's update" is not three values, it is which of them differ from
+// this - the residents table says so in as many words, and a family member's phone has no
+// other way to know. A caregiver's phone has its own copy typed during setup; this is the
+// building's, and the building's is the one the record was filed against.
+type Baseline struct {
+	Mood     string `json:"mood"`
+	Appetite string `json:"appetite"`
+	Sleep    string `json:"sleep"`
 }

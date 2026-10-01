@@ -53,6 +53,12 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("DELETE /v1/sessions", a.signOut)
 
 	mux.Handle("DELETE /v1/sessions/all", a.identified(a.signOutEverywhere))
+
+	// Which face of the app belongs to the person holding this session. Asked on launch,
+	// because the alternative is the app deciding for itself and a family member seeing a
+	// filing form for the moment before it corrects itself.
+	mux.Handle("GET /v1/me", a.identified(a.me))
+
 	mux.Handle("GET /v1/residents", a.identified(a.listResidents))
 	mux.Handle("GET /v1/residents/{id}/trail", a.identified(a.trail))
 	mux.Handle("GET /v1/residents/{id}/days", a.identified(a.history))
@@ -219,6 +225,21 @@ func (a *API) signOutEverywhere(w http.ResponseWriter, r *http.Request, c db.Cal
 	a.ok(w, r, http.StatusOK, map[string]int{"sessionsEnded": n})
 }
 
+func (a *API) me(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	account, err := a.sessions.Account(r.Context(), c)
+	if err != nil {
+		if errors.Is(err, sessions.ErrSignInFailed) {
+			// A valid token for an account this database does not have. 401 rather than
+			// 500: the client's move is to sign in again, and nothing here is broken.
+			a.fail(w, r, http.StatusUnauthorized, "not signed in", nil)
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read this account", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, account)
+}
+
 func (a *API) listResidents(w http.ResponseWriter, r *http.Request, c db.Caller) {
 	list, err := a.records.Residents(r.Context(), c)
 	if err != nil {
@@ -320,6 +341,16 @@ func (a *API) fileDay(w http.ResponseWriter, r *http.Request, c db.Caller) {
 	if err != nil {
 		if errors.Is(err, records.ErrNotVisible) {
 			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
+		// Somebody who may read this record and not write to it, which is what a family
+		// member is. 403 and not 404: they have just been served this resident's days, so
+		// hiding the resident at this point would contradict the answer before it. And not
+		// 400, which is what this was until M4 - a family member filing a day was told
+		// their data was malformed, when the database had refused them by policy and said
+		// so plainly in the log.
+		if errors.Is(err, records.ErrNotTheirsToFile) {
+			a.fail(w, r, http.StatusForbidden, "only the care team can record a day", nil)
 			return
 		}
 		// A mood the enum does not have, a meal slot that is not a meal, an amount

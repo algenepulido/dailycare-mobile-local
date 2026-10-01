@@ -57,13 +57,28 @@ func TestNothingOutsideThisPackageReadsPHI(t *testing.T) {
 	}
 	t.Logf("checking %d PHI tables against the rest of the API", len(phi))
 
-	// FROM/JOIN/INTO/UPDATE <table>. Not every mention of the word - a comment that says
-	// "care_days" is not a read, and a test that fails on prose teaches people to stop
-	// writing prose.
+	// FROM/JOIN <table>. Not every mention of the word - a comment that says "care_days"
+	// is not a read, and a test that fails on prose teaches people to stop writing prose.
+	//
+	// Reads, which is what this test is named for and what its message says, and not the
+	// INSERT INTO and UPDATE it also matched until M4. The asymmetry is the whole reason
+	// this guard exists: a read leaves no trace unless Go calls audit_read() on purpose,
+	// so a query in the wrong package is a disclosure nobody can see afterwards - while a
+	// write is recorded by an AFTER INSERT OR UPDATE trigger whichever package issued it,
+	// and audit-invariants.sql asserts that no PHI-bearing table is missing one. So the
+	// write half was never held here; it is held by the database and checked there.
+	//
+	// It cost something to find that out: the broader pattern failed on the bootstrap job
+	// writing a family member's grant - an administrative write, audited by the trigger on
+	// resident_contacts - and on a test seeding its own fixture. Neither is a read, and
+	// neither was what the message accused them of.
+	//
+	// DELETE FROM is still caught, and so is INSERT INTO x SELECT ... FROM a PHI table,
+	// because the read in it is still a read.
 	patterns := make(map[string]*regexp.Regexp, len(phi))
 	for _, table := range phi {
 		patterns[table] = regexp.MustCompile(
-			`(?i)\b(from|join|into|update)\s+` + regexp.QuoteMeta(table) + `\b`)
+			`(?i)\b(from|join)\s+` + regexp.QuoteMeta(table) + `\b`)
 	}
 
 	// The module root, so the walk covers handlers and anything added beside them rather

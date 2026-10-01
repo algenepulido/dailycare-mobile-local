@@ -195,3 +195,110 @@ func TestAnExpiredAccessTokenIsRefused(t *testing.T) {
 		t.Fatal("an expired access token verified")
 	}
 }
+
+// Which face of the app an account gets, asked of the database rather than decided here.
+//
+// Four states from one account, because the interesting one is the account that is both: a
+// care manager whose own mother lives in their building holds a membership and a grant at
+// the same time, and resident_relation has 'self' and 'child' precisely because that
+// happens. They can file, so they must get the app that files.
+func TestWhatKindOfAccountThisIs(t *testing.T) {
+	s, _, user := store(t)
+	ctx := context.Background()
+	caller := db.Caller{UserID: user, RequestID: "t"}
+
+	admin, err := pgx.Connect(ctx, os.Getenv("DAILYCARE_TEST_ADMIN_DSN"))
+	if err != nil {
+		t.Fatalf("admin connect: %v", err)
+	}
+	defer admin.Close(ctx)
+
+	// A building with somebody in it, so there is a membership and a grant to give.
+	facility, resident, member := uuid.New(), uuid.New(), uuid.New()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO facilities (id, name, timezone) VALUES ($1, 'Cedar', 'America/Chicago')`,
+			[]any{facility}},
+		{`INSERT INTO residents (id, facility_id, display_name) VALUES ($1, $2, 'Cathy')`,
+			[]any{resident, facility}},
+	} {
+		if _, err := admin.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("seeding: %v", err)
+		}
+	}
+
+	kind := func(t *testing.T) Kind {
+		t.Helper()
+		got, err := s.Account(ctx, caller)
+		if err != nil {
+			t.Fatalf("reading the account: %v", err)
+		}
+		if got.DisplayName != "A Nurse" || got.UserID != user {
+			t.Fatalf("got %q / %s, want A Nurse / %s", got.DisplayName, got.UserID, user)
+		}
+		return got.Kind
+	}
+
+	// Nothing. An account that exists and is linked to nobody - a caregiver whose
+	// membership ended, or a family member whose last grant was withdrawn. Not a fault,
+	// and the app has to say something true about it.
+	if got := kind(t); got != None {
+		t.Errorf("linked to nobody: got %q, want %q", got, None)
+	}
+
+	if _, err := admin.Exec(ctx,
+		`INSERT INTO facility_members (id, facility_id, user_id, role, state)
+		 VALUES ($1, $2, $3, 'caregiver', 'active')`, member, facility, user); err != nil {
+		t.Fatalf("seeding a membership: %v", err)
+	}
+	if got := kind(t); got != Staff {
+		t.Errorf("a live membership: got %q, want %q", got, Staff)
+	}
+
+	// Ended by its date, not deleted and not a state: access_state is invited, active,
+	// revoked, and a caregiver who leaves is none of those - ended_at is the column the
+	// schema gives that, and app_my_facilities() requires it to be null.
+	if _, err := admin.Exec(ctx,
+		`UPDATE facility_members SET ended_at = now() WHERE id = $1`,
+		member); err != nil {
+		t.Fatal(err)
+	}
+	if got := kind(t); got != None {
+		t.Errorf("a membership that ended: got %q, want %q", got, None)
+	}
+
+	if _, err := admin.Exec(ctx,
+		`INSERT INTO resident_contacts (facility_id, resident_id, user_id, relation, state)
+		 VALUES ($1, $2, $3, 'child', 'active')`, facility, resident, user); err != nil {
+		t.Fatalf("seeding a grant: %v", err)
+	}
+	if got := kind(t); got != Family {
+		t.Errorf("an active grant and no membership: got %q, want %q", got, Family)
+	}
+
+	// Both at once, which is the case the order exists for.
+	if _, err := admin.Exec(ctx,
+		`UPDATE facility_members SET ended_at = NULL WHERE id = $1`,
+		member); err != nil {
+		t.Fatal(err)
+	}
+	if got := kind(t); got != Staff {
+		t.Errorf("a membership and a grant together: got %q, want %q", got, Staff)
+	}
+
+	// A grant that was withdrawn stops counting, which is the whole of what revoking does.
+	if _, err := admin.Exec(ctx,
+		`UPDATE facility_members SET ended_at = now() WHERE id = $1`, member); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx,
+		`UPDATE resident_contacts SET state = 'revoked', revoked_at = now()
+		  WHERE user_id = $1 AND resident_id = $2`, user, resident); err != nil {
+		t.Fatal(err)
+	}
+	if got := kind(t); got != None {
+		t.Errorf("a withdrawn grant: got %q, want %q", got, None)
+	}
+}

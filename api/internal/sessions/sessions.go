@@ -43,6 +43,85 @@ type Session struct {
 	UserID       uuid.UUID `json:"userId"`
 }
 
+// What an account is: staff who record care, family who read it, or neither.
+//
+// Not a label the application decides. M3 had the application tell the database that every
+// caller was a caregiver, and the audit trail then said "caregiver" for a care manager -
+// the lesson being that the one place that knows is the one holding the rows. Both answers
+// below are read under the caller's own identity through the ordinary policies:
+// members_own_facilities shows a staff member their own building and a family member
+// nothing, and contacts_read shows a family member their own grants. If either policy is
+// ever widened, this answer moves with it rather than drifting away from it.
+type Kind string
+
+const (
+	// Staff: a live facility membership. They file care.
+	Staff Kind = "staff"
+	// Family: no membership, and at least one active grant. They read one person's record.
+	Family Kind = "family"
+	// None: an account linked to nobody. A caregiver whose membership ended, or a family
+	// member whose last grant was withdrawn - which is a real state and not a fault, and
+	// the app has to say something true about it rather than show an empty list.
+	None Kind = "none"
+)
+
+// Account is what a session is, as the database has it.
+type Account struct {
+	UserID      uuid.UUID `json:"userId"`
+	DisplayName string    `json:"displayName"`
+	Kind        Kind      `json:"kind"`
+}
+
+// Account answers who is holding this session and which face of the app is theirs.
+//
+// Staff before family, because somebody can be both: resident_relation has 'self' and
+// 'child', so a care manager whose mother lives in their own building holds a membership
+// and a grant at once. They can file, so they get the app that files.
+//
+// No audit_read. Reading your own name and your own membership is not a disclosure of
+// anybody's record, and a row per app launch would fill the trail with the one event that
+// carries no information - the same reason Residents does not write one.
+func (s *Store) Account(ctx context.Context, c db.Caller) (*Account, error) {
+	out := &Account{UserID: c.UserID}
+	var staff, family bool
+
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		// Through the two functions the policies themselves are built on, rather than by
+		// querying the membership and grant tables here. Two reasons, and the second is
+		// the one that matters: app_my_facilities() and app_my_contact_facilities() are
+		// the exact predicates app_may_read_resident() is assembled from, so what the app
+		// believes an account is and what the policies will let it do cannot drift apart.
+		// And both read app_user_id() themselves, so this asks about the same identity the
+		// policies will ask about rather than an id handed in alongside it.
+		return tx.QueryRow(ctx, `
+			SELECT u.display_name,
+			       EXISTS (SELECT 1 FROM app_my_facilities()),
+			       EXISTS (SELECT 1 FROM app_my_contact_facilities())
+			  FROM users u
+			 WHERE u.id = app_user_id()`).
+			Scan(&out.DisplayName, &staff, &family)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The token verified but names nobody this database has. A deactivated account
+		// cannot get a session in the first place, so this is a signing key outliving the
+		// account it was issued for, and the answer is the sign-in screen.
+		return nil, ErrSignInFailed
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sessions: reading the account: %w", err)
+	}
+
+	switch {
+	case staff:
+		out.Kind = Staff
+	case family:
+		out.Kind = Family
+	default:
+		out.Kind = None
+	}
+	return out, nil
+}
+
 // SignIn is the only place a password is looked at.
 func (s *Store) SignIn(ctx context.Context, email, password, device string) (*Session, error) {
 	var userID uuid.UUID
