@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/dailycare-hq/dailycare-api/internal/auth"
 	"github.com/dailycare-hq/dailycare-api/internal/db"
@@ -179,16 +180,28 @@ func bootstrap(ctx context.Context, args []string) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Refused rather than updated. An email that is already there belongs to somebody, and
-	// the difference between creating an account and resetting a stranger's password is
-	// one this should not decide for whoever typed the command.
-	var exists bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower($1))`, *email).
-		Scan(&exists); err != nil {
+	// An email that is already there belongs to somebody, and what to do about that
+	// depends on what is being asked for.
+	//
+	// Creating an account is still refused: the difference between that and resetting a
+	// stranger's password is not one this should decide for whoever typed the command.
+	//
+	// A second family grant is not that, and the plan for this milestone says so in as many
+	// words - a second resident is another row, not another account, because two parents in
+	// the same building is the ordinary case. Refusing it meant a facility could link a
+	// daughter to her mother and then had no way to link her to her father; measured on
+	// staging, where the second grant was refused with the password sentence above and the
+	// switcher the app had been built for could never appear.
+	var existing *uuid.UUID
+	var found uuid.UUID
+	err = tx.QueryRow(ctx,
+		`SELECT id FROM users WHERE lower(email) = lower($1)`, *email).Scan(&found)
+	if err == nil {
+		existing = &found
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	if exists {
+	if existing != nil && *role != "family" {
 		return fmt.Errorf("%s already has an account. Resetting a password is a different "+
 			"operation and this is not it", *email)
 	}
@@ -205,13 +218,20 @@ func bootstrap(ctx context.Context, args []string) error {
 
 	// No password_hash. An account with none cannot be signed in to - credential_for_sign_in
 	// returns nothing for it - so the invitation is the only way in until it is accepted.
+	//
+	// Not written at all for somebody who is already here. Their name is theirs - they may
+	// have corrected it through users_update_self since - and overwriting it from a command
+	// line would be an administrator renaming a person to add a grant.
 	var userID uuid.UUID
-	if err := tx.QueryRow(ctx,
+	if existing != nil {
+		userID = *existing
+	} else if err := tx.QueryRow(ctx,
 		`INSERT INTO users (email, display_name) VALUES ($1,$2) RETURNING id`,
 		*email, *name).Scan(&userID); err != nil {
 		return err
 	}
 
+	grantState := ""
 	if *role == "family" {
 		// The grant is made as the person making it, not as whatever role this job
 		// connects with.
@@ -243,13 +263,56 @@ func bootstrap(ctx context.Context, args []string) error {
 		// that has a reader are different things for it to see. redeem_token moves it when
 		// they accept - see family-access.sql - and app_is_contact() reads nothing until
 		// it does.
+		// 'invited' only while there is something to wait for.
+		//
+		// The first grant waits because nobody has yet proved they hold that address, and
+		// redeem_token is what both establishes the password and activates the grant. An
+		// account that can already sign in has nothing pending: there is no accept button in
+		// this product, and the only thing that ever moved a grant to active was redeeming a
+		// credential. So a second grant written 'invited' would sit there forever - a
+		// facility would be told a daughter could read her father and she would open the app
+		// and see only her mother.
+		//
+		// Which is the same shape as the fault this milestone already produced once, when
+		// the activation reported success and changed nothing. Measured rather than
+		// reasoned about this time: see the live check after it.
+		state := "invited"
+		if existing != nil {
+			var canSignIn bool
+			if err := tx.QueryRow(ctx,
+				`SELECT password_hash IS NOT NULL FROM users WHERE id = $1`, userID).
+				Scan(&canSignIn); err != nil {
+				return err
+			}
+			if canSignIn {
+				state = "active"
+			}
+		}
+
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO resident_contacts
 			   (facility_id, resident_id, user_id, relation, state, granted_by, granted_at)
-			 VALUES ($1,$2,$3,$4,'invited',$5, now())`,
-			*facility, residents[0], userID, *relation, actor); err != nil {
+			 VALUES ($1,$2,$3,$4,$5,$6, now())`,
+			*facility, residents[0], userID, *relation, state, actor); err != nil {
+			// UNIQUE (resident_id, user_id) is what says they already hold one, and the
+			// constraint is allowed to be the thing that says it. Asking first would mean
+			// reading resident_contacts here, which is a read of who is linked to whom
+			// that no audit_read would record - the one thing the guard in
+			// internal/records exists to stop, and it stopped this.
+			//
+			// Which state the existing grant is in is therefore not reported, and does not
+			// need to be: none of the three is this command's to move. An invitation is
+			// outstanding, a reader is live, or access was withdrawn - and putting a
+			// withdrawn grant back is a decision with a person behind it, which belongs to
+			// the care manager's own screen rather than to a job asked to make a new one.
+			var pg *pgconn.PgError
+			if errors.As(err, &pg) && pg.Code == "23505" {
+				return fmt.Errorf("%s already holds a grant for that resident. This creates "+
+					"grants and does not change the ones that are there", *email)
+			}
 			return fmt.Errorf("granting access to %s: %w", residents[0], err)
 		}
+		grantState = state
 	} else {
 		var memberID uuid.UUID
 		if err := tx.QueryRow(ctx,
@@ -268,11 +331,21 @@ func bootstrap(ctx context.Context, args []string) error {
 		}
 	}
 
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
-		 VALUES ($1, 'invitation', $2, now() + interval '7 days')`,
-		userID, digest); err != nil {
-		return err
+	// An invitation only for somebody who has no way in yet.
+	//
+	// A second grant for an account that already exists needs none: they have a password, or
+	// an invitation already outstanding, and a fresh one would be a second credential for
+	// the same person issued because a facility added a resident. The grant still waits at
+	// 'invited' - accepting it is the next sign-in, because redeem_token activates every
+	// invited grant the account holds and signing in is enough for one made this way.
+	invite := existing == nil
+	if invite {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
+			 VALUES ($1, 'invitation', $2, now() + interval '7 days')`,
+			userID, digest); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -284,9 +357,15 @@ func bootstrap(ctx context.Context, args []string) error {
 	// captures one stream does not necessarily capture both.
 	fmt.Fprintf(os.Stderr, "\n%s is %s, %s in %s\n", *name, userID, *role, *facility)
 	if *role == "family" {
-		fmt.Fprintf(os.Stderr,
-			"They read this one resident and nothing else, and cannot record anything.\n"+
-				"The grant is not live until they accept the invitation below.\n")
+		fmt.Fprintf(os.Stderr, "They read this one resident and nothing else, and cannot record anything.\n")
+		if grantState == "active" {
+			fmt.Fprintf(os.Stderr,
+				"This is a further resident for an account that already exists, so no second\n"+
+					"invitation is issued and the grant is live now. They see them on their next\n"+
+					"refresh.\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "The grant is not live until they accept the invitation below.\n")
+		}
 	} else if *role == "care_manager" {
 		// A care manager is not assigned to anybody and does not need to be: the policies
 		// give them every resident in their own facility. Printed separately because the
@@ -308,6 +387,9 @@ func bootstrap(ctx context.Context, args []string) error {
 		fmt.Fprintf(os.Stderr,
 			"No --by given, so nothing records who granted this. That is expected for the\n"+
 				"first account in a building and is listed by assignments_without_an_author.\n")
+	}
+	if !invite {
+		return nil
 	}
 	fmt.Fprintf(os.Stderr,
 		"\nThe invitation is printed once. Only its digest is stored, so this cannot be\n"+

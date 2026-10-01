@@ -78,7 +78,7 @@ export default function CareReportScreen() {
     return (
       <View style={styles.centered}>
         {invited ? (
-          <SignInSheet open onClose={() => setInvited(false)} />
+          <SignInSheet open firstRun onClose={() => setInvited(false)} />
         ) : (
           <SetupSheet
             open

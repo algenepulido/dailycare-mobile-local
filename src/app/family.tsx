@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { Button, DayReport, Icon, Screen, SignInSheet } from '@/components';
 import { SignedOut, fetchDay, fetchDayPhotos, listResidents } from '@/data/api';
@@ -40,6 +40,7 @@ export default function FamilyScreen() {
   const [signInOpen, setSignInOpen] = useState(false);
 
   const date = today();
+  const signedIn = Boolean(account);
 
   /** Who this account may read. The server decides; this shows what came back. */
   const loadPeople = useCallback(async () => {
@@ -55,8 +56,26 @@ export default function FamilyScreen() {
   }, []);
 
   useEffect(() => {
-    void loadPeople();
-  }, [loadPeople]);
+    if (signedIn) void loadPeople();
+  }, [signedIn, loadPeople]);
+
+  /**
+   * Nothing of one person's record survives the next person signing in.
+   *
+   * Signing out leaves this screen mounted - the device is still a family phone, so there is
+   * nowhere else for it to go - and everything it is holding is somebody's care record. A
+   * phone handed to a second family member would have shown them the first one's resident
+   * for as long as the new request took.
+   */
+  useEffect(() => {
+    if (!signedIn) {
+      setPeople(null);
+      setChosen(null);
+      setDay(undefined);
+      setPhotos(undefined);
+      setProblem(null);
+    }
+  }, [signedIn]);
 
   /**
    * The day, and its photographs, for whoever is chosen.
@@ -96,12 +115,17 @@ export default function FamilyScreen() {
     setRefreshing(false);
   }
 
-  if (problem === 'signedOut') {
+  // Signed out deliberately, or a session that ended on its own. The same screen for both,
+  // because the way back is the same and a family member has no half-written day underneath
+  // that the distinction would matter to.
+  if (!signedIn || problem === 'signedOut') {
     return (
       <Screen footer={<Button label="Sign in" onPress={() => setSignInOpen(true)} />}>
-        <Text style={styles.title}>Signed out</Text>
+        <Text style={styles.title}>DailyCare</Text>
         <Text style={styles.blurb}>
-          This session has ended. Sign in again to see today.
+          {problem === 'signedOut'
+            ? 'This session has ended. Sign in again to see today.'
+            : 'Sign in to see how your person is doing today.'}
         </Text>
         <SignInSheet open={signInOpen} onClose={() => setSignInOpen(false)} />
       </Screen>
@@ -127,15 +151,15 @@ export default function FamilyScreen() {
 
   return (
     <Screen
-      scroll={false}
       footer={<Button label="Sign out" variant="secondary" onPress={() => void signOut()} />}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={pullToRefresh} tintColor={color.clay} />
+      }
     >
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={pullToRefresh} tintColor={color.clay} />
-        }
-      >
+      {/* One view, so the screen's own gap between children does not open up between the
+          sections of the day - DayReport spaces those itself and the review sheet shows
+          them at that spacing. */}
+      <View>
         <Text style={styles.title}>{person ? person.displayName : 'Today'}</Text>
         <Text style={styles.blurb}>{longLabel(date)}</Text>
 
@@ -177,7 +201,7 @@ export default function FamilyScreen() {
             checklist={buildFamilyChecklist(day)}
           />
         )}
-      </ScrollView>
+      </View>
     </Screen>
   );
 }
