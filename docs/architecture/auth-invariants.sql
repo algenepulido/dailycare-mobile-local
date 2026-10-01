@@ -495,8 +495,25 @@ INSERT INTO resident_contacts
    'child', 'invited', 'a0000000-0000-0000-0000-00000000000a', now());
 INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
   ('9a000000-0000-0000-0000-00000000009a', 'invitation', h('priya'), now() + interval '7 days');
+-- A second grant, to somebody else, so the narrowness check below has something real to
+-- aim at. Written here with the rest of the fixtures, before any identity is taken on:
+-- contacts_insert admits a care manager and the session becomes Priya on the next line.
+INSERT INTO users (id, email, display_name) VALUES
+  ('9b000000-0000-0000-0000-00000000009b', 'sam@example.test', 'Sam');
+INSERT INTO resident_contacts
+  (id, facility_id, resident_id, user_id, relation, state, granted_by, granted_at) VALUES
+  ('9d000000-0000-0000-0000-00000000009d', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '9b000000-0000-0000-0000-00000000009b',
+   'sibling', 'invited', 'a0000000-0000-0000-0000-00000000000a', now());
 SELECT set_config('app.user_id', '9a000000-0000-0000-0000-00000000009a', false);
 \set QUIET off
+
+-- Forced for the length of this, because that is the condition the deployed system runs
+-- under and the one checks_begin() took away. Without it the owner is exempt, the update
+-- inside redeem_token lands whatever the policies say, and this block reports success on a
+-- transition that cannot happen anywhere else. It did exactly that: the suite passed and
+-- staging left the grant sitting at 'invited' with nothing raised.
+ALTER TABLE resident_contacts FORCE ROW LEVEL SECURITY;
 
 SELECT expect('an invited grant is not yet a reader',
   NOT app_is_contact('e1000000-0000-0000-0000-000000000001'));
@@ -516,6 +533,25 @@ SELECT expect('the facility''s own decision is still dated from when it was made
 SELECT expect('and a second grant to somebody else is untouched by any of it',
   (SELECT count(*) = 0 FROM resident_contacts
     WHERE user_id <> '9a000000-0000-0000-0000-00000000009a' AND state = 'active'));
+
+-- And it reaches nobody else's. Needs a second grant to aim at, or the attempt lands on
+-- an empty table and proves nothing - which is what the first version of this did.
+--
+-- Checked by reading the row rather than by expecting an error: an update a policy filters
+-- out changes nothing and raises nothing. That is the behaviour that let the original bug
+-- through, and a check written to catch an exception would miss it the same way.
+UPDATE resident_contacts SET state = 'active'
+ WHERE id = '9d000000-0000-0000-0000-00000000009d';
+
+SELECT expect('one person cannot accept another''s invitation',
+  (SELECT state = 'invited' FROM resident_contacts
+    WHERE id = '9d000000-0000-0000-0000-00000000009d'));
+
+SELECT expect('and their own is still the one that moved',
+  (SELECT state = 'active' FROM resident_contacts
+    WHERE id = '9c000000-0000-0000-0000-00000000009c'));
+
+ALTER TABLE resident_contacts NO FORCE ROW LEVEL SECURITY;
 
 \set QUIET on
 SELECT set_config('app.user_id', '', false);
