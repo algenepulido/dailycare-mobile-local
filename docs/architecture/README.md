@@ -1,5 +1,10 @@
 # Architecture
 
+**Reviewing this rather than working on it?** Start at
+[`../REVIEW-START-HERE.md`](../REVIEW-START-HERE.md) — the same material in prose,
+for somebody assessing whether the system is fit to hold health information. This
+file is the index to the evidence underneath it.
+
 The data model, the access model, and the classification the review package is generated
 from. Milestone 2 work, kept as SQL rather than as prose because a description of a
 constraint and a constraint are different things, and only one of them stops a mistake.
