@@ -84,6 +84,20 @@ func bootstrap(ctx context.Context, args []string) error {
 	}
 	fallback(relation, "BOOTSTRAP_RELATION")
 
+	if len(residents) == 0 {
+		for _, r := range strings.Split(os.Getenv("BOOTSTRAP_RESIDENTS"), ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				if err := residents.Set(r); err != nil {
+					return fmt.Errorf("BOOTSTRAP_RESIDENTS: %w", err)
+				}
+			}
+		}
+	}
+
+	// After the environment, not before it. This ran above the BOOTSTRAP_RESIDENTS block
+	// and refused a correct request: a family grant was rejected for naming no resident
+	// while the resident was sitting in an environment variable nothing had read yet. A
+	// check on a value has to come after everything that can set that value.
 	// The database would refuse an unknown value anyway - both of these are enums - but it
 	// would refuse it after the user row was written, leaving an account attached to
 	// nothing. Checked here, before anything is created.
@@ -105,15 +119,6 @@ func bootstrap(ctx context.Context, args []string) error {
 		}
 	default:
 		return fmt.Errorf("role %q is not one this creates: caregiver, care_manager or family", *role)
-	}
-	if len(residents) == 0 {
-		for _, r := range strings.Split(os.Getenv("BOOTSTRAP_RESIDENTS"), ",") {
-			if r = strings.TrimSpace(r); r != "" {
-				if err := residents.Set(r); err != nil {
-					return fmt.Errorf("BOOTSTRAP_RESIDENTS: %w", err)
-				}
-			}
-		}
 	}
 
 	// A reset needs the address and nothing else: the account is already there, with a
