@@ -275,6 +275,15 @@ func (a *API) dayPhotos(w http.ResponseWriter, r *http.Request, c db.Caller) {
 	}
 	photos, err := a.media.ForDay(r.Context(), c, id, on)
 	if err != nil {
+		// The same answer the day itself gives, because it is the same refusal. This
+		// returned 500 for a resident the session may not read, which is wrong twice:
+		// a refusal is not a failure, and answering 404 for the day and 500 for its
+		// photographs tells a caller the resident is there. Found by reading a day as a
+		// family member and then asking for the photographs of one they hold no grant for.
+		if errors.Is(err, media.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
 		a.fail(w, r, http.StatusInternalServerError, "could not read the photographs", err)
 		return
 	}

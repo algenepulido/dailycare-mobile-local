@@ -54,6 +54,8 @@ func bootstrap(ctx context.Context, args []string) error {
 	by := fs.String("by", "", "the address of the person doing this, recorded against the grant")
 	reset := fs.Bool("reset", false,
 		"issue a password reset for an account that already exists, instead of creating one")
+	revoke := fs.Bool("revoke", false,
+		"withdraw a family member's access to one resident, instead of creating anything")
 	var residents residentList
 	fs.Var(&residents, "resident", "a resident to assign them to; repeat for more")
 	if err := fs.Parse(args); err != nil {
@@ -66,6 +68,9 @@ func bootstrap(ctx context.Context, args []string) error {
 	// hand without the environment getting a say it was not asked for.
 	if !*reset && strings.EqualFold(os.Getenv("BOOTSTRAP_RESET"), "true") {
 		*reset = true
+	}
+	if !*revoke && strings.EqualFold(os.Getenv("BOOTSTRAP_REVOKE"), "true") {
+		*revoke = true
 	}
 	fallback(facility, "BOOTSTRAP_FACILITY")
 	fallback(email, "BOOTSTRAP_EMAIL")
@@ -129,6 +134,14 @@ func bootstrap(ctx context.Context, args []string) error {
 			return errors.New("--reset needs --email")
 		}
 		return issueReset(ctx, *email)
+	}
+
+	if *revoke {
+		if *email == "" || len(residents) != 1 || *by == "" {
+			fs.Usage()
+			return errors.New("--revoke needs --email, exactly one --resident, and --by")
+		}
+		return revokeAccess(ctx, *email, residents[0], *by)
 	}
 
 	if *facility == "" || *email == "" || *name == "" {
@@ -308,6 +321,81 @@ func fallback(flagValue *string, env string) {
 	if *flagValue == "" {
 		*flagValue = os.Getenv(env)
 	}
+}
+
+// revokeAccess withdraws one family member's access to one resident.
+//
+// Not a delete. The row stays, with who took it away and when, because a reviewer asks
+// both and neither can be reconstructed from a row that is gone - which is also why
+// access-policies.sql has no DELETE policy on this table at all.
+//
+// Per resident, like the grant. Somebody linked to two residents who should only lose one
+// keeps the other, and that is the ordinary case rather than the awkward one.
+//
+// Run as the care manager doing it, for the same reason the grant is: contacts_update
+// admits a care manager of that facility and the table is forced, so an unidentified
+// session changes nothing. revoked_by is then a name the database agreed to rather than
+// one it was handed.
+func revokeAccess(ctx context.Context, email, resident, by string) error {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return errors.New("DATABASE_URL is not set")
+	}
+	conn, err := connect(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var actor uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT id FROM users WHERE lower(email) = lower($1)`, by).Scan(&actor); err != nil {
+		return fmt.Errorf("--by %s: no account with that address", by)
+	}
+	if _, err := tx.Exec(ctx,
+		`SELECT set_config('app.user_id', $1, true)`, actor.String()); err != nil {
+		return err
+	}
+
+	var holder uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT id FROM users WHERE lower(email) = lower($1)`, email).Scan(&holder); err != nil {
+		return fmt.Errorf("no account for %s", email)
+	}
+
+	// Only a grant that is live. Revoking one already revoked would move revoked_at to
+	// today and lose the date it actually happened, which is the one thing this row is for.
+	tag, err := tx.Exec(ctx,
+		`UPDATE resident_contacts
+		    SET state = 'revoked', revoked_by = $1, revoked_at = now(), updated_at = now()
+		  WHERE user_id = $2 AND resident_id = $3 AND state <> 'revoked'`,
+		actor, holder, resident)
+	if err != nil {
+		return fmt.Errorf("withdrawing access: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Nothing changed, and an update a policy filters out says nothing either - so the
+		// two cases are reported together rather than guessed between. The caller knows
+		// which they meant.
+		return fmt.Errorf(
+			"nothing was withdrawn: %s holds no live grant for that resident, or %s is not a care manager of their facility",
+			email, by)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "\n%s no longer reads %s.\n", email, resident)
+	fmt.Fprintf(os.Stderr,
+		"The row is kept, with who withdrew it and when. Their account and any other\n"+
+			"resident they are linked to are untouched.\n")
+	return nil
 }
 
 // issueReset gives an existing account a way back in.
