@@ -394,3 +394,38 @@ func TestADayThatWasCorrectedSaysSo(t *testing.T) {
 		t.Errorf("the day that stands is not the correction: %+v", after.Note)
 	}
 }
+
+// A family member is told who looked after their resident.
+//
+// They cannot resolve filed_by themselves: users is closed to them outside their own row,
+// which is right and stays right - a family should not be able to read a building's staff
+// list. care_day_filed_by_name is scoped to the record instead, so the name arrives attached
+// to a day they may already read and gives no way to ask about anybody else.
+func TestTheDaySaysWhoFiledIt(t *testing.T) {
+	s, caregiver, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	if _, err := s.File(ctx, caregiver, resident, on, aDay()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The caregiver seeded by ward() is called "A Nurse".
+	got, err := s.Day(ctx, caregiver, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FiledByName != "A Nurse" {
+		t.Errorf("the caregiver reading their own day: got %q, want %q", got.FiledByName, "A Nurse")
+	}
+
+	daughter := grantFamily(t, resident)
+	fromFamily, err := s.Day(ctx, daughter, resident, on)
+	if err != nil {
+		t.Fatalf("a family member reading the day: %v", err)
+	}
+	if fromFamily.FiledByName != "A Nurse" {
+		t.Errorf("a family member reading the same day: got %q, want %q",
+			fromFamily.FiledByName, "A Nurse")
+	}
+}

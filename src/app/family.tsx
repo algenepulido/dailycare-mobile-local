@@ -2,14 +2,15 @@ import { Image } from 'expo-image';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
-import { Button, DayReport, Icon, Screen, SignInSheet } from '@/components';
+import { Button, Icon, Screen, SignInSheet } from '@/components';
 import { SignedOut, fetchDay, fetchDayPhotos, listResidents } from '@/data/api';
 import type { DayPhoto, RemoteResident } from '@/data/api';
 import { baselineFromWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { longLabel, today } from '@/domain/dates';
-import { buildChanges, buildFamilyChecklist } from '@/domain/rules';
-import type { Change, ChecklistGroup } from '@/domain/rules';
+import { familyDay } from '@/domain/familyDay';
+import type { FamilyDay } from '@/domain/familyDay';
+import { DEFAULT_BASELINE } from '@/domain/types';
 import { useSession } from '@/state/session';
 import { color, radii, type } from '@/theme/tokens';
 
@@ -157,8 +158,8 @@ export default function FamilyScreen() {
       }
     >
       {/* One view, so the screen's own gap between children does not open up between the
-          sections of the day - DayReport spaces those itself and the review sheet shows
-          them at that spacing. */}
+          lines of the summary. It is meant to read as paragraphs rather than as a stack of
+          separate things. */}
       <View>
         <Text style={styles.title}>{person ? person.displayName : 'Today'}</Text>
         <Text style={styles.blurb}>{longLabel(date)}</Text>
@@ -194,12 +195,7 @@ export default function FamilyScreen() {
         ) : day === null ? (
           <Nothing name={person?.displayName ?? 'they'} />
         ) : (
-          <Filed
-            day={day}
-            photos={photos}
-            changes={changesOf(day, person)}
-            checklist={buildFamilyChecklist(day)}
-          />
+          <Filed day={day} photos={photos} summary={summaryOf(day, person)} />
         )}
       </View>
     </Screen>
@@ -207,21 +203,31 @@ export default function FamilyScreen() {
 }
 
 /**
- * What changed, against the baseline the building holds for this resident.
+ * The day in the words a family reads it in, against the baseline the building holds.
  *
  * Not against a baseline typed on this phone: a family member never set one up, and the
- * comparison has to be the same one the caregiver's screen made or the two would disagree
- * about whether the day was ordinary.
+ * comparison has to be the one the caregiver's screen made or the two would disagree about
+ * whether the day was ordinary.
  *
- * Empty when any of the three observations came back as a word this app cannot name, which
- * fromWire turns into null. Reporting "Mood: " with nothing after it would be worse than
- * reporting nothing, and the checklist and the note are still there to read.
+ * All of the wording lives in domain/familyDay, deliberately. It is the part that is about
+ * what a family is told rather than about how it looks, so it is testable without a screen
+ * and survives the design pass untouched.
  */
-function changesOf(day: FiledSummary, person: RemoteResident | null): Change[] {
-  if (!person || !day.mood || !day.appetite || !day.sleep) return [];
-  return buildChanges(
-    { mood: day.mood, appetite: day.appetite, sleep: day.sleep, concerns: day.concerns },
-    baselineFromWire(person.baseline),
+function summaryOf(day: FiledSummary, person: RemoteResident | null): FamilyDay {
+  return familyDay(
+    {
+      mood: day.mood,
+      appetite: day.appetite,
+      sleep: day.sleep,
+      note: day.note,
+      shower: day.shower,
+      grooming: day.grooming,
+      meals: day.meals,
+      concerns: day.concerns,
+    },
+    person ? baselineFromWire(person.baseline) : DEFAULT_BASELINE,
+    person?.displayName ?? 'They',
+    day.filedByName,
   );
 }
 
@@ -240,55 +246,74 @@ function Nothing({ name }: { name: string }) {
 function Filed({
   day,
   photos,
-  changes,
-  checklist,
+  summary,
 }: {
   day: FiledSummary;
   photos: DayPhoto[] | undefined;
-  changes: Change[];
-  checklist: ChecklistGroup[];
+  summary: FamilyDay;
 }) {
   return (
     <>
       {/* That it was corrected, not what it used to say. A family is told the record
           changed; the versions behind it are a care manager's to read. */}
       {day.corrected ? (
-        <View style={styles.corrected}>
-          <Icon name="flag" size={15} color={color.warn} />
-          <Text style={styles.correctedText}>This day was corrected after it was first filed.</Text>
+        <Text style={styles.corrected}>
+          This was updated after it was first written.
+        </Text>
+      ) : null}
+
+      <Text style={styles.opening}>{summary.opening}</Text>
+
+      {summary.wentWell.map((line) => (
+        <Text key={line} style={styles.line}>
+          {line}
+        </Text>
+      ))}
+
+      {/* Only when there is something. A family should not be shown an empty worry
+          heading on a day that had nothing worth worrying about. */}
+      {summary.worthAnEye.length > 0 ? (
+        <>
+          <Text style={styles.heading}>Worth a gentle eye</Text>
+          {summary.worthAnEye.map((line) => (
+            <Text key={line} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+        </>
+      ) : null}
+
+      {summary.note ? (
+        <>
+          <Text style={styles.heading}>
+            {summary.noteBy ? `In ${summary.noteBy}'s words` : 'From the care home'}
+          </Text>
+          <Text style={styles.quote}>{summary.note}</Text>
+        </>
+      ) : null}
+
+      {photos === undefined ? (
+        <ActivityIndicator style={styles.spinner} color={color.clay} />
+      ) : photos.length > 0 ? (
+        <View style={styles.photos}>
+          {photos.map((photo) => (
+            <Image
+              key={photo.id}
+              source={{ uri: photo.url }}
+              style={styles.photo}
+              contentFit="cover"
+              accessibilityLabel="A photo from today"
+            />
+          ))}
         </View>
       ) : null}
 
-      <DayReport changes={changes} checklist={checklist} note={day.note}>
-        <Text style={styles.photoLabel}>Photo</Text>
-        {photos === undefined ? (
-          <ActivityIndicator style={styles.spinner} color={color.clay} />
-        ) : photos.length === 0 ? (
-          <View style={styles.noPhoto}>
-            <Icon name="camera" size={15} color={color.ink3} />
-            <Text style={styles.noPhotoText}>No photo today</Text>
-          </View>
-        ) : (
-          <View style={styles.photos}>
-            {photos.map((photo) => (
-              <Image
-                key={photo.id}
-                source={{ uri: photo.url }}
-                style={styles.photo}
-                contentFit="cover"
-                accessibilityLabel="Photo filed with today"
-              />
-            ))}
-          </View>
-        )}
-      </DayReport>
-
-      {/* Said rather than left to be noticed. A checklist with no medication group reads
-          to a family like a gap in the care, and it is a gap in what this app records. */}
+      {/* Said rather than left to be noticed. Medication is absent from everything above,
+          and absence on a care app reads as "nobody gave her anything". */}
       <Text style={styles.footnote}>
-        Medication is not part of this record. The care home keeps it in their own system.
+        Written {timeOfDay(day.filedAt)}. Medication is kept by the care home in their own
+        system and is not part of this.
       </Text>
-      <Text style={styles.footnote}>Filed {timeOfDay(day.filedAt)}.</Text>
     </>
   );
 }
@@ -331,24 +356,29 @@ const styles = StyleSheet.create({
   },
   nothingText: { ...type.body, color: color.ink2, flex: 1 },
 
-  corrected: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: radii.innerCard,
-    backgroundColor: color.honeySoft,
+  // Set to be read rather than audited. No cards, no counts, no colour standing in for a
+  // judgement - a family is being told about their person, and the typography is the whole
+  // of the structure. The design pass can replace every number here; what it should not have
+  // to undo is a layout that looks like a form.
+  corrected: { ...type.meta, color: color.ink3, marginTop: 16, fontStyle: 'italic' },
+
+  opening: { ...type.body, color: color.ink, fontSize: 18, lineHeight: 27, marginTop: 20 },
+  line: { ...type.body, color: color.ink2, fontSize: 16, lineHeight: 26, marginTop: 10 },
+  heading: { ...type.sectionLabel, color: color.ink3, marginTop: 26, marginBottom: 2 },
+  quote: {
+    ...type.body,
+    color: color.ink,
+    fontSize: 16,
+    lineHeight: 26,
+    marginTop: 10,
+    paddingLeft: 14,
+    borderLeftWidth: 2,
+    borderLeftColor: color.frame,
   },
-  correctedText: { ...type.chip, color: color.ink, flex: 1 },
 
-  photoLabel: { ...type.sectionLabel, marginTop: 22, marginBottom: 10, marginHorizontal: 2 },
-  spinner: { alignSelf: 'flex-start' },
-  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  photo: { width: 148, height: 148, borderRadius: radii.photoThumb, backgroundColor: color.paper2 },
-  noPhoto: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  noPhotoText: { ...type.chip, color: color.ink3 },
+  spinner: { alignSelf: 'flex-start', marginTop: 20 },
+  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 22 },
+  photo: { width: 196, height: 196, borderRadius: radii.photoThumb, backgroundColor: color.paper2 },
 
-  footnote: { ...type.meta, color: color.ink4, marginTop: 14 },
+  footnote: { ...type.meta, color: color.ink4, marginTop: 28, lineHeight: 19 },
 });

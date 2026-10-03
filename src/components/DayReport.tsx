@@ -16,16 +16,18 @@ interface DayReportProps {
 }
 
 /**
- * A day, as a family reads it: what changed, the care checklist, the note, the photograph.
+ * A day as the caregiver confirms it: what changed, the care checklist, the note, the photo.
  *
- * One component rather than two, because the caregiver's review sheet has described itself
- * as "what the family would receive" since milestone one and now there is a family
- * receiving it. Two copies of this block would let the sentence stop being true quietly -
- * a wording changed on one screen, a section reordered on the other, and a caregiver
- * confirming something slightly different from what a daughter is shown.
+ * The family's screen rendered this too for a while, on the reasoning that the review sheet
+ * had called itself "what the family would receive" since milestone one. The reasoning was
+ * half right. The family must see the same day the caregiver confirmed - that part stands,
+ * and the single filed record is what holds it - but this block is an account of the form:
+ * counts, flags, what is missing, in the order the form asks for it. That is the right shape
+ * for the person filling it in and the wrong one for a daughter, who is not reviewing a care
+ * record. domain/familyDay is where her half lives now, and this is the caregiver's again.
  *
- * Sections, order and copy come from the web prototype's summary and are not re-decided
- * here. The photograph is a slot rather than a prop for the reason above it.
+ * Sections, order and copy come from the web prototype's summary and are not re-decided here.
+ * The photograph is a slot rather than a prop because the two callers hold different things.
  */
 export function DayReport({ changes, checklist, note, children }: DayReportProps) {
   return (

@@ -77,10 +77,14 @@ SELECT expect('no file went in twice',
 --                         the owner had no CREATE anywhere.
 --   contact-acceptance.sql replaces that same function and creates a policy on a table it
 --                         owns. Neither needs CREATE on the schema.
+--   care-attribution.sql  creates a function, so it needs CREATE on the schema and has it
+--                         for the same reason audit-attribution.sql does: the migration runs
+--                         as the role that owns the schema, which kept CREATE when PUBLIC
+--                         lost it. Same reason as the second entry, not the third.
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));

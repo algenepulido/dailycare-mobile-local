@@ -1,10 +1,4 @@
-import {
-  ALERT_SLEEPS,
-  buildChanges,
-  buildChecklist,
-  buildFamilyChecklist,
-  mealCounts,
-} from './rules';
+import { ALERT_SLEEPS, buildChanges, buildChecklist, mealCounts } from './rules';
 import type { CheckIn } from './types';
 import { DEFAULT_BASELINE } from './types';
 
@@ -142,45 +136,5 @@ describe('the care checklist', () => {
       undefined,
       undefined,
     ]);
-  });
-});
-
-describe('the checklist a family member is shown', () => {
-  const filed = {
-    meals: [
-      { slot: 'breakfast' as const, happened: true, amount: 'most' as const },
-      { slot: 'lunch' as const, happened: true, amount: null },
-      { slot: 'dinner' as const, happened: false, amount: null },
-    ],
-    shower: true,
-    grooming: false,
-  };
-
-  // The reason this function exists. Medication is recorded on the phone and never sent, so
-  // a group built from what the server has would say "Medication 0/2" - and a daughter
-  // reading that concludes nobody gave her mother her tablets.
-  it('has no medication group, because the server has no medication', () => {
-    expect(buildFamilyChecklist(filed).map((g) => g.label)).toEqual(['Meals', 'Hygiene']);
-  });
-
-  it('counts the meals that happened and names the ones that did not', () => {
-    const [meals] = buildFamilyChecklist(filed);
-    expect([meals.done, meals.total]).toEqual([2, 3]);
-    expect(meals.doneItems).toEqual(['Breakfast (most)', 'Lunch']);
-    expect(meals.missedItems).toEqual(['Dinner']);
-  });
-
-  it('reads hygiene the same way the caregiver’s own checklist does', () => {
-    const [, hygiene] = buildFamilyChecklist(filed);
-    expect([hygiene.done, hygiene.total]).toEqual([1, 2]);
-    expect(hygiene.doneItems).toEqual(['Shower']);
-    expect(hygiene.missedItems).toEqual(['Grooming']);
-  });
-
-  // A day the server returned without every slot. It does return all three for a filed day,
-  // so this is about the shape being safe rather than about a case that happens.
-  it('treats a meal the record does not mention as not done', () => {
-    const [meals] = buildFamilyChecklist({ meals: [], shower: false, grooming: false });
-    expect([meals.done, meals.missedItems.length]).toEqual([0, 3]);
   });
 });

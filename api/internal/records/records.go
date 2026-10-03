@@ -94,6 +94,12 @@ type CareDay struct {
 	// what lets a history mark the days that were corrected without asking for the
 	// revisions of every day on the screen.
 	Corrected bool `json:"corrected"`
+	// Who filed it, by name rather than by the uuid in FiledBy.
+	//
+	// A family member cannot resolve that uuid - users is closed to them outside their own
+	// row, correctly - so without this the one person they most want named is the one the
+	// day cannot name. care_day_filed_by_name answers it for a day they may already read.
+	FiledByName string `json:"filedByName,omitempty"`
 }
 
 // read runs fn after recording that the resident's data was looked at. Unexported, and the
@@ -139,6 +145,19 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 			resident, on).Scan(&id, &d.ResidentID, &d.On, &d.Mood, &d.Appetite, &d.Sleep,
 			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt, &d.Corrected); err != nil {
 			return err
+		}
+
+		// The name, through the function that is scoped to this record rather than to the
+		// person. Null for a caller who may not read the resident, which cannot happen here
+		// - read() has already proved they can - so a null would mean the day has a filed_by
+		// pointing at nobody, and the screen says "the care home" rather than an empty space.
+		var filer *string
+		if err := tx.QueryRow(ctx,
+			`SELECT care_day_filed_by_name($1)`, id).Scan(&filer); err != nil {
+			return err
+		}
+		if filer != nil {
+			d.FiledByName = *filer
 		}
 
 		// Ordered by the enum rather than by name, so breakfast comes before lunch comes

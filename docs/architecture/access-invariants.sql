@@ -248,6 +248,20 @@ $$);
 SELECT expect_rows('her own grant, so the app can list who she is linked to', 1,
   'SELECT * FROM resident_contacts');
 
+-- Who looked after her mother, which is the one thing the day is missing without it. The
+-- home's own weekly summary names the caregiver throughout, so a family app that cannot is
+-- not the same product.
+--
+-- Scoped to the record and not to the person: the second check asks about a day she may not
+-- read and gets nothing back. Note what that is - no name, rather than a refusal - which is
+-- the same answer the rest of this gives her about Robert, so it discloses nothing about
+-- whether the day exists.
+SELECT expect('she is told who looked after her mother',
+  care_day_filed_by_name('cd000000-0000-0000-0000-000000000001') = 'Maria');
+
+SELECT expect('and no name at all from a day that is not hers',
+  care_day_filed_by_name('cd000000-0000-0000-0000-000000000002') IS NULL);
+
 
 -- ── access that has been taken away ────────────────────────────────────────────
 

@@ -122,6 +122,9 @@ export interface FiledDay {
   meals: { slot: string; happened: boolean; amount?: string }[];
   concerns: string[];
   filedBy?: string;
+  /** The caregiver's name. A family member cannot resolve filedBy - users is closed to them
+   *  outside their own row - so the server resolves it for the day they are reading. */
+  filedByName?: string;
   filedAt?: string;
   /** Present on a revision a later one replaced. Absent on the day as it now stands. */
   supersededAt?: string;
@@ -133,6 +136,8 @@ export interface FiledDay {
  *  also the words on the screen. */
 export interface FiledSummary {
   filedAt: string;
+  /** Who filed it, by name. Empty when the server did not say. */
+  filedByName: string;
   /** When a correction replaced this one. Null on the version that currently stands, so
    *  a list of revisions tells you which is live without a second field saying so. */
   supersededAt: string | null;
@@ -183,6 +188,7 @@ export function fromWire(day: FiledDay): FiledSummary | null {
   if (!day.filedAt) return null;
   return {
     filedAt: day.filedAt,
+    filedByName: day.filedByName ?? '',
     supersededAt: day.supersededAt ?? null,
     corrected: day.corrected ?? false,
     mood: (day.mood && MOOD_BACK[day.mood]) || null,
