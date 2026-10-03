@@ -8,8 +8,8 @@ import type { DayPhoto, RemoteResident } from '@/data/api';
 import { baselineFromWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { longLabel, today } from '@/domain/dates';
-import { familyDay } from '@/domain/familyDay';
-import type { FamilyDay } from '@/domain/familyDay';
+import { STEADY_DAY, familyDay } from '@/domain/familyDay';
+import type { CareGroup, FamilyDay } from '@/domain/familyDay';
 import { DEFAULT_BASELINE } from '@/domain/types';
 import { useSession } from '@/state/session';
 import { color, radii, type } from '@/theme/tokens';
@@ -254,39 +254,37 @@ function Filed({
 }) {
   return (
     <>
-      {/* That it was corrected, not what it used to say. A family is told the record
-          changed; the versions behind it are a care manager's to read. */}
+      {summary.from ? <Text style={styles.from}>from {summary.from}</Text> : null}
+
+      {/* That it was updated, not what it used to say. A family is told the record changed;
+          the versions behind it are a care manager's to read. */}
       {day.corrected ? (
-        <Text style={styles.corrected}>
-          This was updated after it was first written.
-        </Text>
+        <Text style={styles.corrected}>This was updated after it was first written.</Text>
       ) : null}
 
-      <Text style={styles.opening}>{summary.opening}</Text>
+      <Text style={styles.heading}>What changed today</Text>
+      {summary.changed.length === 0 ? (
+        <View style={styles.steady}>
+          <Icon name="check" size={18} color={color.sage} />
+          <Text style={styles.steadyText}>{STEADY_DAY}</Text>
+        </View>
+      ) : (
+        summary.changed.map((line) => (
+          <Text key={line} style={styles.line}>
+            {line}
+          </Text>
+        ))
+      )}
 
-      {summary.wentWell.map((line) => (
-        <Text key={line} style={styles.line}>
-          {line}
-        </Text>
+      <Text style={styles.heading}>Care today</Text>
+      {summary.care.map((g) => (
+        <CareRow key={g.label} group={g} />
       ))}
-
-      {/* Only when there is something. A family should not be shown an empty worry
-          heading on a day that had nothing worth worrying about. */}
-      {summary.worthAnEye.length > 0 ? (
-        <>
-          <Text style={styles.heading}>Worth a gentle eye</Text>
-          {summary.worthAnEye.map((line) => (
-            <Text key={line} style={styles.line}>
-              {line}
-            </Text>
-          ))}
-        </>
-      ) : null}
 
       {summary.note ? (
         <>
           <Text style={styles.heading}>
-            {summary.noteBy ? `In ${summary.noteBy}'s words` : 'From the care home'}
+            {summary.from ? `Note from ${summary.from}` : 'Note from the care home'}
           </Text>
           <Text style={styles.quote}>{summary.note}</Text>
         </>
@@ -295,26 +293,65 @@ function Filed({
       {photos === undefined ? (
         <ActivityIndicator style={styles.spinner} color={color.clay} />
       ) : photos.length > 0 ? (
-        <View style={styles.photos}>
-          {photos.map((photo) => (
-            <Image
-              key={photo.id}
-              source={{ uri: photo.url }}
-              style={styles.photo}
-              contentFit="cover"
-              accessibilityLabel="A photo from today"
-            />
-          ))}
-        </View>
+        <>
+          <Text style={styles.heading}>Photo from today</Text>
+          <View style={styles.photos}>
+            {photos.map((photo) => (
+              <Image
+                key={photo.id}
+                source={{ uri: photo.url }}
+                style={styles.photo}
+                contentFit="cover"
+                accessibilityLabel="A photo from today"
+              />
+            ))}
+          </View>
+        </>
       ) : null}
 
-      {/* Said rather than left to be noticed. Medication is absent from everything above,
-          and absence on a care app reads as "nobody gave her anything". */}
+      {/* Who it came from, again. The care home's own summary says it twice - once at the
+          top and once at the foot - and the second one is what tells a family why this is
+          on their phone at all. */}
       <Text style={styles.footnote}>
-        Written {timeOfDay(day.filedAt)}. Medication is kept by the care home in their own
-        system and is not part of this.
+        {summary.from
+          ? `Written by ${summary.from} at the care home, ${timeOfDay(day.filedAt)}.`
+          : `Written at the care home, ${timeOfDay(day.filedAt)}.`}
       </Text>
     </>
+  );
+}
+
+/**
+ * One group of care information.
+ *
+ * A count and the names, which is how the care home's own daily summary puts it and is the
+ * fastest thing to take in. No colour standing in for a judgement: the summary a family gets
+ * today has no flags in it, and flags belong to the caregiver confirming what they filed.
+ */
+function CareRow({ group }: { group: CareGroup }) {
+  return (
+    <View style={styles.care}>
+      <View style={styles.careHead}>
+        <Text style={styles.careLabel}>{group.label}</Text>
+        {group.absent ? null : (
+          <Text style={styles.careCount}>
+            {group.done} of {group.total}
+          </Text>
+        )}
+      </View>
+      {group.absent ? (
+        <Text style={styles.careAbsent}>{group.absent}</Text>
+      ) : (
+        <>
+          {group.did.length > 0 ? (
+            <Text style={styles.careDid}>{group.did.join(', ')}</Text>
+          ) : null}
+          {group.didNot.length > 0 ? (
+            <Text style={styles.careDidNot}>Not recorded: {group.didNot.join(', ')}</Text>
+          ) : null}
+        </>
+      )}
+    </View>
   );
 }
 
@@ -356,20 +393,48 @@ const styles = StyleSheet.create({
   },
   nothingText: { ...type.body, color: color.ink2, flex: 1 },
 
-  // Set to be read rather than audited. No cards, no counts, no colour standing in for a
-  // judgement - a family is being told about their person, and the typography is the whole
-  // of the structure. The design pass can replace every number here; what it should not have
-  // to undo is a layout that looks like a form.
-  corrected: { ...type.meta, color: color.ink3, marginTop: 16, fontStyle: 'italic' },
+  // Laid out to be scanned, which is what a daily update is for - the care home's own
+  // summary can be taken in at the end of a shift and so should this. No colour standing in
+  // for a judgement: that summary has no flags in it. The design pass can replace every
+  // number here; what it should not have to undo is the order.
+  from: { ...type.meta, color: color.ink3, marginTop: 2 },
+  corrected: { ...type.meta, color: color.ink3, marginTop: 14, fontStyle: 'italic' },
 
-  opening: { ...type.body, color: color.ink, fontSize: 18, lineHeight: 27, marginTop: 20 },
-  line: { ...type.body, color: color.ink2, fontSize: 16, lineHeight: 26, marginTop: 10 },
-  heading: { ...type.sectionLabel, color: color.ink3, marginTop: 26, marginBottom: 2 },
+  heading: { ...type.sectionLabel, color: color.ink3, marginTop: 26, marginBottom: 4 },
+  line: { ...type.body, color: color.ink, fontSize: 16, lineHeight: 25, marginTop: 8 },
+
+  steady: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+    padding: 14,
+    borderRadius: radii.innerCard,
+    backgroundColor: color.sageSoft,
+  },
+  steadyText: { ...type.body, color: color.ink, flex: 1 },
+
+  care: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: radii.innerCard,
+    borderWidth: 1,
+    borderColor: color.line,
+    backgroundColor: color.white,
+  },
+  careHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  careLabel: { ...type.checklistItem, color: color.ink },
+  careCount: { ...type.chip, color: color.ink3 },
+  careDid: { ...type.body, color: color.ink2, marginTop: 4 },
+  careDidNot: { ...type.body, color: color.ink3, marginTop: 4 },
+  careAbsent: { ...type.body, color: color.ink3, marginTop: 4 },
+
   quote: {
     ...type.body,
     color: color.ink,
     fontSize: 16,
-    lineHeight: 26,
+    lineHeight: 25,
     marginTop: 10,
     paddingLeft: 14,
     borderLeftWidth: 2,
@@ -377,7 +442,7 @@ const styles = StyleSheet.create({
   },
 
   spinner: { alignSelf: 'flex-start', marginTop: 20 },
-  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 22 },
+  photos: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   photo: { width: 196, height: 196, borderRadius: radii.photoThumb, backgroundColor: color.paper2 },
 
   footnote: { ...type.meta, color: color.ink4, marginTop: 28, lineHeight: 19 },
