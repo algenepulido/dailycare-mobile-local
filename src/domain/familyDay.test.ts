@@ -55,8 +55,7 @@ describe('a day as a family reads it', () => {
       'Cathy',
       'Maria',
     );
-    expect(d.wentWell).toContain('Cathy had breakfast and lunch.');
-    expect(d.wentWell).toContain('Most of the breakfast was eaten.');
+    expect(d.wentWell).toContain('Cathy had breakfast and lunch — most of the breakfast.');
     expect(d.worthAnEye).toContain('Dinner was not recorded.');
   });
 
@@ -75,13 +74,13 @@ describe('a day as a family reads it', () => {
 
   it('puts a difference that is an improvement with the good news', () => {
     const d = familyDay(day({ appetite: 'Good' }), usual, 'Cathy', 'Maria');
-    expect(d.wentWell).toContain('Their appetite was good today, where fair is usual.');
+    expect(d.wentWell).toContain("Cathy's appetite was good today. Fair is the usual.");
     expect(d.worthAnEye).toEqual([]);
   });
 
   it('puts a difference that is not with the gentler half, and keeps the comparison', () => {
     const d = familyDay(day({ appetite: 'Poor' }), usual, 'Cathy', 'Maria');
-    expect(d.worthAnEye).toContain('Their appetite was poor today, where fair is usual.');
+    expect(d.worthAnEye).toContain("Cathy's appetite was poor today. Fair is the usual.");
   });
 
   it('says a concern in words rather than in the stored shorthand', () => {
@@ -153,5 +152,25 @@ describe('a day as a family reads it', () => {
     expect(eye).toContain('agitated');
     expect(eye).toContain('No shower or grooming was recorded.');
     expect(eye).toContain('Cathy was in some pain today.');
+  });
+});
+
+// Sleep needs two grammars in one sentence: what happened is a verb, what is usual is a
+// thing. One form for both gave "Slept restlessly is the usual".
+describe('how a night reads', () => {
+  const usualNight: Baseline = { mood: 'Calm', appetite: 'Fair', sleep: 'Restless' };
+  const base: FiledDayFacts = {
+    mood: 'Calm', appetite: 'Fair', sleep: 'Restless', note: '', shower: true, grooming: true,
+    meals: [], concerns: [],
+  };
+
+  it('says the night and then what is usual, in sentences that parse', () => {
+    const d = familyDay({ ...base, sleep: 'Up a lot' }, usualNight, 'Cathy', 'Maria');
+    expect(d.worthAnEye).toContain('Cathy was up a lot last night. A restless night is the usual.');
+  });
+
+  it('puts a better night with the good news', () => {
+    const d = familyDay({ ...base, sleep: 'Slept well' }, usualNight, 'Cathy', 'Maria');
+    expect(d.wentWell).toContain('Cathy slept well last night. A restless night is the usual.');
   });
 });

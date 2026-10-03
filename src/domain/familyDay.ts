@@ -109,16 +109,16 @@ export function familyDay(
       missed.push(MEAL_NAME[slot]);
     }
   }
-  if (eaten.length === 3) {
-    wentWell.push(`${them} had all three meals.`);
-  } else if (eaten.length > 0) {
-    wentWell.push(`${them} had ${list(eaten)}.`);
-  }
-  if (amounts.length > 0) {
-    // Passive, and deliberately: the alternative needs a pronoun for the resident and the
-    // record does not hold one. A family app that guesses at "he" or "she" guesses wrong
-    // eventually, in the one place it would be most felt.
-    wentWell.push(`${capitalise(list(amounts))} ${amounts.length === 1 ? 'was' : 'were'} eaten.`);
+  if (eaten.length > 0) {
+    const meals = eaten.length === 3 ? 'all three meals' : list(eaten);
+    // The amounts close the sentence rather than sitting inside the list. Inside it they
+    // read as another item - "breakfast - most of it and lunch" - which is the sort of thing
+    // only reading it aloud catches.
+    wentWell.push(
+      amounts.length > 0
+        ? `${them} had ${meals} — ${list(amounts)}.`
+        : `${them} had ${meals}.`,
+    );
   }
   if (missed.length > 0) {
     // "was not recorded", not "not done". The difference matters and is true: a meal with no
@@ -129,11 +129,11 @@ export function familyDay(
   /* -------------------------------------------------------------- hygiene */
 
   if (day.shower && day.grooming) {
-    wentWell.push('A shower, and time spent on how they look.');
+    wentWell.push('A shower, and help getting ready.');
   } else if (day.shower) {
     wentWell.push('A shower today.');
   } else if (day.grooming) {
-    wentWell.push('Time spent on how they look.');
+    wentWell.push('Help getting ready today.');
   }
   if (!day.shower && !day.grooming) {
     worthAnEye.push('No shower or grooming was recorded.');
@@ -188,25 +188,49 @@ function phrase(them: string, kind: string, value: string, usual: string): strin
   const u = usual.toLowerCase();
   switch (kind) {
     case 'mood':
-      return `${them} seemed ${v} today, where ${u} is usual.`;
+      return `${them} seemed ${v} today. ${capitalise(u)} is the usual.`;
     case 'appetite':
-      return `Their appetite was ${v} today, where ${u} is usual.`;
+      return `${them}'s appetite was ${v} today. ${capitalise(u)} is the usual.`;
     default:
-      return `They slept ${sleepWords(v)} last night, where ${sleepWords(u)} is usual.`;
+      // The two halves need different grammar. What happened last night is a verb - "was up
+      // a lot" - and what is usual is a thing - "a restless night". Using the verb for both
+      // produced "Slept restlessly is the usual", which is the sort of sentence that only
+      // shows itself on a screen.
+      return `${them} ${sleepWords(v)} last night. ${usualNight(u)} is the usual.`;
   }
 }
 
-/** The sleep values read as a state rather than as a manner, so they need a verb around them. */
+function usualNight(value: string): string {
+  switch (value) {
+    case 'slept well':
+      return 'A good night';
+    case 'restless':
+      return 'A restless night';
+    case 'up a lot':
+      return 'A broken night';
+    default:
+      return 'A sleepless night';
+  }
+}
+
+/**
+ * Sleep in two short sentences rather than one long one.
+ *
+ * The four stored values are a mix of states and manners - "slept well", "up a lot" - and a
+ * single sentence comparing one to another came out as "slept in and out of sleep last
+ * night, where restlessly is usual". Each is given its own clause instead, which is also how
+ * the mood and appetite lines read, so the three of them are one pattern.
+ */
 function sleepWords(value: string): string {
   switch (value) {
     case 'slept well':
-      return 'well';
+      return 'slept well';
     case 'restless':
-      return 'restlessly';
+      return 'slept restlessly';
     case 'up a lot':
-      return 'in and out of sleep';
+      return 'was up a lot';
     default:
-      return 'badly';
+      return 'barely slept';
   }
 }
 
