@@ -224,6 +224,7 @@ function summaryOf(day: FiledSummary, person: RemoteResident | null): FamilyDay 
       grooming: day.grooming,
       meals: day.meals,
       concerns: day.concerns,
+      medication: day.medication,
     },
     person ? baselineFromWire(person.baseline) : DEFAULT_BASELINE,
     person?.displayName ?? 'They',
@@ -333,24 +334,19 @@ function CareRow({ group }: { group: CareGroup }) {
     <View style={styles.care}>
       <View style={styles.careHead}>
         <Text style={styles.careLabel}>{group.label}</Text>
-        {group.absent ? null : (
-          <Text style={styles.careCount}>
-            {group.done} of {group.total}
-          </Text>
-        )}
+        <Text style={styles.careCount}>
+          {group.done} of {group.total}
+        </Text>
       </View>
-      {group.absent ? (
-        <Text style={styles.careAbsent}>{group.absent}</Text>
-      ) : (
-        <>
-          {group.did.length > 0 ? (
-            <Text style={styles.careDid}>{group.did.join(', ')}</Text>
-          ) : null}
-          {group.didNot.length > 0 ? (
-            <Text style={styles.careDidNot}>Not recorded: {group.didNot.join(', ')}</Text>
-          ) : null}
-        </>
-      )}
+      {group.did.length > 0 ? (
+        <Text style={styles.careDid}>{group.did.join(', ')}</Text>
+      ) : null}
+      {group.didNot.length > 0 ? (
+        <Text style={styles.careDidNot}>Not recorded: {group.didNot.join(', ')}</Text>
+      ) : null}
+      {/* Quiet, and under the thing it is about. A family should be able to tell a
+          caregiver's own record from a pharmacy's without being warned about it. */}
+      {group.source ? <Text style={styles.careSource}>{group.source}</Text> : null}
     </View>
   );
 }
@@ -428,7 +424,7 @@ const styles = StyleSheet.create({
   careCount: { ...type.chip, color: color.ink3 },
   careDid: { ...type.body, color: color.ink2, marginTop: 4 },
   careDidNot: { ...type.body, color: color.ink3, marginTop: 4 },
-  careAbsent: { ...type.body, color: color.ink3, marginTop: 4 },
+  careSource: { ...type.meta, color: color.ink4, marginTop: 6 },
 
   quote: {
     ...type.body,

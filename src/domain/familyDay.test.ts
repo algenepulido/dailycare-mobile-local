@@ -18,6 +18,7 @@ function day(over: Partial<FiledDayFacts> = {}): FiledDayFacts {
       { slot: 'dinner', happened: true, amount: null },
     ],
     concerns: [],
+    medication: [],
     ...over,
   };
 }
@@ -99,17 +100,66 @@ describe('a day as a family reads it', () => {
   });
 
   /**
-   * Medication keeps its place in the list instead of being dropped from it.
+   * Medication, and whose statement it is.
    *
-   * The care home's daily summary shows it and ours cannot: a tick in the caregiver's app is
-   * not a dispensing record and is never sent. Showing nothing there leaves a family reading
-   * the silence, and silence where medication should be reads as nobody having given any.
+   * The same two letters mean something different depending on where they came from: a
+   * caregiver's tick is somebody saying they gave a dose, and a clinical system's row is a
+   * record that one was administered. medication_source has carried both values since the
+   * schema was written. So the family is shown the ticks and told whose they are.
    */
-  it('keeps medication in its place and says where it is kept', () => {
-    const meds = group(familyDay(day(), usual, 'Cathy', 'Maria'), 'Medication');
-    expect(meds.absent).toBe('Recorded by the care home in their own system.');
-    expect(meds.did).toEqual([]);
+  it('shows what the caregiver recorded, and says it was theirs', () => {
+    const d = familyDay(
+      day({
+        medication: [
+          { slot: 'am', status: 'given', detail: '', recordedBy: 'Maria Santos' },
+          { slot: 'pm', status: 'given', detail: '', recordedBy: 'Maria Santos' },
+        ],
+      }),
+      usual,
+      'Cathy',
+      'Maria Santos',
+    );
+    const meds = group(d, 'Medication');
+    expect([meds.done, meds.total]).toEqual([2, 2]);
+    expect(meds.did).toEqual(['A.M', 'P.M']);
     expect(meds.didNot).toEqual([]);
+    expect(meds.source).toBe('Maria Santos recorded this.');
+  });
+
+  it('carries a supplemental dose as the caregiver described it', () => {
+    const d = familyDay(
+      day({
+        medication: [
+          { slot: 'am', status: 'given', detail: '', recordedBy: 'Maria Santos' },
+          {
+            slot: 'supplemental',
+            status: 'given',
+            detail: 'Tylenol 500mg twice today',
+            recordedBy: 'Maria Santos',
+          },
+        ],
+      }),
+      usual,
+      'Cathy',
+      'Maria Santos',
+    );
+    const meds = group(d, 'Medication');
+    expect(meds.did).toEqual(['A.M', 'Tylenol 500mg twice today']);
+    expect(meds.didNot).toEqual(['P.M']);
+  });
+
+  // A slot nobody ticked is a slot nobody wrote down, which is the same distinction the
+  // meals carry. It is never a claim that a dose was missed.
+  it('says a slot was not recorded rather than not given', () => {
+    const meds = group(familyDay(day(), usual, 'Cathy', 'Maria'), 'Medication');
+    expect(meds.did).toEqual([]);
+    expect(meds.didNot).toEqual(['A.M', 'P.M']);
+  });
+
+  // Nothing recorded means nothing to attribute. A provenance line on an empty group would
+  // be a sentence about who did not say something.
+  it('says nothing about the source when nothing was recorded', () => {
+    expect(group(familyDay(day(), usual, 'Cathy', 'Maria'), 'Medication').source).toBeUndefined();
   });
 
   /* ---------------------------------------------------------------- the note */
@@ -145,7 +195,7 @@ describe('a day as a family reads it', () => {
     );
     const words = [
       ...d.changed,
-      ...d.care.flatMap((g) => [g.label, g.absent ?? '', ...g.did, ...g.didNot]),
+      ...d.care.flatMap((g) => [g.label, g.source ?? '', ...g.did, ...g.didNot]),
     ]
       .join(' ')
       .toLowerCase();

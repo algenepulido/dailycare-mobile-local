@@ -158,11 +158,11 @@ export function AlreadyFiled({
             </View>
           )}
 
-          {/* Medication is the one thing here that genuinely never leaves the phone: a
-              tick is a caregiver saying they gave it, and medication_events is a record
-              that it was dispensed, and the schema is careful about the difference. */}
+          {/* It travels from milestone four, marked as a caregiver's own record. The
+              family is shown the ticks and told whose they are, which is the distinction
+              medication_source was written for. */}
           <Text style={styles.footnote}>
-            Medication stays on the phone that recorded it and is not sent.
+            Medication goes to the family as your record of it, not as a pharmacy's.
           </Text>
 
           {/* The only safe way in to a correction. Sending the form without this loads
@@ -173,8 +173,8 @@ export function AlreadyFiled({
           <View style={styles.correct}>
             <Button label="Correct this day" variant="secondary" onPress={onCorrect} />
             <Text style={styles.correctHint}>
-              This fills the form with what is on the record now. Medication is not part
-              of it and is not filled in - it stays on the phone that gave it.
+              This fills the form with what is on the record now. Medication is not filled
+              in, so a correction cannot take back a dose you already recorded.
             </Text>
           </View>
         </ScrollView>

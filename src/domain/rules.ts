@@ -56,7 +56,7 @@ export interface Change {
  *
  * Narrower than CheckIn on purpose. A day read back from the server is this shape without
  * being a CheckIn - it has no id, no caregiver, no photo on this device and no medication,
- * because a tick for a tablet never leaves the phone that recorded it. A full CheckIn still
+ * because medication is its own event rather than part of a day. A full CheckIn still
  * satisfies this, so every caller that had one keeps working.
  */
 export interface Observed {

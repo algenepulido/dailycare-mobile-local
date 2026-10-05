@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -94,6 +95,9 @@ type CareDay struct {
 	// what lets a history mark the days that were corrected without asking for the
 	// revisions of every day on the screen.
 	Corrected bool `json:"corrected"`
+	// What the caregiver recorded about medication for this day, if anything. Empty rather
+	// than absent so a client can tell "nothing recorded" from "this server does not say".
+	Medication []MedicationRecord `json:"medication"`
 	// Who filed it, by name rather than by the uuid in FiledBy.
 	//
 	// A family member cannot resolve that uuid - users is closed to them outside their own
@@ -124,7 +128,10 @@ func (s *Store) read(ctx context.Context, c db.Caller, resident uuid.UUID, subje
 
 // Day returns one resident's day, or ErrNotVisible.
 func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on time.Time) (*CareDay, error) {
-	d := CareDay{ResidentID: resident, On: on, Meals: []Meal{}, Concerns: []string{}}
+	d := CareDay{
+		ResidentID: resident, On: on,
+		Meals: []Meal{}, Concerns: []string{}, Medication: []MedicationRecord{},
+	}
 	err := s.read(ctx, c, resident, "care_days", func(tx pgx.Tx) error {
 		// The current revision only. A corrected day has an older row with the same
 		// resident and date, and showing that one would be showing a past that was
@@ -158,6 +165,37 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 		}
 		if filer != nil {
 			d.FiledByName = *filer
+		}
+
+		// Medication, with whose record it is.
+		//
+		// Only the caregiver's own rows here. A clinical feed writes with a different source
+		// and is a different statement - "a dose was administered" rather than "somebody
+		// recorded giving one" - and the day a family reads has to be able to say which it
+		// is holding. When PointClickCare arrives this is where the two part company.
+		//
+		// The name comes from the same SECURITY DEFINER function the day's own attribution
+		// uses, for the same reason: users is closed to a family member outside their own
+		// row, and the name belongs to the record rather than to the person.
+		meds, err := tx.Query(ctx, `
+			SELECT me.slot::text, me.status::text, coalesce(me.detail, ''),
+			       coalesce(medication_recorded_by_name(me.id), '')
+			  FROM medication_events me
+			 WHERE me.resident_id = $1 AND me.care_date = $2 AND me.source = 'caregiver'
+			 ORDER BY me.slot, me.recorded_at`, resident, on)
+		if err != nil {
+			return err
+		}
+		defer meds.Close()
+		for meds.Next() {
+			var m MedicationRecord
+			if err := meds.Scan(&m.Slot, &m.Status, &m.Detail, &m.RecordedBy); err != nil {
+				return err
+			}
+			d.Medication = append(d.Medication, m)
+		}
+		if err := meds.Err(); err != nil {
+			return err
 		}
 
 		// Ordered by the enum rather than by name, so breakfast comes before lunch comes
@@ -463,6 +501,27 @@ type Filing struct {
 	Grooming bool     `json:"grooming"`
 	Meals    []Meal   `json:"meals"`
 	Concerns []string `json:"concerns"`
+	// What the caregiver ticked. Written as medication_events with source 'caregiver', which
+	// is the distinction the schema was built for: a tick and a clinical system's entry are
+	// both valid and the family is told which one they are reading.
+	Medication Medication `json:"medication"`
+}
+
+type Medication struct {
+	AM           bool   `json:"am"`
+	PM           bool   `json:"pm"`
+	Supplemental string `json:"supplemental"`
+}
+
+// What a day says about medication when it is read back.
+type MedicationRecord struct {
+	Slot   string `json:"slot"`
+	Status string `json:"status"`
+	// Only for a supplemental dose, which is the one the schema requires a description for.
+	Detail string `json:"detail,omitempty"`
+	// The caregiver's name, so a family is told whose record this is rather than being left
+	// to assume it came from a pharmacy.
+	RecordedBy string `json:"recordedBy,omitempty"`
 }
 
 type Meal struct {
@@ -537,6 +596,53 @@ func (s *Store) File(ctx context.Context, c db.Caller, resident uuid.UUID, on ti
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO care_day_concerns (care_day_id, concern) VALUES ($1, $2)`,
 				id, name); err != nil {
+				return policyRefusal(err)
+			}
+		}
+
+		// Medication, as the caregiver's own record of it.
+		//
+		// A ticked slot only. An untouched box is not a claim that nothing was given, and
+		// medication_status has 'not_recorded' for exactly that - which absence says more
+		// plainly than a row would.
+		//
+		// ON CONFLICT DO NOTHING against medication_events_one_per_slot, which allows one
+		// row per resident per day per scheduled slot. That makes a correction safe in the
+		// one direction it can go: the form a correction opens does not carry medication
+		// forward - deliberately, see draftFromFiled - so re-filing a day cannot silently
+		// retract a dose, and re-sending the same tick is a no-op rather than a failure.
+		// Retracting one is not possible at all, which is the schema's position: a
+		// medication event is a fact about a moment and the caregiver has no update policy.
+		for _, slot := range []struct {
+			name   string
+			ticked bool
+		}{{"am", f.Medication.AM}, {"pm", f.Medication.PM}} {
+			if !slot.ticked {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO medication_events
+				  (facility_id, resident_id, care_date, slot, status, source, recorded_by)
+				VALUES ($1, $2, $3, $4, 'given', 'caregiver', $5)
+				ON CONFLICT DO NOTHING`,
+				facility, resident, on, slot.name, c.UserID); err != nil {
+				return policyRefusal(err)
+			}
+		}
+
+		// Supplemental doses are outside that unique index, because more than one in a day
+		// is ordinary. So the guard against a second filing duplicating one is written here
+		// instead, on the text itself.
+		if detail := strings.TrimSpace(f.Medication.Supplemental); detail != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO medication_events
+				  (facility_id, resident_id, care_date, slot, status, source, recorded_by, detail)
+				SELECT $1, $2, $3, 'supplemental', 'given', 'caregiver', $4, $5
+				 WHERE NOT EXISTS (
+				   SELECT 1 FROM medication_events
+				    WHERE resident_id = $2 AND care_date = $3 AND slot = 'supplemental'
+				      AND source = 'caregiver' AND detail = $5)`,
+				facility, resident, on, c.UserID, detail); err != nil {
 				return policyRefusal(err)
 			}
 		}

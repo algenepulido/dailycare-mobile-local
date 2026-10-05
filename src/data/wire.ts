@@ -70,16 +70,24 @@ export interface WireDay {
   grooming: boolean;
   meals: { slot: string; happened: boolean; amount?: string }[];
   concerns: string[];
+  /**
+   * The medication the caregiver ticked, as a caregiver's own record of it.
+   *
+   * Sent from milestone four onwards. It was held back before that on the reasoning that a
+   * tick is not a dispensing record, which is true and was half the picture: the schema's own
+   * comment on medication_source says a caregiver's tick and a clinical system's entry are
+   * both valid and the family should be able to see which they are reading. So it travels,
+   * marked as the caregiver's, and a MedTech feed will arrive beside it rather than instead
+   * of it.
+   */
+  medication: { am: boolean; pm: boolean; supplemental: string };
 }
 
 /**
  * What the server is given.
  *
- * Two things the app keeps and does not send. Medication is recorded on the device and
- * medication_events is a different table with a different provenance - a tick in this app
- * is a caregiver saying they gave it, and a row from a clinical system is a record that it
- * was dispensed, and the schema is careful about the difference. And the photograph, which
- * has a path of its own that does not exist yet.
+ * The photograph is the one thing this does not carry. It has a path of its own, straight to
+ * storage, so it never passes through the API at all.
  */
 export function toWire(checkIn: CheckIn): WireDay {
   return {
@@ -100,6 +108,11 @@ export function toWire(checkIn: CheckIn): WireDay {
       };
     }),
     concerns: checkIn.concerns.map((c) => CONCERN_WIRE[c]),
+    medication: {
+      am: checkIn.medication.am,
+      pm: checkIn.medication.pm,
+      supplemental: checkIn.supplementalMedication.trim(),
+    },
   };
 }
 
@@ -126,6 +139,8 @@ export interface FiledDay {
    *  outside their own row - so the server resolves it for the day they are reading. */
   filedByName?: string;
   filedAt?: string;
+  /** What the caregiver recorded about medication, and who recorded it. */
+  medication?: { slot: string; status: string; detail?: string; recordedBy?: string }[];
   /** Present on a revision a later one replaced. Absent on the day as it now stands. */
   supersededAt?: string;
   /** True when this version replaced an earlier one. */
@@ -136,6 +151,8 @@ export interface FiledDay {
  *  also the words on the screen. */
 export interface FiledSummary {
   filedAt: string;
+  /** What the caregiver recorded about medication, and whose record it is. */
+  medication: { slot: string; status: string; detail: string; recordedBy: string }[];
   /** Who filed it, by name. Empty when the server did not say. */
   filedByName: string;
   /** When a correction replaced this one. Null on the version that currently stands, so
@@ -189,6 +206,12 @@ export function fromWire(day: FiledDay): FiledSummary | null {
   return {
     filedAt: day.filedAt,
     filedByName: day.filedByName ?? '',
+    medication: (day.medication ?? []).map((m) => ({
+      slot: m.slot,
+      status: m.status,
+      detail: m.detail ?? '',
+      recordedBy: m.recordedBy ?? '',
+    })),
     supersededAt: day.supersededAt ?? null,
     corrected: day.corrected ?? false,
     mood: (day.mood && MOOD_BACK[day.mood]) || null,

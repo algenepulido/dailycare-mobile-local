@@ -429,3 +429,90 @@ func TestTheDaySaysWhoFiledIt(t *testing.T) {
 			fromFamily.FiledByName, "A Nurse")
 	}
 }
+
+// Medication reaches a family as the caregiver's own record of it.
+//
+// Held back until milestone four on the reasoning that a tick is not a dispensing record.
+// That was half the picture: medication_source has carried both 'caregiver' and
+// 'pointclickcare' since the schema was written, and its comment says the family should be
+// able to see which one they are reading. So it travels, marked.
+func TestMedicationReachesTheFamilyAsTheCaregiversOwn(t *testing.T) {
+	s, caregiver, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	f := aDay()
+	f.Medication = Medication{AM: true, PM: false, Supplemental: "Tylenol 500mg twice today"}
+	if _, err := s.File(ctx, caregiver, resident, on, f); err != nil {
+		t.Fatalf("filing: %v", err)
+	}
+
+	daughter := grantFamily(t, resident)
+	got, err := s.Day(ctx, daughter, resident, on)
+	if err != nil {
+		t.Fatalf("a family member reading the day: %v", err)
+	}
+
+	byslot := map[string]MedicationRecord{}
+	for _, m := range got.Medication {
+		byslot[m.Slot] = m
+	}
+	if am, ok := byslot["am"]; !ok || am.Status != "given" {
+		t.Errorf("the A.M tick did not reach the family: %+v", got.Medication)
+	} else if am.RecordedBy != "A Nurse" {
+		t.Errorf("the A.M tick is not attributed: got %q", am.RecordedBy)
+	}
+	// Not ticked is not a row. medication_status has 'not_recorded' for exactly that, and
+	// absence says it more plainly than a row claiming nothing happened.
+	if _, ok := byslot["pm"]; ok {
+		t.Error("a slot nobody ticked produced a row")
+	}
+	if sup, ok := byslot["supplemental"]; !ok || sup.Detail != "Tylenol 500mg twice today" {
+		t.Errorf("the supplemental dose did not reach the family: %+v", got.Medication)
+	}
+}
+
+// A correction cannot take back a dose, and cannot duplicate one either.
+//
+// The form a correction opens does not carry medication forward - deliberately - so the
+// second filing arrives with nothing ticked and the first filing's record stands. Re-sending
+// the same tick is a no-op rather than a failure, which is what medication_events_one_per_slot
+// and ON CONFLICT DO NOTHING are doing between them.
+func TestCorrectingADayLeavesMedicationAlone(t *testing.T) {
+	s, caregiver, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	first := aDay()
+	first.Medication = Medication{AM: true, PM: true, Supplemental: "Paracetamol"}
+	if _, err := s.File(ctx, caregiver, resident, on, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// A correction as the app sends one: medication empty, because the form does not load it.
+	corrected := aDay()
+	corrected.Note = "and a second look at it"
+	if _, err := s.File(ctx, caregiver, resident, on, corrected); err != nil {
+		t.Fatalf("correcting: %v", err)
+	}
+
+	got, err := s.Day(ctx, caregiver, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Medication) != 3 {
+		t.Fatalf("medication changed with the correction: %+v", got.Medication)
+	}
+
+	// And filing the same ticks again neither fails nor doubles them.
+	if _, err := s.File(ctx, caregiver, resident, on, first); err != nil {
+		t.Fatalf("re-sending the same ticks: %v", err)
+	}
+	again, err := s.Day(ctx, caregiver, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Medication) != 3 {
+		t.Errorf("re-filing duplicated medication: %+v", again.Medication)
+	}
+}

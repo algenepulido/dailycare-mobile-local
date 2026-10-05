@@ -43,6 +43,8 @@ export interface FiledDayFacts {
   grooming: boolean;
   meals: { slot: Meal; happened: boolean; amount: MealAmount | null }[];
   concerns: Concern[];
+  /** What the caregiver recorded about medication, as it came back from the server. */
+  medication: { slot: string; status: string; detail: string; recordedBy: string }[];
 }
 
 /** One part of the care information, grouped as the daily summary groups it. */
@@ -56,13 +58,15 @@ export interface CareGroup {
   /** What the record does not have. Never "not done" — see the note at the top. */
   didNot: string[];
   /**
-   * Set when the group cannot be answered from this record at all, rather than being empty.
+   * Where the group's information came from, when that is not obvious and matters.
    *
-   * Medication is the one. A tick in the caregiver's app is not a dispensing record and is
-   * never sent, so the honest thing is to say where it is kept — a family reading silence
-   * where medication should be will read it as nobody having given any.
+   * Medication is the one that needs it. The same two letters will mean something different
+   * once a clinical feed writes this table — a caregiver's tick is somebody saying they gave
+   * a dose, a MedTech's row is a record that one was administered — so the line says whose
+   * statement a family is reading. Quiet rather than a disclaimer: it is a provenance note,
+   * not a warning.
    */
-  absent?: string;
+  source?: string;
 }
 
 export interface FamilyDay {
@@ -79,6 +83,21 @@ export interface FamilyDay {
   care: CareGroup[];
   /** The caregiver's own words, unedited. Empty when they wrote none. */
   note: string;
+}
+
+/**
+ * Whose statement the medication line is.
+ *
+ * Named when the record names them, because "Maria recorded this" is a different sentence
+ * from "the system says this" and a family should be able to tell them apart. Nothing at all
+ * when there is nothing recorded: a provenance note on an empty group would be a sentence
+ * about who did not say something.
+ */
+function medicationSource(recorder: string, recorded: number): string | undefined {
+  if (recorded === 0) return undefined;
+  return recorder
+    ? `${recorder} recorded this.`
+    : 'Recorded by the caregiver.';
 }
 
 /** Shown in place of the list when nothing differed from what is normal. */
@@ -143,17 +162,42 @@ export function familyDay(
     (x): x is string => x !== null,
   );
 
+  /* ------------------------------------------------------------- medication */
+
+  const SLOT_NAME: Record<string, string> = { am: 'A.M', pm: 'P.M' };
+  const givenSlots: string[] = [];
+  const notRecorded: string[] = [];
+  const supplemental: string[] = [];
+  let recorder = '';
+  for (const slot of ['am', 'pm'] as const) {
+    const e = day.medication.find((m) => m.slot === slot);
+    // 'given' is the only status this app can produce. The others belong to a clinical feed
+    // and are read rather than written here, so they are named rather than counted.
+    if (e && e.status === 'given') {
+      givenSlots.push(SLOT_NAME[slot]);
+      if (!recorder && e.recordedBy) recorder = e.recordedBy;
+    } else {
+      notRecorded.push(SLOT_NAME[slot]);
+    }
+  }
+  for (const e of day.medication) {
+    if (e.slot !== 'supplemental' || !e.detail) continue;
+    supplemental.push(e.detail);
+    if (!recorder && e.recordedBy) recorder = e.recordedBy;
+  }
+
   const care: CareGroup[] = [
     { label: 'Meals', done: ate.length, total: 3, did: ate, didNot: notEaten },
     {
-      // Kept in the list rather than dropped from it, in the place the care home's own
-      // summary puts it, saying what is true about this record.
       label: 'Medication',
-      done: 0,
-      total: 0,
-      did: [],
-      didNot: [],
-      absent: 'Recorded by the care home in their own system.',
+      done: givenSlots.length,
+      total: 2,
+      did: supplemental.length > 0 ? [...givenSlots, ...supplemental] : givenSlots,
+      didNot: notRecorded,
+      // Trevor's own distinction, in his words: today this is a caregiver saying they gave
+      // it; once PointClickCare feeds the table it becomes a record that a dose was
+      // administered. The line changes with the source rather than being decided here.
+      source: medicationSource(recorder, givenSlots.length + supplemental.length),
     },
     { label: 'Hygiene', done: washed.length, total: 2, did: washed, didNot: notWashed },
   ];

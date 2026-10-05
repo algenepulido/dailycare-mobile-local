@@ -87,7 +87,7 @@ export function RevisionsSheet({ open, onClose, revisions, dateLabel, careDate }
       })}
 
       <Text style={styles.footnote}>
-        Medication is recorded on the phone that took it and is not part of this record.
+        Medication is recorded as its own event, so it is not one of the versions here.
       </Text>
     </Sheet>
   );
