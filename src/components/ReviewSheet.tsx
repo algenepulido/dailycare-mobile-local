@@ -140,8 +140,8 @@ export function ReviewSheet({
             a preview of a made-up person. */}
         {onSend ? (
           <Text style={styles.footnote}>
-            This is what the family sees. Medication is not part of it and stays on this
-            phone.
+            This is what the family sees. Your medication ticks go with it, as your record
+            of them.
           </Text>
         ) : (
           <Text style={styles.footnote}>
