@@ -37,6 +37,13 @@ interface Account {
   userId: string;
   /** The name the account is held under. Empty until the server has answered once. */
   displayName: string;
+  /**
+   * The buildings this account runs, as the server last said. Empty for almost everybody,
+   * and empty on a cold start until it has answered - which is why the facility screen is
+   * reached from a row that appears when this fills rather than one that is always there
+   * and refuses.
+   */
+  manages: api.Building[];
 }
 
 interface SessionValue {
@@ -108,7 +115,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       const me = await api.fetchAccount();
       await rememberKind(me.kind);
-      setAccount({ userId: me.userId, displayName: me.displayName });
+      setAccount({ userId: me.userId, displayName: me.displayName, manages: me.manages ?? [] });
       setKind(me.kind);
     } catch {
       // Keep what we had.
@@ -138,7 +145,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // was signed out still opens on the family side, asking for a sign-in.
       setKind(asKind(lastKind));
       if (refreshToken) {
-        setAccount({ userId: '', displayName: '' });
+        setAccount({ userId: '', displayName: '', manages: [] });
       }
       setReady(true);
 
@@ -236,7 +243,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSigningIn(true);
       try {
         const tokens = await api.signIn(email.trim(), password, deviceLabel());
-        setAccount({ userId: (tokens as { userId?: string }).userId ?? '', displayName: '' });
+        setAccount({ userId: (tokens as { userId?: string }).userId ?? '', displayName: '', manages: [] });
         // Before linkResident, and awaited: the screen this lands on depends on the answer,
         // and signing in is the one moment the app is certainly online. linkResident is a
         // caregiver's step and does nothing for a family member, who has no resident typed
@@ -255,7 +262,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSigningIn(true);
       try {
         const tokens = await api.redeem(link, password, deviceLabel());
-        setAccount({ userId: (tokens as { userId?: string }).userId ?? '', displayName: '' });
+        setAccount({ userId: (tokens as { userId?: string }).userId ?? '', displayName: '', manages: [] });
         // A family member's grant goes from invited to active inside redeem_token, so this
         // is the first moment the server can answer "family" for them at all - and the
         // moment it has to, because accepting an invitation is how they arrive.

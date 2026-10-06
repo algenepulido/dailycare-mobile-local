@@ -70,6 +70,20 @@ type Account struct {
 	UserID      uuid.UUID `json:"userId"`
 	DisplayName string    `json:"displayName"`
 	Kind        Kind      `json:"kind"`
+	// The buildings this account runs, which is empty for almost everybody.
+	//
+	// Here rather than discovered by the app trying an administrative route and reading the
+	// refusal: a screen that exists only when a request fails is a screen whose condition
+	// lives in an error path. app_is_care_manager() is the predicate every administrative
+	// policy is built on, so what the app believes and what the policies allow are the same
+	// sentence.
+	Manages []Building `json:"manages"`
+}
+
+// Building is one facility, named, for a screen to put at the top of itself.
+type Building struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // Account answers who is holding this session and which face of the app is theirs.
@@ -101,6 +115,27 @@ func (s *Store) Account(ctx context.Context, c db.Caller) (*Account, error) {
 			 WHERE u.id = app_user_id()`).
 			Scan(&out.DisplayName, &staff, &family)
 	})
+	if err == nil && staff {
+		err = s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+			rows, e := tx.Query(ctx, `
+				SELECT f.id, f.name
+				  FROM facilities f
+				 WHERE app_is_care_manager(f.id)
+				 ORDER BY f.name`)
+			if e != nil {
+				return e
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var b Building
+				if e := rows.Scan(&b.ID, &b.Name); e != nil {
+					return e
+				}
+				out.Manages = append(out.Manages, b)
+			}
+			return rows.Err()
+		})
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The token verified but names nobody this database has. A deactivated account
 		// cannot get a session in the first place, so this is a signing key outliving the

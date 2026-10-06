@@ -211,6 +211,20 @@ export interface RemoteAccount {
   userId: string;
   displayName: string;
   kind: AccountKind;
+  /**
+   * The buildings this account runs. Empty for almost everybody.
+   *
+   * The facility screen exists when this is not empty, which is the same sentence the
+   * policies use - app_is_care_manager is what the server answers with. The alternative is
+   * a screen whose condition lives in whether an administrative request came back 403, and
+   * a surface that appears out of an error path is one nobody can reason about.
+   */
+  manages: Building[];
+}
+
+export interface Building {
+  id: string;
+  name: string;
 }
 
 export async function fetchAccount(): Promise<RemoteAccount> {
@@ -439,4 +453,133 @@ export async function uploadPhoto(
   // not know arrived would skip the only call that can still tell it.
   await rememberUpload(uri, place.objectId);
   return place.objectId;
+}
+
+
+/**
+ * Administering a building.
+ *
+ * Nothing in here decides anything. Every one of these is refused by the database for a
+ * facility this session does not manage, and the screen above shows whatever came back -
+ * including the refusals, which carry a sentence a care manager can act on rather than a
+ * status code.
+ */
+export interface RemoteMember {
+  id: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  role: 'caregiver' | 'care_manager';
+  state: 'invited' | 'active' | 'revoked';
+  startedAt: string;
+  endedAt?: string;
+}
+
+export async function listMembers(facilityId: string): Promise<RemoteMember[]> {
+  return (await authed(`/v1/facilities/${facilityId}/members`)) as RemoteMember[];
+}
+
+/** The link is shown once, at the moment it is made, and is empty for somebody who already had a way in. */
+export interface Invited {
+  member: RemoteMember;
+  link?: string;
+}
+
+export async function inviteMember(
+  facilityId: string,
+  email: string,
+  displayName: string,
+  role: 'caregiver' | 'care_manager',
+): Promise<Invited> {
+  return (await authed(`/v1/facilities/${facilityId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ email, displayName, role }),
+  })) as Invited;
+}
+
+export async function endMembership(memberId: string): Promise<void> {
+  await authed(`/v1/members/${memberId}`, { method: 'DELETE' });
+}
+
+export interface RemoteAssignment {
+  id: string;
+  residentId: string;
+  memberId: string;
+  displayName: string;
+  startedAt: string;
+  endedAt?: string;
+}
+
+export async function listAssignments(facilityId: string): Promise<RemoteAssignment[]> {
+  return (await authed(`/v1/facilities/${facilityId}/assignments`)) as RemoteAssignment[];
+}
+
+export async function assign(
+  facilityId: string,
+  residentId: string,
+  memberId: string,
+): Promise<RemoteAssignment> {
+  return (await authed(`/v1/facilities/${facilityId}/assignments`, {
+    method: 'POST',
+    body: JSON.stringify({ residentId, memberId }),
+  })) as RemoteAssignment;
+}
+
+export async function endAssignment(assignmentId: string): Promise<void> {
+  await authed(`/v1/assignments/${assignmentId}`, { method: 'DELETE' });
+}
+
+export async function admitResident(
+  facilityId: string,
+  displayName: string,
+  baseline: { mood: string; appetite: string; sleep: string },
+): Promise<RemoteResident> {
+  return (await authed(`/v1/facilities/${facilityId}/residents`, {
+    method: 'POST',
+    body: JSON.stringify({ displayName, baseline }),
+  })) as RemoteResident;
+}
+
+/** A date rather than a deletion. The record stays and retention is what removes anything. */
+export async function recordDeparture(residentId: string, on: string): Promise<void> {
+  await authed(`/v1/residents/${residentId}/departure`, {
+    method: 'POST',
+    body: JSON.stringify({ on }),
+  });
+}
+
+export interface RemoteContact {
+  id: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  relation: string;
+  state: 'invited' | 'active' | 'revoked';
+  grantedAt?: string;
+  revokedAt?: string;
+}
+
+export async function listContacts(residentId: string): Promise<RemoteContact[]> {
+  return (await authed(`/v1/residents/${residentId}/contacts`)) as RemoteContact[];
+}
+
+export interface GrantedAccess {
+  contact: RemoteContact;
+  link?: string;
+}
+
+export async function grantAccess(
+  residentId: string,
+  email: string,
+  displayName: string,
+  relation: string,
+): Promise<GrantedAccess> {
+  return (await authed(`/v1/residents/${residentId}/contacts`, {
+    method: 'POST',
+    body: JSON.stringify({ email, displayName, relation }),
+  })) as GrantedAccess;
+}
+
+export async function withdrawAccess(residentId: string, contactId: string): Promise<void> {
+  await authed(`/v1/residents/${residentId}/contacts/${contactId}`, { method: 'DELETE' });
 }

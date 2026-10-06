@@ -43,7 +43,7 @@ const MEAL_LABEL: Record<Meal, string> = {
 };
 
 export default function CareReportScreen() {
-  const { kind, caregiver, resident, ready, startSession } = useSession();
+  const { kind, caregiver, resident, ready, startSession, account } = useSession();
   const [namesOpen, setNamesOpen] = useState(false);
   const [invited, setInvited] = useState(false);
 
@@ -68,6 +68,52 @@ export default function CareReportScreen() {
    */
   if (kind === 'family') {
     return <Redirect href="/family" />;
+  }
+
+  /**
+   * A care manager's phone, before anybody has set it up to file anything.
+   *
+   * Found on a device, which is the only place it could have been: she accepts her
+   * invitation, the password is written, the session opens - and the app puts the setup
+   * sheet in front of her asking for the caregiver reporting and who she is caring for.
+   * She is neither. The milestone's own test is a care manager running a building with no
+   * developer in the room, and she could not get off the first screen.
+   *
+   * Not a redirect. This phone may yet become a filing phone - a manager who also works a
+   * round is ordinary - so both jobs are offered and she picks. The comment above about
+   * somebody invited having "no round to set up" was right and incomplete: there are two
+   * such people, and this is the second.
+   */
+  if ((!caregiver || !resident) && !invited && (account?.manages?.length ?? 0) > 0) {
+    return (
+      <View style={styles.centered}>
+        <View style={styles.choice}>
+          <Text style={styles.choiceTitle}>You run {account?.manages[0]?.name}</Text>
+          <Text style={styles.choiceBlurb}>
+            This phone has not been set up to file care for anybody. That is a separate job
+            from running the building, and you can do either.
+          </Text>
+          <Button label={`Run ${account?.manages[0]?.name}`} onPress={() => router.push('/facility')} />
+          <Button
+            label="Set this phone up to file care"
+            variant="secondary"
+            onPress={() => setNamesOpen(true)}
+          />
+        </View>
+        <SetupSheet
+          open={namesOpen}
+          firstRun
+          caregiverName=""
+          residentName=""
+          baseline={DEFAULT_BASELINE}
+          onClose={() => setNamesOpen(false)}
+          onSignIn={() => setInvited(true)}
+          onSave={(caregiverName, residentName, baseline) =>
+            void startSession({ caregiverName, residentName, baseline })
+          }
+        />
+      </View>
+    );
   }
 
   // First run has no report to show behind the sheet, and no way to dismiss it either -
@@ -299,6 +345,21 @@ function CareReport({
           <Text style={styles.historyLinkText}>Everyone this account may see</Text>
         </Pressable>
       ) : null}
+
+        {/* Only for somebody who runs a building, and the server is what says so. The row
+            appears when /v1/me comes back naming one rather than always being here and
+            answering 403 - a surface whose condition is an error is a surface nobody can
+            reason about, and a caregiver tapping it would learn the screen exists. */}
+        {(account?.manages?.length ?? 0) > 0 ? (
+          <Pressable
+            onPress={() => router.push('/facility')}
+            accessibilityRole="button"
+            accessibilityLabel={`Run ${account?.manages[0]?.name ?? 'the building'}`}
+            style={({ pressed }) => [styles.historyLink, pressed && styles.pressed]}
+          >
+            <Text style={styles.historyLinkText}>Run {account?.manages[0]?.name}</Text>
+          </Pressable>
+        ) : null}
 
       {filed && remoteId ? (
         <AlreadyFiled
@@ -554,6 +615,9 @@ function initials(name: string): string {
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.paper },
+  choice: { paddingHorizontal: 28, gap: 12, alignSelf: 'stretch' },
+  choiceTitle: { ...type.screenTitle, color: color.ink, marginBottom: 2 },
+  choiceBlurb: { ...type.blurb, marginBottom: 10 },
   pressed: { opacity: 0.7 },
 
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

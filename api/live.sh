@@ -114,6 +114,24 @@ CEDAR=f1000000-0000-0000-0000-000000000001
 BIRCH=f2000000-0000-0000-0000-000000000002
 
 echo
+echo "── what each phone is told it is"
+R=$(req GET "/v1/me" "$PRIYA"); want "a care manager asks what their account is" 200 "${R%%$'\t'*}"
+RUNS=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+m=d.get('manages') or []
+print(', '.join(b['name'] for b in m) if m else 'none')")
+want "and is told which building they run" "Cedar House" "$RUNS"
+
+R=$(req GET "/v1/me" "$MARIA")
+RUNS=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+m=d.get('manages') or []
+print(', '.join(b['name'] for b in m) if m else 'none')")
+want "a caregiver runs none of them" none "$RUNS"
+
+echo
 echo "── the building as it stands"
 R=$(req GET "/v1/facilities/$CEDAR/members" "$PRIYA"); S=${R%%$'\t'*}; B=${R#*$'\t'}
 want "a manager reads their own building" 200 "$S" "$B"
