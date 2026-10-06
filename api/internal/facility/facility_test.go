@@ -24,6 +24,7 @@ type world struct {
 	priyaMember       uuid.UUID
 	mariaMember       uuid.UUID
 	benMember         uuid.UUID
+	cathy, mabel      uuid.UUID
 }
 
 func seed(t *testing.T) world {
@@ -78,6 +79,22 @@ func seed(t *testing.T) world {
 	w.priya, w.priyaMember = person("priya", "care_manager", w.cedar)
 	w.maria, w.mariaMember = person("maria", "caregiver", w.cedar)
 	w.ben, w.benMember = person("ben", "care_manager", w.birch)
+
+	// One resident in each building. Seeded here rather than through the application
+	// because residents are the records package's and this one has no business reading
+	// them - which is also why an assignment comes back carrying an id and not a name.
+	w.cathy, w.mabel = uuid.New(), uuid.New()
+	for _, r := range []struct {
+		id   uuid.UUID
+		at   uuid.UUID
+		name string
+	}{{w.cathy, w.cedar, "Cathy"}, {w.mabel, w.birch, "Mabel"}} {
+		if _, err := c.Exec(ctx,
+			`INSERT INTO residents (id, facility_id, display_name) VALUES ($1, $2, $3)`,
+			r.id, r.at, r.name); err != nil {
+			t.Fatalf("seeding a resident: %v", err)
+		}
+	}
 	return w
 }
 
@@ -226,5 +243,98 @@ func TestAnAddressThatAlreadyHasAnAccount(t *testing.T) {
 	// constraint name, and nothing half-written is left behind because it is one transaction.
 	if _, err := w.store.Invite(ctx, w.priya, w.cedar, email, "Tomas", "caregiver", digest2, token2); !errors.Is(err, ErrAccountExists) {
 		t.Fatalf("a second account on one address should say so, got %v", err)
+	}
+}
+
+func TestACareManagerDecidesWhoReadsAResident(t *testing.T) {
+	w := seed(t)
+	ctx := context.Background()
+	got, err := w.store.Assign(ctx, w.priya, w.cedar, w.cathy, w.mariaMember)
+	if err != nil {
+		t.Fatalf("assigning: %v", err)
+	}
+	if got.ResidentID != w.cathy || got.MemberID != w.mariaMember {
+		t.Error("the assignment came back naming somebody else")
+	}
+	if got.EndedAt != nil {
+		t.Error("a new assignment should not already be over")
+	}
+	list, err := w.store.Assignments(ctx, w.priya, w.cedar)
+	if err != nil {
+		t.Fatalf("reading the assignments: %v", err)
+	}
+	var found bool
+	for _, a := range list {
+		if a.ID == got.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the assignment just made is not in the building")
+	}
+}
+
+func TestAssigningIsNotACaregiversToDo(t *testing.T) {
+	w := seed(t)
+	// She files care for the residents she is assigned to. Deciding who else may read one
+	// is a different act, and the policy is what says so.
+	if _, err := w.store.Assign(context.Background(), w.maria, w.cedar, w.cathy, w.mariaMember); !errors.Is(err, ErrNotTheirs) {
+		t.Fatalf("a caregiver assigning should be refused, got %v", err)
+	}
+}
+
+func TestAnAssignmentCannotReachAnotherBuilding(t *testing.T) {
+	w := seed(t)
+	ctx := context.Background()
+	// Priya runs Cedar. Mabel is at Birch, and Ben works there.
+	if _, err := w.store.Assign(ctx, w.priya, w.birch, w.mabel, w.benMember); !errors.Is(err, ErrNotTheirs) {
+		t.Fatalf("assigning in another building should be refused, got %v", err)
+	}
+	// And the pair is held by a foreign key as well as by the policy: her own building,
+	// somebody else's resident.
+	if _, err := w.store.Assign(ctx, w.priya, w.cedar, w.mabel, w.mariaMember); err == nil {
+		t.Fatal("a resident at another building should not be assignable here")
+	}
+}
+
+func TestAnAssignmentEndsOnADate(t *testing.T) {
+	w := seed(t)
+	ctx := context.Background()
+	made, err := w.store.Assign(ctx, w.priya, w.cedar, w.cathy, w.mariaMember)
+	if err != nil {
+		t.Fatalf("assigning: %v", err)
+	}
+	if err := w.store.EndAssignment(ctx, w.priya, made.ID); err != nil {
+		t.Fatalf("ending: %v", err)
+	}
+	list, err := w.store.Assignments(ctx, w.priya, w.cedar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range list {
+		if a.ID == made.ID && a.EndedAt == nil {
+			t.Error("an ended assignment should carry the date it ended")
+		}
+	}
+	// Asking again is not a failure: the state the caller wanted is the state it is in.
+	if err := w.store.EndAssignment(ctx, w.priya, made.ID); err != nil {
+		t.Errorf("ending one that has already ended should be quiet, got %v", err)
+	}
+}
+
+func TestEndingAnAssignmentIsAManagersAlone(t *testing.T) {
+	w := seed(t)
+	ctx := context.Background()
+	made, err := w.store.Assign(ctx, w.priya, w.cedar, w.cathy, w.mariaMember)
+	if err != nil {
+		t.Fatalf("assigning: %v", err)
+	}
+	// Maria can see it - it is her own building and her own assignment - and may not end it.
+	if err := w.store.EndAssignment(ctx, w.maria, made.ID); !errors.Is(err, ErrNotTheirs) {
+		t.Fatalf("a caregiver ending an assignment should be refused as theirs-not, got %v", err)
+	}
+	// Ben cannot see it at all.
+	if err := w.store.EndAssignment(ctx, w.ben, made.ID); !errors.Is(err, ErrNotVisible) {
+		t.Fatalf("an assignment at another building should be invisible, got %v", err)
 	}
 }

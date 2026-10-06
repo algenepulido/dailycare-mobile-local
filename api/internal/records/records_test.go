@@ -159,6 +159,12 @@ func TestEveryUnauditedQueryInThisPackageIsDeclared(t *testing.T) {
 			"if they tried. Recording a row per resident on every app launch would add the " +
 			"one event that carries no information, in the volume that makes the rest hard " +
 			"to read. Revisit if the list ever stops being the assignment.",
+		"Admit": "There is no resident to record a read of yet - this is the statement " +
+			"that creates one. The write is in the trail either way: residents carries an " +
+			"AFTER INSERT OR UPDATE trigger and audit-invariants.sql asserts that no " +
+			"PHI-bearing table is missing one, which is the half of the audit design the " +
+			"database holds rather than the code. The second query it makes is " +
+			"facility_is_covered, which is about a building and names nobody.",
 	}
 
 	body, err := os.ReadFile("records.go")

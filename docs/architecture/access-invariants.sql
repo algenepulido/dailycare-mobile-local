@@ -1286,6 +1286,93 @@ SELECT expect_refused('and nothing anywhere deletes a membership',
   $$DELETE FROM facility_members WHERE id = 'fa000000-0000-0000-0000-00000000000a'$$);
 
 
+-- ── and putting one of them in front of a resident ────────────────────────────
+--
+-- assignments_manager_writes was written with the rest of the policies and nothing could
+-- reach it: the application held SELECT and UPDATE (ended_at) on this table and no INSERT,
+-- so the first of these would have failed on the grant before the policy was consulted.
+
+INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002',
+        'fa000000-0000-0000-0000-00000000000a', 'b0000000-0000-0000-0000-00000000000b');
+
+SELECT expect('a care manager puts a caregiver in front of a resident',
+  (SELECT count(*) = 1 FROM assignments
+    WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+      AND facility_member_id = 'fa000000-0000-0000-0000-00000000000a'));
+
+-- The question a reviewer asks, and the reason the column is pinned rather than trusted.
+SELECT expect('and the record says who did it',
+  (SELECT assigned_by = 'b0000000-0000-0000-0000-00000000000b' FROM assignments
+    WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+      AND facility_member_id = 'fa000000-0000-0000-0000-00000000000a'));
+
+SELECT expect_refused('an assignment cannot be attributed to somebody else',
+  $$INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+    VALUES ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+            'fb000000-0000-0000-0000-00000000000b', 'a0000000-0000-0000-0000-00000000000a')$$);
+
+SELECT expect_refused('and cannot be made with no author at all',
+  $$INSERT INTO assignments (facility_id, resident_id, facility_member_id)
+    VALUES ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+            'fb000000-0000-0000-0000-00000000000b')$$);
+
+-- Refused by the grant rather than by the policy, which the policy also says. Measured by
+-- removing the policy's clause and watching nothing go red: ended_at is outside the insert
+-- grant, so the request never reaches a row to be judged. Labelled for what actually answers.
+SELECT expect_refused('an assignment cannot be created already over, which the grant refuses',
+  $$INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by, ended_at)
+    VALUES ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+            'fb000000-0000-0000-0000-00000000000b', 'b0000000-0000-0000-0000-00000000000b',
+            now())$$);
+
+SELECT expect_refused('and not in a building the manager does not manage',
+  $$INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+    VALUES ('f2000000-0000-0000-0000-000000000002', 'e3000000-0000-0000-0000-000000000003',
+            'fd000000-0000-0000-0000-00000000000d', 'b0000000-0000-0000-0000-00000000000b')$$);
+
+-- Satisfies the policy in every respect it judges, and names one column the grant leaves
+-- out. Nothing but the grant can refuse it.
+DO $probe$
+BEGIN
+  INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by, started_at)
+  VALUES ('f1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+          'fb000000-0000-0000-0000-00000000000b', 'b0000000-0000-0000-0000-00000000000b',
+          now() - interval '1 year');
+  RAISE NOTICE 'FAIL  ALLOWED: an assignment was backdated';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused by the grant alone: an assignment cannot be backdated';
+END $probe$;
+
+-- A caregiver files care. Who reads a resident is not theirs to decide.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+SELECT expect_refused('a caregiver cannot assign anybody to anybody',
+  $$INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+    VALUES ('f1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002',
+            'fa000000-0000-0000-0000-00000000000a', 'a0000000-0000-0000-0000-00000000000a')$$);
+
+-- And the same question on the other disclosure. bootstrap set granted_by correctly and had
+-- a commit named for it; this is the half that does not depend on which handler wrote it.
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+SELECT expect_refused('a family grant cannot be attributed to somebody else',
+  $$INSERT INTO resident_contacts
+      (facility_id, resident_id, user_id, relation, granted_by, granted_at)
+    VALUES ('f1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002',
+            'c0000000-0000-0000-0000-00000000000c', 'child',
+            'a0000000-0000-0000-0000-00000000000a', now())$$);
+
+INSERT INTO resident_contacts
+  (facility_id, resident_id, user_id, relation, granted_by, granted_at)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002',
+        'c0000000-0000-0000-0000-00000000000c', 'child',
+        'b0000000-0000-0000-0000-00000000000b', now());
+
+SELECT expect('and one made by the manager making it is accepted',
+  (SELECT granted_by = 'b0000000-0000-0000-0000-00000000000b' FROM resident_contacts
+    WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+      AND user_id = 'c0000000-0000-0000-0000-00000000000c'));
+
+
 \echo '── after access is withdrawn and after a shift ends'
 RESET ROLE;
 UPDATE resident_contacts SET state = 'revoked', revoked_at = now()

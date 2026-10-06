@@ -203,5 +203,103 @@ LEFT=$(python3 -c 'import json;d=json.load(open("/tmp/dc-body"));print(len(d) if
 want "which now shows them nothing" 0 "$LEFT"
 
 echo
+echo "── admitting a resident, which a signed agreement gates"
+
+# Nothing has been signed for Cedar yet, and residents_insert consults facility_is_covered
+# as well as app_is_care_manager. Pressed in this order on purpose: the refusal is the
+# interesting half and it only exists before the agreement does.
+R=$(req POST "/v1/facilities/$CEDAR/residents" "$PRIYA" \
+  '{"displayName":"Cathy","baseline":{"mood":"calm","appetite":"fair","sleep":"restless"}}')
+want "a building with nothing signed for it takes no residents" 409 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+docker exec -i -u postgres "$NAME" psql -q -d dailycare -v ON_ERROR_STOP=1 >/dev/null <<SQL2 || exit 1
+INSERT INTO facility_agreements
+  (facility_id, executed_on, notification_contact, notification_days, counterparty)
+VALUES ('$CEDAR', current_date - 1, 'compliance@example.test', 30, 'Cedar House');
+SQL2
+
+R=$(req POST "/v1/facilities/$CEDAR/residents" "$PRIYA" \
+  '{"displayName":"Cathy","baseline":{"mood":"calm","appetite":"fair","sleep":"restless"}}')
+want "and takes them once it is signed" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+CATHY=$(field id)
+
+R=$(req POST "/v1/facilities/$CEDAR/residents" "$MARIA" \
+  '{"displayName":"Nope","baseline":{"mood":"calm","appetite":"fair","sleep":"restless"}}')
+want "a caregiver cannot admit anybody" 403 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+echo
+echo "── putting a caregiver in front of her"
+R=$(req POST "/v1/facilities/$CEDAR/assignments" "$PRIYA" \
+  "{\"residentId\":\"$CATHY\",\"memberId\":\"fa000000-0000-0000-0000-00000000000a\"}")
+want "a manager assigns a caregiver to a resident" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+ASSIGNMENT=$(field id)
+
+R=$(req GET "/v1/residents" "$MARIA")
+MINE=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+print(sum(1 for r in d if r['id']=='$CATHY') if isinstance(d,list) else -1)")
+want "and that caregiver can now read her" 1 "$MINE"
+
+R=$(req POST "/v1/facilities/$CEDAR/assignments" "$MARIA" \
+  "{\"residentId\":\"$CATHY\",\"memberId\":\"fa000000-0000-0000-0000-00000000000a\"}")
+want "a caregiver cannot assign anybody" 403 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+echo
+echo "── letting her daughter read it"
+R=$(req POST "/v1/residents/$CATHY/contacts" "$PRIYA" \
+  '{"email":"anna@example.test","displayName":"Anna","relation":"child"}')
+want "a manager grants a family member access" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+ANNA_C=$(field contact.id)
+ANNA_LINK=$(field link)
+ANNA_STATE=$(field contact.state)
+want "and the grant waits at invited" invited "$ANNA_STATE"
+
+ANNA=$(arrive "$ANNA_LINK" "a third reasonable passphrase")
+R=$(req GET "/v1/residents" "$ANNA")
+SEES=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+print(sum(1 for r in d if r['id']=='$CATHY') if isinstance(d,list) else -1)")
+want "accepting it is what makes her a reader" 1 "$SEES"
+
+R=$(req POST "/v1/facilities/$CEDAR/members" "$ANNA" \
+  '{"email":"nope3@example.test","displayName":"Nope","role":"caregiver"}')
+want "and a family member administers nothing" 403 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req GET "/v1/residents/$CATHY/contacts" "$PRIYA")
+want "a manager sees who may read her" 200 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+echo
+echo "── and taking it back"
+R=$(req DELETE "/v1/residents/$CATHY/contacts/$ANNA_C" "$PRIYA")
+want "a manager withdraws the access" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req GET "/v1/residents" "$ANNA")
+LEFT2=$(python3 -c 'import json;d=json.load(open("/tmp/dc-body"));print(len(d) if isinstance(d,list) else -1)')
+want "and her phone stops seeing anybody" 0 "$LEFT2"
+
+R=$(req GET "/v1/residents/$CATHY/contacts" "$PRIYA")
+KEPT=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+if not isinstance(d,list): print('not a list')
+else:
+    k=next((k for k in d if k['id']=='$ANNA_C'),None)
+    print('gone' if k is None else ('kept ' + k['state'] + (' with a date' if k.get('revokedAt') else ' with no date')))")
+want "while the decision stays on the record" "kept revoked with a date" "$KEPT"
+
+echo
+echo "── and a resident who moves out"
+R=$(req POST "/v1/residents/$CATHY/departure" "$PRIYA" '{"on":"2026-10-06"}')
+want "a manager records a departure" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req DELETE "/v1/assignments/$ASSIGNMENT" "$PRIYA")
+want "and ends the assignment that went with her" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req DELETE "/v1/assignments/$ASSIGNMENT" "$PRIYA")
+want "asking twice is quiet rather than an error" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+echo
 printf '  %d passed, %d failed\n\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

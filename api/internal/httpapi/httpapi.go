@@ -93,6 +93,14 @@ func (a *API) Routes() http.Handler {
 	mux.Handle("GET /v1/facilities/{id}/members", a.identified(a.listMembers))
 	mux.Handle("POST /v1/facilities/{id}/members", a.identified(a.inviteMember))
 	mux.Handle("DELETE /v1/members/{id}", a.identified(a.endMembership))
+	mux.Handle("GET /v1/facilities/{id}/assignments", a.identified(a.listAssignments))
+	mux.Handle("POST /v1/facilities/{id}/assignments", a.identified(a.assign))
+	mux.Handle("DELETE /v1/assignments/{id}", a.identified(a.endAssignment))
+	mux.Handle("POST /v1/facilities/{id}/residents", a.identified(a.admitResident))
+	mux.Handle("POST /v1/residents/{id}/departure", a.identified(a.departResident))
+	mux.Handle("GET /v1/residents/{id}/contacts", a.identified(a.listContacts))
+	mux.Handle("POST /v1/residents/{id}/contacts", a.identified(a.grantAccess))
+	mux.Handle("DELETE /v1/residents/{id}/contacts/{contactId}", a.identified(a.withdrawAccess))
 
 	// /healthz is not ours to use. Cloud Run's frontend answers it before a request
 	// reaches the container, with an HTML 404 - so a probe against a deployed service
@@ -613,6 +621,221 @@ func (a *API) endMembership(w http.ResponseWriter, r *http.Request, c db.Caller)
 			return
 		}
 		a.fail(w, r, http.StatusInternalServerError, "could not end the membership", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listAssignments(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such facility", nil)
+		return
+	}
+	list, err := a.facility.Assignments(r.Context(), c, id)
+	if err != nil {
+		if a.facilityFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read the assignments", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, list)
+}
+
+func (a *API) assign(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such facility", nil)
+		return
+	}
+	var body struct {
+		ResidentID string `json:"residentId"`
+		MemberID   string `json:"memberId"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	resident, err := uuid.Parse(body.ResidentID)
+	if err != nil {
+		a.fail(w, r, http.StatusBadRequest, "a resident is needed", nil)
+		return
+	}
+	member, err := uuid.Parse(body.MemberID)
+	if err != nil {
+		a.fail(w, r, http.StatusBadRequest, "a caregiver is needed", nil)
+		return
+	}
+	assignment, err := a.facility.Assign(r.Context(), c, id, resident, member)
+	if err != nil {
+		if a.facilityFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not make the assignment", err)
+		return
+	}
+	a.ok(w, r, http.StatusCreated, assignment)
+}
+
+func (a *API) endAssignment(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such assignment", nil)
+		return
+	}
+	if err := a.facility.EndAssignment(r.Context(), c, id); err != nil {
+		if a.facilityFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not end the assignment", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// The administrative half of the records package. Same shape as the facility handlers: a
+// domain error becomes a status and a sentence, and nothing from the database gets through.
+func (a *API) recordsFailure(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case errors.Is(err, records.ErrNotVisible):
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+	case errors.Is(err, records.ErrNotCovered):
+		a.fail(w, r, http.StatusConflict,
+			"that building has no signed agreement covering it, so a resident cannot be admitted to it", nil)
+	case errors.Is(err, records.ErrAccountExists):
+		a.fail(w, r, http.StatusConflict, "that email address already has an account", nil)
+	case errors.Is(err, records.ErrNotTheirs):
+		a.fail(w, r, http.StatusForbidden, "only a care manager can do this", nil)
+	default:
+		return false
+	}
+	return true
+}
+
+func (a *API) admitResident(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such facility", nil)
+		return
+	}
+	var body struct {
+		DisplayName string           `json:"displayName"`
+		Baseline    records.Baseline `json:"baseline"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	if body.DisplayName == "" {
+		a.fail(w, r, http.StatusBadRequest, "a name is needed", nil)
+		return
+	}
+	resident, err := a.records.Admit(r.Context(), c, id, body.DisplayName, body.Baseline)
+	if err != nil {
+		if a.recordsFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusBadRequest, "that resident was not something the record accepts", err)
+		return
+	}
+	a.ok(w, r, http.StatusCreated, resident)
+}
+
+func (a *API) departResident(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	var body struct {
+		On string `json:"on"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	on, err := time.Parse("2006-01-02", body.On)
+	if err != nil {
+		a.fail(w, r, http.StatusBadRequest, "a date is needed, as YYYY-MM-DD", nil)
+		return
+	}
+	if err := a.records.Depart(r.Context(), c, id, on); err != nil {
+		if a.recordsFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not record the departure", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listContacts(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	list, err := a.records.Contacts(r.Context(), c, id)
+	if err != nil {
+		if a.recordsFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read who may see them", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, list)
+}
+
+func (a *API) grantAccess(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	var body struct {
+		Email       string `json:"email"`
+		DisplayName string `json:"displayName"`
+		Relation    string `json:"relation"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	if body.Email == "" || body.DisplayName == "" || body.Relation == "" {
+		a.fail(w, r, http.StatusBadRequest,
+			"an email address, a name and how they are related are all needed", nil)
+		return
+	}
+	token, digest, err := auth.NewToken()
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "could not make an invitation", err)
+		return
+	}
+	granted, err := a.records.Grant(r.Context(), c, id,
+		body.Email, body.DisplayName, body.Relation, digest, token)
+	if err != nil {
+		if a.recordsFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusBadRequest, "that grant was not something the record accepts", err)
+		return
+	}
+	a.ok(w, r, http.StatusCreated, granted)
+}
+
+func (a *API) withdrawAccess(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	contact, err := uuid.Parse(r.PathValue("contactId"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such grant", nil)
+		return
+	}
+	if err := a.records.Withdraw(r.Context(), c, id, contact); err != nil {
+		if a.recordsFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not withdraw the access", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

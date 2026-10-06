@@ -83,6 +83,10 @@ SELECT expect('no file went in twice',
 --                         lost it. Same reason as the second entry, not the third.
 --   medication-attribution.sql  the same again, and the same reason: one function, created
 --                         by the owner of the schema.
+--   decisions-have-authors.sql  replaces two policies on tables it owns and adds a row to
+--                         app_privileges. Neither needs CREATE on the schema; replacing a
+--                         policy needs ownership of its table, which is the third of the
+--                         reasons above rather than the second.
 --   invitation-issuing.sql  creates two functions and grants EXECUTE on one of them, so it
 --                         needs CREATE on the schema and ownership of what it grants. Both
 --                         for the same reason as the entries above: it runs as the role
@@ -95,7 +99,7 @@ SELECT expect('no file went in twice',
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));

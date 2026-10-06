@@ -669,3 +669,265 @@ type Baseline struct {
 	Appetite string `json:"appetite"`
 	Sleep    string `json:"sleep"`
 }
+
+// ErrNotCovered is a building with no executed agreement behind it.
+//
+// residents_insert consults facility_is_covered as well as app_is_care_manager, and the two
+// arrive as the same refusal. They are not the same problem: one is a care manager at the
+// wrong building and the other is a building nobody has signed for, which is a finding
+// rather than a mistake and reads as one on screen.
+var ErrNotCovered = errors.New("records: that building has no agreement covering it")
+
+// ErrNotTheirs is an administrative act somebody may not perform here.
+//
+// Separate from ErrNotTheirsToFile, which is specifically a family member writing care.
+var ErrNotTheirs = errors.New("records: not this session's to do")
+
+// Admit adds a resident to a building.
+//
+// The two clauses of residents_insert are asked apart afterwards rather than before: the
+// policy is what decides, and asking it first would be the application deciding and the
+// database agreeing - which is the shape that drifts.
+func (s *Store) Admit(ctx context.Context, c db.Caller, facility uuid.UUID,
+	name string, b Baseline) (Resident, error) {
+
+	r := Resident{DisplayName: name, FacilityID: facility, Baseline: b}
+	refused := false
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			INSERT INTO residents
+			  (facility_id, display_name, baseline_mood, baseline_appetite, baseline_sleep)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id`, facility, name, b.Mood, b.Appetite, b.Sleep).Scan(&r.ID)
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == "42501" {
+			refused = true
+			return ErrNotTheirs
+		}
+		return err
+	})
+	if err == nil {
+		return r, nil
+	}
+	if !refused {
+		return Resident{}, err
+	}
+
+	// Which of the policy's two clauses said no, asked in a transaction of its own.
+	//
+	// It was inside the one above to begin with, which does not work and the live walk is
+	// what showed it: a statement PostgreSQL refuses aborts its transaction, so the question
+	// after it fails with "current transaction is aborted" and the refusal comes back as the
+	// generic one. The database still decides - this only reads back far enough to say which
+	// answer it gave.
+	var covered bool
+	if e := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT facility_is_covered($1)`, facility).Scan(&covered)
+	}); e != nil {
+		return Resident{}, err
+	}
+	if !covered {
+		return Resident{}, ErrNotCovered
+	}
+	return Resident{}, ErrNotTheirs
+}
+
+// Depart marks a resident as moved out. Nothing is deleted and nothing stops being readable:
+// the access matrix says departure is a date and destruction belongs to retention.
+func (s *Store) Depart(ctx context.Context, c db.Caller, resident uuid.UUID, on time.Time) error {
+	return s.read(ctx, c, resident, "residents", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`UPDATE residents SET departed_on = $2, updated_at = now() WHERE id = $1`,
+			resident, on)
+		if err != nil {
+			return policyRefusalAdmin(err)
+		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
+		// read() has already proved this session may see the resident, so a filtered update
+		// past that point is the narrower refusal: somebody who reads this building and does
+		// not run it.
+		return ErrNotTheirs
+	})
+}
+
+// Contact is one family member's access to one resident.
+type Contact struct {
+	ID          uuid.UUID  `json:"id"`
+	UserID      uuid.UUID  `json:"userId"`
+	DisplayName string     `json:"displayName"`
+	Email       string     `json:"email"`
+	Relation    string     `json:"relation"`
+	State       string     `json:"state"`
+	GrantedAt   *time.Time `json:"grantedAt,omitempty"`
+	RevokedAt   *time.Time `json:"revokedAt,omitempty"`
+}
+
+// Contacts is who in a family may read one resident, including the ones whose access was
+// withdrawn. Withdrawn grants stay in the list because the row is the record of a decision -
+// revoked_by and revoked_at are what a reviewer asks for, and a list that hid them would
+// make the screen disagree with the trail.
+func (s *Store) Contacts(ctx context.Context, c db.Caller, resident uuid.UUID) ([]Contact, error) {
+	out := []Contact{}
+	err := s.read(ctx, c, resident, "resident_contacts", func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT rc.id, rc.user_id, u.display_name, u.email::text, rc.relation,
+			       rc.state::text, rc.granted_at, rc.revoked_at
+			  FROM resident_contacts rc
+			  JOIN users u ON u.id = rc.user_id
+			 WHERE rc.resident_id = $1
+			 ORDER BY u.display_name`, resident)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var k Contact
+			if err := rows.Scan(&k.ID, &k.UserID, &k.DisplayName, &k.Email, &k.Relation,
+				&k.State, &k.GrantedAt, &k.RevokedAt); err != nil {
+				return err
+			}
+			out = append(out, k)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// policyRefusalAdmin is policyRefusal's sibling for the administrative paths, which have a
+// different right answer: filing is refused because recording care is not a family member's,
+// and these are refused because running a building is not a caregiver's.
+func policyRefusalAdmin(err error) error {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "42501" {
+		return ErrNotTheirs
+	}
+	return err
+}
+
+// Granted is what a care manager is handed once, at the moment they give a family member
+// access. Link is empty when that person already had a way in.
+type Granted struct {
+	Contact Contact `json:"contact"`
+	Link    string  `json:"link,omitempty"`
+}
+
+// Grant gives one family member access to one resident, and hands back the one link that
+// lets them arrive.
+//
+// The same three steps as inviting a caregiver and for the same reasons: the account is
+// named by the application because a manager cannot read one they have just created, the
+// grant opens at 'invited' by column default because a facility that has sent an invitation
+// and one that has a reader are different things for it to see, and the link comes from
+// issue_invitation because the application holds no grant on user_tokens.
+func (s *Store) Grant(ctx context.Context, c db.Caller, resident uuid.UUID,
+	email, displayName, relation, digest, token string) (Granted, error) {
+
+	var g Granted
+	err := s.read(ctx, c, resident, "resident_contacts", func(tx pgx.Tx) error {
+		var facility uuid.UUID
+		if err := tx.QueryRow(ctx,
+			`SELECT facility_id FROM residents WHERE id = $1`, resident).Scan(&facility); err != nil {
+			return err
+		}
+
+		userID := uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO users (id, email, display_name) VALUES ($1, $2, $3)`,
+			userID, email, displayName); err != nil {
+			var pg *pgconn.PgError
+			if errors.As(err, &pg) && pg.Code == "23505" {
+				return ErrAccountExists
+			}
+			return policyRefusalAdmin(err)
+		}
+
+		// granted_by is app_user_id() rather than an argument: decisions-have-authors.sql
+		// pins it, so sending anything else is refused and the column is an answer rather
+		// than a field a client fills in.
+		var contactID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO resident_contacts
+			  (facility_id, resident_id, user_id, relation, granted_by, granted_at)
+			VALUES ($1, $2, $3, $4, app_user_id(), now())
+			RETURNING id`, facility, resident, userID, relation).Scan(&contactID); err != nil {
+			return policyRefusalAdmin(err)
+		}
+
+		var issued bool
+		if err := tx.QueryRow(ctx,
+			`SELECT issue_invitation($1, $2)`, userID, digest).Scan(&issued); err != nil {
+			return policyRefusalAdmin(err)
+		}
+		if issued {
+			g.Link = token
+		}
+
+		return tx.QueryRow(ctx, `
+			SELECT rc.id, rc.user_id, u.display_name, u.email::text, rc.relation,
+			       rc.state::text, rc.granted_at, rc.revoked_at
+			  FROM resident_contacts rc
+			  JOIN users u ON u.id = rc.user_id
+			 WHERE rc.id = $1`, contactID).Scan(
+			&g.Contact.ID, &g.Contact.UserID, &g.Contact.DisplayName, &g.Contact.Email,
+			&g.Contact.Relation, &g.Contact.State, &g.Contact.GrantedAt, &g.Contact.RevokedAt)
+	})
+	if err != nil {
+		return Granted{}, err
+	}
+	return g, nil
+}
+
+// ErrAccountExists is an address that already belongs to somebody. Same wall as inviting a
+// caregiver into a building, and the same reason: a manager cannot read an account they have
+// not been introduced to, so the application cannot learn the id of one it has just been
+// told exists.
+var ErrAccountExists = errors.New("records: that address already has an account")
+
+// Withdraw ends one family member's access to one resident.
+//
+// The row is revoked rather than removed. revoked_by and revoked_at are answers a reviewer
+// asks for and neither can be reconstructed from a row that is gone, which is also why
+// resident_contacts has no delete policy at all.
+//
+// Worth knowing before restoring is built on top of this: contacts_update admits a care
+// manager and says nothing about which transition, so it is wider than the comment above it
+// describes - a manager can move a grant from 'invited' straight to 'active' without the
+// person having accepted anything. Nothing does that today. Narrowing it to the two
+// transitions that are real - active to revoked here, revoked to active there - belongs with
+// restoring rather than ahead of it, because the second half is what decides whether a
+// restored grant waits to be accepted again.
+func (s *Store) Withdraw(ctx context.Context, c db.Caller, resident, contact uuid.UUID) error {
+	return s.read(ctx, c, resident, "resident_contacts", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE resident_contacts
+			   SET state = 'revoked', revoked_by = app_user_id(), revoked_at = now(),
+			       updated_at = now()
+			 WHERE id = $1 AND resident_id = $2 AND state <> 'revoked'`, contact, resident)
+		if err != nil {
+			return policyRefusalAdmin(err)
+		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
+		// Nothing changed and nothing raised. Either it was already revoked, which is the
+		// state the caller wanted, or the policy filtered it out.
+		var already bool
+		if err := tx.QueryRow(ctx,
+			`SELECT state = 'revoked' FROM resident_contacts WHERE id = $1 AND resident_id = $2`,
+			contact, resident).Scan(&already); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotVisible
+			}
+			return err
+		}
+		if already {
+			return nil
+		}
+		return ErrNotTheirs
+	})
+}

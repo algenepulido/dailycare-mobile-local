@@ -256,3 +256,125 @@ func (s *Store) End(ctx context.Context, c db.Caller, member uuid.UUID) error {
 		return ErrNotTheirs
 	})
 }
+
+// Assignment is one caregiver in front of one resident.
+//
+// The resident is an id and not a name. residents is PHI and the records package is the only
+// thing that reads it - a join from here would be a second disclosure route with nothing
+// auditing it, and records_test.go fails the build for exactly that. The screen already has
+// the residents it may see and matches them up.
+type Assignment struct {
+	ID          uuid.UUID  `json:"id"`
+	ResidentID  uuid.UUID  `json:"residentId"`
+	MemberID    uuid.UUID  `json:"memberId"`
+	DisplayName string     `json:"displayName"`
+	StartedAt   time.Time  `json:"startedAt"`
+	EndedAt     *time.Time `json:"endedAt,omitempty"`
+}
+
+// Assignments is every assignment at one building, including the ones that have ended.
+func (s *Store) Assignments(ctx context.Context, c db.Caller, facility uuid.UUID) ([]Assignment, error) {
+	out := []Assignment{}
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT a.id, a.resident_id, a.facility_member_id, u.display_name,
+			       a.started_at, a.ended_at
+			  FROM assignments a
+			  JOIN facility_members fm ON fm.id = a.facility_member_id
+			  JOIN users u ON u.id = fm.user_id
+			 WHERE a.facility_id = $1
+			 ORDER BY a.ended_at NULLS FIRST, u.display_name`, facility)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a Assignment
+			if err := rows.Scan(&a.ID, &a.ResidentID, &a.MemberID, &a.DisplayName,
+				&a.StartedAt, &a.EndedAt); err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Assign is a care manager deciding that this caregiver may read this resident.
+//
+// assigned_by is passed as app_user_id() rather than as an argument. The policy pins it to
+// the requester, so sending anything else is refused - which makes the column an answer to
+// "who gave them access to her" rather than a field a client fills in.
+//
+// A resident at another building is refused by the foreign key on the pair rather than by
+// the policy, and a caregiver who is not a member of this one by the policy. Both arrive
+// here as the same refusal, which is the right amount of detail to give back.
+func (s *Store) Assign(ctx context.Context, c db.Caller,
+	facility, resident, member uuid.UUID) (Assignment, error) {
+
+	var a Assignment
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		var id uuid.UUID
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+			VALUES ($1, $2, $3, app_user_id())
+			RETURNING id`, facility, resident, member).Scan(&id); err != nil {
+			return refusal(err)
+		}
+		return tx.QueryRow(ctx, `
+			SELECT a.id, a.resident_id, a.facility_member_id, u.display_name,
+			       a.started_at, a.ended_at
+			  FROM assignments a
+			  JOIN facility_members fm ON fm.id = a.facility_member_id
+			  JOIN users u ON u.id = fm.user_id
+			 WHERE a.id = $1`, id).Scan(&a.ID, &a.ResidentID, &a.MemberID, &a.DisplayName,
+			&a.StartedAt, &a.EndedAt)
+	})
+	if err != nil {
+		return Assignment{}, err
+	}
+	return a, nil
+}
+
+// EndAssignment closes one on a date. The days they filed while it stood are untouched.
+//
+// Read, then write, for the reason the whole package is built that way: the update policy
+// filters rather than raises, so an assignment at a building the caller does not manage
+// would otherwise look like a success.
+func (s *Store) EndAssignment(ctx context.Context, c db.Caller, assignment uuid.UUID) error {
+	return s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		var seen bool
+		if err := tx.QueryRow(ctx,
+			`SELECT true FROM assignments WHERE id = $1`, assignment).Scan(&seen); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotVisible
+			}
+			return err
+		}
+		tag, err := tx.Exec(ctx,
+			`UPDATE assignments SET ended_at = now() WHERE id = $1 AND ended_at IS NULL`,
+			assignment)
+		if err != nil {
+			return refusal(err)
+		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
+		// Visible, unchanged, and no exception. Either a caregiver asked, or it had already
+		// ended - and the second is not a failure worth a status of its own, because the
+		// state the caller wanted is the state it is in.
+		var already bool
+		if err := tx.QueryRow(ctx,
+			`SELECT ended_at IS NOT NULL FROM assignments WHERE id = $1`, assignment).Scan(&already); err != nil {
+			return err
+		}
+		if already {
+			return nil
+		}
+		return ErrNotTheirs
+	})
+}
