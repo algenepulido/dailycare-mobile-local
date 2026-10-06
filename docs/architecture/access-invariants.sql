@@ -1056,6 +1056,236 @@ SELECT table_name, operation, caregiver, care_manager, family FROM access_matrix
 WHERE table_name IN ('residents','care_days','media_objects') ORDER BY table_name, operation;
 
 
+\echo ''
+\echo '── putting somebody in the building'
+
+-- facility_members decides who exists, and until member-invitation.sql nothing but
+-- bootstrap could write to it. Every check below runs as dailycare_app with an identity
+-- set, never as the owner: the identity tables are ENABLE rather than FORCE, so the owner
+-- is exempt from their policies and would pass all of this without any of it being true.
+-- That exemption is what hid the contact activation for a release.
+--
+-- The refusals are read as row counts rather than as exceptions wherever they are updates.
+-- An INSERT a policy refuses raises 42501; an UPDATE it refuses matches no rows and says
+-- nothing at all, which is the asymmetry that makes a check here easy to write wrongly.
+
+SET ROLE dailycare_app;
+
+-- Priya, care manager at Cedar.
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+
+-- The application names the account. It has to: the read policies on users are myself, a
+-- colleague, and a family member I granted access to, and somebody with no membership yet
+-- is none of the three - so the manager who just created this row cannot see it, and asking
+-- for its id back is not a thing that works. The check below is the one that says so.
+INSERT INTO users (id, email, display_name)
+VALUES ('aa000000-0000-0000-0000-0000000000aa', 'tomas@example.test', 'Tomas');
+
+SELECT expect_rows('an account a manager has just created is not yet visible to them', 0,
+  $$SELECT id FROM users WHERE email = 'tomas@example.test'$$);
+
+INSERT INTO facility_members (facility_id, user_id, role, invited_by)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'aa000000-0000-0000-0000-0000000000aa',
+        'caregiver', 'b0000000-0000-0000-0000-00000000000b');
+
+-- Two things at once, and the second is why this is not circular: the membership carries a
+-- foreign key to users, so a row that was never written could not have been referenced.
+SELECT expect_rows('and is a colleague once it belongs to a building', 1,
+  $$SELECT id FROM users WHERE email = 'tomas@example.test'$$);
+
+SELECT expect('the membership opens invited, which is the column default and not a choice',
+  (SELECT state = 'invited' AND ended_at IS NULL
+     FROM facility_members fm JOIN users u ON u.id = fm.user_id
+    WHERE u.email = 'tomas@example.test'));
+
+SELECT expect('and records who let them in',
+  (SELECT invited_by = 'b0000000-0000-0000-0000-00000000000b'
+     FROM facility_members fm JOIN users u ON u.id = fm.user_id
+    WHERE u.email = 'tomas@example.test'));
+
+-- The whole of what 'invited' is worth. Every predicate the policies are built from wants
+-- 'active', so until the person accepts there is nothing the membership opens.
+SELECT set_config('app.user_id',
+  (SELECT id::text FROM users u WHERE u.email = 'tomas@example.test'), false);
+SELECT expect_rows('an invited caregiver sees no residents', 0, 'SELECT id FROM residents');
+SELECT expect_rows('and no care days',                       0, 'SELECT id FROM care_days');
+
+-- Aimed at: the same manager, the same statement, another building.
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+SELECT expect_refused('a manager cannot put somebody into a building they do not manage',
+  $$INSERT INTO facility_members (facility_id, user_id, role, invited_by)
+    VALUES ('f2000000-0000-0000-0000-000000000002',
+            'a0000000-0000-0000-0000-00000000000a', 'caregiver',
+            'b0000000-0000-0000-0000-00000000000b')$$);
+
+SELECT expect_refused('and cannot name somebody else as the one who invited them',
+  $$INSERT INTO facility_members (facility_id, user_id, role, invited_by)
+    VALUES ('f1000000-0000-0000-0000-000000000001',
+            'c0000000-0000-0000-0000-00000000000c', 'caregiver',
+            'a0000000-0000-0000-0000-00000000000a')$$);
+
+-- A caregiver is not an administrator. Maria files care.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+SELECT expect_refused('a caregiver cannot create an account',
+  $$INSERT INTO users (email, display_name) VALUES ('nope@example.test', 'Nope')$$);
+SELECT expect_refused('and cannot add anybody to the building',
+  $$INSERT INTO facility_members (facility_id, user_id, role, invited_by)
+    VALUES ('f1000000-0000-0000-0000-000000000001',
+            'c0000000-0000-0000-0000-00000000000c', 'caregiver',
+            'a0000000-0000-0000-0000-00000000000a')$$);
+
+-- The columns that are not in the grant. Refused before a policy is reached, which is the
+-- stronger of the two answers.
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+DO $probe$
+BEGIN
+  INSERT INTO users (email, display_name, password_hash)
+  VALUES ('forged@example.test', 'Forged', '$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$aaaa');
+  RAISE NOTICE 'FAIL  ALLOWED: the inviter set a password';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: the inviter cannot set a password';
+END $probe$;
+
+DO $probe$
+BEGIN
+  INSERT INTO facility_members (facility_id, user_id, role, invited_by, state)
+  VALUES ('f1000000-0000-0000-0000-000000000001',
+          'c0000000-0000-0000-0000-00000000000c', 'caregiver',
+          'b0000000-0000-0000-0000-00000000000b', 'active');
+  RAISE NOTICE 'FAIL  ALLOWED: a membership was created already active';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: a membership cannot be created already active';
+END $probe$;
+
+
+-- ── and taking somebody out of it again ────────────────────────────────────────
+--
+-- Read as row counts throughout. A refused UPDATE matches nothing and raises nothing, so
+-- expect_refused() would report "ALLOWED" for a statement the database silently dropped -
+-- the one place in this file where the obvious helper is the wrong one.
+
+UPDATE facility_members SET state = 'revoked', ended_at = now(), updated_at = now()
+ WHERE user_id = 'aa000000-0000-0000-0000-0000000000aa';
+
+SELECT expect('a care manager ends a membership, and it is a date rather than a deletion',
+  (SELECT state = 'revoked' AND ended_at IS NOT NULL
+     FROM facility_members WHERE user_id = 'aa000000-0000-0000-0000-0000000000aa'));
+
+SELECT expect('and the row is still there to be asked who invited them',
+  (SELECT invited_by = 'b0000000-0000-0000-0000-00000000000b'
+     FROM facility_members WHERE user_id = 'aa000000-0000-0000-0000-0000000000aa'));
+
+-- Priya is the only care manager at Cedar, so ending her own membership would leave the
+-- building with no way to run it and no way back except the terminal this milestone exists
+-- to retire.
+UPDATE facility_members SET state = 'revoked', ended_at = now(), updated_at = now()
+ WHERE id = 'fb000000-0000-0000-0000-00000000000b';
+
+SELECT expect('the last care manager at a building cannot end their own membership',
+  (SELECT state = 'active' AND ended_at IS NULL
+     FROM facility_members WHERE id = 'fb000000-0000-0000-0000-00000000000b'));
+
+-- Birch is Ben's building and not Priya's. Read back as the owner rather than as Priya,
+-- because members_own_facilities does not show her Birch at all - asking her whether the row
+-- changed returns no row, and a check that reads nothing reports whatever NULL reports. The
+-- first version of this did exactly that and called a working policy a failure.
+UPDATE facility_members SET state = 'revoked', ended_at = now(), updated_at = now()
+ WHERE id = 'fd000000-0000-0000-0000-00000000000d';
+
+RESET ROLE;
+SELECT expect('and a manager cannot end a membership at a building they do not manage',
+  (SELECT state = 'active' AND ended_at IS NULL
+     FROM facility_members WHERE id = 'fd000000-0000-0000-0000-00000000000d'));
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+
+-- Ending is one defined transition, pinned at both ends because a policy cannot compare the
+-- row before with the row after. Setting a date without revoking is not it.
+--
+-- This one raises where the three above were silent, and the difference is which half
+-- refused: USING filters the rows a statement may reach and says nothing about the ones it
+-- removes, WITH CHECK judges the row that would result and raises when it fails. Same
+-- policy, two behaviours, and a check written for the wrong one passes while proving
+-- nothing.
+SELECT expect_refused('a membership is not quietly ended without being revoked',
+  $$UPDATE facility_members SET ended_at = now(), updated_at = now()
+     WHERE user_id = 'a0000000-0000-0000-0000-00000000000a'$$);
+
+-- The columns no path writes. Refused by the grant, before a row is reached.
+DO $probe$
+BEGIN
+  UPDATE facility_members SET role = 'care_manager'
+   WHERE id = 'fa000000-0000-0000-0000-00000000000a';
+  RAISE NOTICE 'FAIL  ALLOWED: a caregiver was promoted by an update';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: somebody does not become a care manager by an update';
+END $probe$;
+
+DO $probe$
+BEGIN
+  UPDATE facility_members SET facility_id = 'f2000000-0000-0000-0000-000000000002'
+   WHERE id = 'fa000000-0000-0000-0000-00000000000a';
+  RAISE NOTICE 'FAIL  ALLOWED: a membership moved buildings';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: a membership does not move to another building by an update';
+END $probe$;
+
+DO $probe$
+BEGIN
+  UPDATE facility_members SET invited_by = 'a0000000-0000-0000-0000-00000000000a'
+   WHERE id = 'fa000000-0000-0000-0000-00000000000a';
+  RAISE NOTICE 'FAIL  ALLOWED: the record of who let somebody in was rewritten';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: who let somebody in is not rewritable';
+END $probe$;
+
+-- ── the grant on its own, with the policy satisfied ───────────────────────────
+--
+-- The three probes above are refused twice over, and that is the design: the column grant
+-- says a request may not name these, and the policies would refuse the row anyway. It also
+-- makes them unable to say which half did it - both answer 42501, so widening the grant
+-- changes nothing a check can see, and it was widening the grant that showed this.
+--
+-- So each of these satisfies the policy completely and names one column the grant leaves
+-- out. Nothing but the grant can refuse them, which is what makes them worth running.
+
+DO $probe$
+BEGIN
+  INSERT INTO facility_members (facility_id, user_id, role, invited_by, state)
+  VALUES ('f1000000-0000-0000-0000-000000000001',
+          'c0000000-0000-0000-0000-00000000000c', 'caregiver',
+          'b0000000-0000-0000-0000-00000000000b', 'invited');
+  RAISE NOTICE 'FAIL  ALLOWED: a request named state, even to say what the default says';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused by the grant alone: a request cannot name state at all';
+END $probe$;
+
+DO $probe$
+BEGIN
+  INSERT INTO facility_members (facility_id, user_id, role, invited_by, started_at)
+  VALUES ('f1000000-0000-0000-0000-000000000001',
+          'c0000000-0000-0000-0000-00000000000c', 'caregiver',
+          'b0000000-0000-0000-0000-00000000000b', now() - interval '1 year');
+  RAISE NOTICE 'FAIL  ALLOWED: a membership was backdated';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused by the grant alone: a membership cannot be backdated';
+END $probe$;
+
+-- A valid ending in every respect the policy judges, carrying one column it does not.
+DO $probe$
+BEGIN
+  UPDATE facility_members
+     SET state = 'revoked', ended_at = now(), updated_at = now(), role = 'care_manager'
+   WHERE user_id = 'a0000000-0000-0000-0000-00000000000a';
+  RAISE NOTICE 'FAIL  ALLOWED: a promotion rode along with an ending';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused by the grant alone: a role cannot ride along with an ending';
+END $probe$;
+
+SELECT expect_refused('and nothing anywhere deletes a membership',
+  $$DELETE FROM facility_members WHERE id = 'fa000000-0000-0000-0000-00000000000a'$$);
+
+
 \echo '── after access is withdrawn and after a shift ends'
 RESET ROLE;
 UPDATE resident_contacts SET state = 'revoked', revoked_at = now()

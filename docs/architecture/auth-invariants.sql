@@ -553,6 +553,75 @@ SELECT expect('and their own is still the one that moved',
 
 ALTER TABLE resident_contacts NO FORCE ROW LEVEL SECURITY;
 
+
+\echo ''
+\echo '── and a membership allows nothing until it is accepted either'
+
+-- member-invitation.sql made a care manager the one who adds somebody to a building, so a
+-- membership now opens at 'invited' the way a family grant does. bootstrap wrote 'active'
+-- straight out, because when a terminal put somebody in a building the only open question
+-- was whether they had a password.
+--
+-- Not forced, and that is the difference from the block above rather than an omission.
+-- grants.sql records why: a forced policy on an identity table consults a helper that reads
+-- the same table and recurses, which is what ENABLE is doing there. Tried here first, and
+-- PostgreSQL answered with a stack depth limit - the useful kind of refusal.
+--
+-- So the owner stays exempt on this table, and what that means has to be said plainly: the
+-- update inside redeem_token is not governed by any policy here, it simply lands. What the
+-- policies below guard is the application's own path, and the way to ask them anything is
+-- to be the application. That is what SET ROLE is for, and without it this block would run
+-- as the owner and report success on everything while testing nothing.
+
+\set QUIET on
+INSERT INTO users (id, email, display_name) VALUES
+  ('9e000000-0000-0000-0000-00000000009e', 'tomas@example.test', 'Tomas'),
+  ('9f000000-0000-0000-0000-00000000009f', 'nina@example.test',  'Nina');
+INSERT INTO facility_members (id, facility_id, user_id, role, state, invited_by) VALUES
+  ('8e000000-0000-0000-0000-00000000008e', 'f1000000-0000-0000-0000-000000000001',
+   '9e000000-0000-0000-0000-00000000009e', 'caregiver', 'invited',
+   'a0000000-0000-0000-0000-00000000000a'),
+  ('8f000000-0000-0000-0000-00000000008f', 'f1000000-0000-0000-0000-000000000001',
+   '9f000000-0000-0000-0000-00000000009f', 'caregiver', 'invited',
+   'a0000000-0000-0000-0000-00000000000a');
+INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at) VALUES
+  ('9e000000-0000-0000-0000-00000000009e', 'invitation', h('tomas'), now() + interval '7 days');
+SELECT set_config('app.user_id', '9e000000-0000-0000-0000-00000000009e', false);
+\set QUIET off
+
+SET ROLE dailycare_app;
+
+SELECT expect('an invited membership is not yet a building',
+  (SELECT count(*) = 0 FROM app_my_facilities()));
+
+SELECT expect('accepting the invitation is what makes it one',
+  (SELECT redeem_token(h('tomas'), 'invitation',
+     '$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$3sYhZ0ZQZxQKqUk0gq7Wc2Dk8Q0rKvVQe0GJ5m1wXyz')
+     = '9e000000-0000-0000-0000-00000000009e'));
+
+SELECT expect('and now it is',
+  (SELECT count(*) = 1 FROM app_my_facilities()));
+
+SELECT expect('who let them in, and when, is still the facility''s decision and not the acceptance',
+  (SELECT invited_by = 'a0000000-0000-0000-0000-00000000000a' AND started_at < now()
+     FROM facility_members WHERE id = '8e000000-0000-0000-0000-00000000008e'));
+
+-- Aimed at a real second membership, or the attempt lands on nothing and proves nothing.
+-- Read back rather than expected to raise: an update a policy filters out changes no rows
+-- and says nothing, which is the shape of the bug this whole block exists because of.
+UPDATE facility_members SET state = 'active'
+ WHERE id = '8f000000-0000-0000-0000-00000000008f';
+
+SELECT expect('one person cannot accept another''s invitation to a building',
+  (SELECT state = 'invited' FROM facility_members
+    WHERE id = '8f000000-0000-0000-0000-00000000008f'));
+
+SELECT expect('and their own is still the one that moved',
+  (SELECT state = 'active' FROM facility_members
+    WHERE id = '8e000000-0000-0000-0000-00000000008e'));
+
+RESET ROLE;
+
 \set QUIET on
 SELECT set_config('app.user_id', '', false);
 SELECT checks_end();
