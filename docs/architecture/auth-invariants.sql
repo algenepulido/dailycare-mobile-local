@@ -622,6 +622,83 @@ SELECT expect('and their own is still the one that moved',
 
 RESET ROLE;
 
+
+\echo ''
+\echo '── handing somebody a way in'
+
+-- user_tokens is in no INSERT grant and issue_invitation() is the only route to it. The
+-- first check is the one that makes the rest mean anything: if the application could write
+-- the table directly, every refusal below would be a formality.
+
+\set QUIET on
+INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
+  ('8b000000-0000-0000-0000-00000000008b', 'f1000000-0000-0000-0000-000000000001',
+   '9b000000-0000-0000-0000-00000000009b', 'care_manager', 'active');
+INSERT INTO users (id, email, display_name) VALUES
+  ('9c000000-0000-0000-0000-00000000009c', 'rosa@example.test', 'Rosa'),
+  ('9d000000-0000-0000-0000-00000000009d', 'ben@example.test',  'Ben');
+-- Another building, with somebody in it. A hypothetical one proves nothing: the first
+-- version of the refusal below aimed at a caregiver who turned out to be in Sam's own
+-- building, so the function allowed it and was right to.
+INSERT INTO facilities (id, name, timezone) VALUES
+  ('f2000000-0000-0000-0000-000000000002', 'Birch House', 'America/Chicago');
+INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
+  ('8d000000-0000-0000-0000-00000000008d', 'f2000000-0000-0000-0000-000000000002',
+   '9d000000-0000-0000-0000-00000000009d', 'caregiver', 'active');
+INSERT INTO facility_members (id, facility_id, user_id, role, state, invited_by) VALUES
+  ('8c000000-0000-0000-0000-00000000008c', 'f1000000-0000-0000-0000-000000000001',
+   '9c000000-0000-0000-0000-00000000009c', 'caregiver', 'invited',
+   '9b000000-0000-0000-0000-00000000009b');
+\set QUIET off
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', '9b000000-0000-0000-0000-00000000009b', false);
+
+DO $probe$
+BEGIN
+  INSERT INTO user_tokens (user_id, purpose, token_hash, expires_at)
+  VALUES ('9c000000-0000-0000-0000-00000000009c', 'invitation',
+          repeat('a', 64), now() + interval '7 days');
+  RAISE NOTICE 'FAIL  ALLOWED: the application wrote an invitation directly';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused: the application cannot write an invitation directly';
+END $probe$;
+
+SELECT expect('a manager issues one for somebody they put in their building',
+  issue_invitation('9c000000-0000-0000-0000-00000000009c', repeat('b', 64)));
+
+-- Read as the owner. The application has no SELECT on user_tokens either, which is the
+-- same answer as the probe above from the other side and the reason this cannot be checked
+-- from where it was issued.
+RESET ROLE;
+SELECT expect('and it is the only unconsumed one that account holds',
+  (SELECT count(*) = 1 FROM user_tokens
+    WHERE user_id = '9c000000-0000-0000-0000-00000000009c' AND consumed_at IS NULL));
+SET ROLE dailycare_app;
+
+-- Not a failure and not a second credential. bootstrap decided this in Go; the rule is the
+-- database's now, so the next thing to issue an invitation cannot miss it.
+SELECT expect('asking twice does not mint a second way in',
+  NOT issue_invitation('9c000000-0000-0000-0000-00000000009c', repeat('c', 64)));
+
+RESET ROLE;
+SELECT expect('and nothing was written by the asking',
+  (SELECT count(*) = 1 FROM user_tokens
+    WHERE user_id = '9c000000-0000-0000-0000-00000000009c'));
+SET ROLE dailycare_app;
+
+SELECT expect_rejected('a manager cannot invite somebody at another building', $$
+  SELECT issue_invitation('9d000000-0000-0000-0000-00000000009d', repeat('d', 64))
+$$);
+
+-- Maria is a caregiver at the same building. Adding people is not hers.
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+SELECT expect_rejected('and a caregiver cannot invite anybody at all', $$
+  SELECT issue_invitation('9c000000-0000-0000-0000-00000000009c', repeat('e', 64))
+$$);
+
+RESET ROLE;
+
 \set QUIET on
 SELECT set_config('app.user_id', '', false);
 SELECT checks_end();

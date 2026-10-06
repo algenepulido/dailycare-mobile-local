@@ -44,3 +44,4 @@ contact-acceptance.sql
 care-attribution.sql
 medication-attribution.sql
 member-invitation.sql
+invitation-issuing.sql

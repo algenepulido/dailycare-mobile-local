@@ -18,6 +18,7 @@ import (
 
 	"github.com/dailycare-hq/dailycare-api/internal/auth"
 	"github.com/dailycare-hq/dailycare-api/internal/db"
+	"github.com/dailycare-hq/dailycare-api/internal/facility"
 	"github.com/dailycare-hq/dailycare-api/internal/logging"
 	"github.com/dailycare-hq/dailycare-api/internal/media"
 	"github.com/dailycare-hq/dailycare-api/internal/records"
@@ -27,6 +28,7 @@ import (
 type API struct {
 	sessions *sessions.Store
 	records  *records.Store
+	facility *facility.Store
 	// Nil when the process has no Cloud Storage to sign against, which is how it runs on
 	// a laptop. The route still exists and says so rather than disappearing, because an
 	// endpoint that is absent in one environment and present in another is a difference
@@ -35,8 +37,8 @@ type API struct {
 	log   *logging.Logger
 }
 
-func New(s *sessions.Store, r *records.Store, m *media.Store, l *logging.Logger) *API {
-	return &API{sessions: s, records: r, media: m, log: l}
+func New(s *sessions.Store, r *records.Store, f *facility.Store, m *media.Store, l *logging.Logger) *API {
+	return &API{sessions: s, records: r, facility: f, media: m, log: l}
 }
 
 func (a *API) Routes() http.Handler {
@@ -84,6 +86,13 @@ func (a *API) Routes() http.Handler {
 	// that produced them whether or not anybody opened a photograph would be handing out
 	// links nobody asked for.
 	mux.Handle("GET /v1/residents/{id}/days/{date}/photos", a.identified(a.dayPhotos))
+
+	// Administering a building. Every one of these is refused by the database for a
+	// facility the caller does not manage, so what is here is the translation and not the
+	// decision - which is the whole of what milestone five moves out of the terminal.
+	mux.Handle("GET /v1/facilities/{id}/members", a.identified(a.listMembers))
+	mux.Handle("POST /v1/facilities/{id}/members", a.identified(a.inviteMember))
+	mux.Handle("DELETE /v1/members/{id}", a.identified(a.endMembership))
 
 	// /healthz is not ours to use. Cloud Run's frontend answers it before a request
 	// reaches the container, with an HTML 404 - so a probe against a deployed service
@@ -506,4 +515,105 @@ func (a *API) residentAndDate(w http.ResponseWriter, r *http.Request) (uuid.UUID
 		return uuid.Nil, time.Time{}, false
 	}
 	return id, on, true
+}
+
+// The three administrative handlers.
+//
+// They share one shape and it is deliberate: a domain error becomes a status and a sentence
+// a care manager can act on, and nothing from the database reaches the response. The errors
+// they map were chosen in internal/facility for exactly this, because the alternative - a
+// handler reading row counts and guessing - is the thing that put "that day was not
+// something the record accepts" in front of a daughter in M3.
+func (a *API) facilityFailure(w http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case errors.Is(err, facility.ErrNotVisible):
+		a.fail(w, r, http.StatusNotFound, "no such membership", nil)
+	case errors.Is(err, facility.ErrLastManager):
+		a.fail(w, r, http.StatusConflict,
+			"this is the last care manager at the building, so there would be nobody left to run it", nil)
+	case errors.Is(err, facility.ErrNotTheirs):
+		a.fail(w, r, http.StatusForbidden, "only a care manager can do this", nil)
+	case errors.Is(err, facility.ErrAccountExists):
+		a.fail(w, r, http.StatusConflict, "that email address already has an account", nil)
+	default:
+		return false
+	}
+	return true
+}
+
+func (a *API) listMembers(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such facility", nil)
+		return
+	}
+	members, err := a.facility.Members(r.Context(), c, id)
+	if err != nil {
+		if a.facilityFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read the building", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, members)
+}
+
+func (a *API) inviteMember(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such facility", nil)
+		return
+	}
+	var body struct {
+		Email       string `json:"email"`
+		DisplayName string `json:"displayName"`
+		Role        string `json:"role"`
+	}
+	if !a.read(w, r, &body) {
+		return
+	}
+	// Checked here because these are the shape of the request rather than a decision about
+	// who may do what. Everything that is a decision is below, in the database.
+	if body.Email == "" || body.DisplayName == "" {
+		a.fail(w, r, http.StatusBadRequest, "an email address and a name are both needed", nil)
+		return
+	}
+	if body.Role != "caregiver" && body.Role != "care_manager" {
+		a.fail(w, r, http.StatusBadRequest, "a role is either caregiver or care_manager", nil)
+		return
+	}
+
+	token, digest, err := auth.NewToken()
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "could not make an invitation", err)
+		return
+	}
+	invited, err := a.facility.Invite(r.Context(), c, id,
+		body.Email, body.DisplayName, body.Role, digest, token)
+	if err != nil {
+		if a.facilityFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not add them to the building", err)
+		return
+	}
+	// The one time the link exists anywhere outside the recipient's hands. Only its digest
+	// was stored, so there is no asking for it again.
+	a.ok(w, r, http.StatusCreated, invited)
+}
+
+func (a *API) endMembership(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such membership", nil)
+		return
+	}
+	if err := a.facility.End(r.Context(), c, id); err != nil {
+		if a.facilityFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not end the membership", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

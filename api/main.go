@@ -19,6 +19,7 @@ import (
 
 	"github.com/dailycare-hq/dailycare-api/internal/auth"
 	"github.com/dailycare-hq/dailycare-api/internal/db"
+	"github.com/dailycare-hq/dailycare-api/internal/facility"
 	"github.com/dailycare-hq/dailycare-api/internal/httpapi"
 	"github.com/dailycare-hq/dailycare-api/internal/logging"
 	"github.com/dailycare-hq/dailycare-api/internal/media"
@@ -111,7 +112,8 @@ func run() error {
 		log.Info("no MEDIA_BUCKET, so photographs are not set up on this server")
 	}
 
-	api := httpapi.New(sessions.New(database, signer), records.New(database), photos, log)
+	api := httpapi.New(sessions.New(database, signer), records.New(database),
+		facility.New(database), photos, log)
 
 	port := os.Getenv("PORT")
 	if port == "" {

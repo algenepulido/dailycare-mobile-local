@@ -16,6 +16,7 @@ import (
 
 	"github.com/dailycare-hq/dailycare-api/internal/auth"
 	"github.com/dailycare-hq/dailycare-api/internal/db"
+	"github.com/dailycare-hq/dailycare-api/internal/facility"
 	"github.com/dailycare-hq/dailycare-api/internal/logging"
 	"github.com/dailycare-hq/dailycare-api/internal/records"
 	"github.com/dailycare-hq/dailycare-api/internal/sessions"
@@ -75,7 +76,7 @@ func serve(t *testing.T) *harness {
 	signer, _ := auth.NewSigner([]byte("0123456789abcdef0123456789abcdef"))
 	// No media store: a laptop has no bucket to sign against, and the route answers that
 	// rather than disappearing.
-	api := New(sessions.New(d, signer), records.New(d), nil, logging.New(logs, fields))
+	api := New(sessions.New(d, signer), records.New(d), facility.New(d), nil, logging.New(logs, fields))
 	s := httptest.NewServer(api.Routes())
 	t.Cleanup(s.Close)
 	return &harness{server: s, logs: logs, email: email, pass: pass}

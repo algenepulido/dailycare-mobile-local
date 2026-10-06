@@ -83,6 +83,10 @@ SELECT expect('no file went in twice',
 --                         lost it. Same reason as the second entry, not the third.
 --   medication-attribution.sql  the same again, and the same reason: one function, created
 --                         by the owner of the schema.
+--   invitation-issuing.sql  creates two functions and grants EXECUTE on one of them, so it
+--                         needs CREATE on the schema and ownership of what it grants. Both
+--                         for the same reason as the entries above: it runs as the role
+--                         that owns the schema and therefore owns what it just created.
 --   member-invitation.sql creates two functions, so it needs CREATE on the schema and has
 --                         it for the same reason - the migration runs as the role that owns
 --                         it. The rest of the file needs nothing extra: policies on tables
@@ -91,7 +95,7 @@ SELECT expect('no file went in twice',
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));
