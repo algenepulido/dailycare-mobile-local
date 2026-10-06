@@ -3,8 +3,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Icon, Screen, SignInSheet } from '@/components';
-import { SignedOut, fetchDay, fetchDayPhotos, listResidents } from '@/data/api';
-import type { DayPhoto, RemoteResident } from '@/data/api';
+import {
+  SignedOut,
+  acceptGrant,
+  fetchDay,
+  fetchDayPhotos,
+  listResidents,
+  waitingGrants,
+} from '@/data/api';
+import type { DayPhoto, RemoteResident, WaitingGrant } from '@/data/api';
 import { baselineFromWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { longLabel, today } from '@/domain/dates';
@@ -39,6 +46,12 @@ export default function FamilyScreen() {
   const [photos, setPhotos] = useState<DayPhoto[] | undefined>();
   const [refreshing, setRefreshing] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
+  // What this account has been offered and not taken up. Asked for alongside the residents
+  // rather than only when that list is empty: somebody can hold a reading grant for one
+  // parent and a waiting one for the other, and a screen that only looks when it has nothing
+  // would never show the second.
+  const [waiting, setWaiting] = useState<WaitingGrant[]>([]);
+  const [accepting, setAccepting] = useState<string | null>(null);
 
   const date = today();
   const signedIn = Boolean(account);
@@ -51,10 +64,29 @@ export default function FamilyScreen() {
       setProblem(null);
       // Keep the chosen resident across a refresh unless the grant for them has gone.
       setChosen((was) => (was && got.some((p) => p.id === was) ? was : (got[0]?.id ?? null)));
+      // Anything offered and not taken up. Failing quietly: an older server has no such
+      // route, and a family member who can read her mother's day should not be shown an
+      // error because of a list that would have been empty anyway.
+      setWaiting(await waitingGrants().catch(() => []));
     } catch (error) {
       setProblem(error instanceof SignedOut ? 'signedOut' : 'refused');
     }
   }, []);
+
+  const accept = useCallback(
+    async (grant: WaitingGrant) => {
+      setAccepting(grant.id);
+      try {
+        await acceptGrant(grant.id);
+        await loadPeople();
+      } catch {
+        setProblem('refused');
+      } finally {
+        setAccepting(null);
+      }
+    },
+    [loadPeople],
+  );
 
   useEffect(() => {
     if (signedIn) void loadPeople();
@@ -136,14 +168,49 @@ export default function FamilyScreen() {
   // An account linked to nobody. A grant that was withdrawn, or one that has not been given
   // yet - and the two read the same from here on purpose, because which of them it is is the
   // facility's to say and not this screen's to guess.
+  /**
+   * Something has been offered and not taken up.
+   *
+   * Shown before the empty state, because "nobody is linked to this account" is false when
+   * a care home is waiting on an answer - and it is the sentence somebody whose access was
+   * restored would otherwise read. It names the building rather than the resident: an
+   * invited grant discloses nothing until it is accepted, which is the whole reason it waits.
+   */
+  const pending =
+    waiting.length > 0 ? (
+      <>
+        {waiting.map((grant) => (
+          <View key={grant.id} style={styles.offer}>
+            <Text style={styles.offerTitle}>
+              {grant.again
+                ? `${grant.facility} has shared somebody with you again`
+                : `${grant.facility} has shared somebody with you`}
+            </Text>
+            <Text style={styles.offerBlurb}>
+              {grant.again
+                ? 'Your access was taken back and the care home has offered it again. Accepting is yours to do.'
+                : `They have you down as their ${grant.relation}. Nothing is shown until you accept.`}
+            </Text>
+            <Button
+              label={accepting === grant.id ? 'Accepting…' : 'Accept'}
+              disabled={accepting !== null}
+              onPress={() => void accept(grant)}
+            />
+          </View>
+        ))}
+      </>
+    ) : null;
+
   if (people !== null && people.length === 0) {
     return (
       <Screen footer={<Button label="Sign out" variant="secondary" onPress={() => void signOut()} />}>
         <Text style={styles.title}>DailyCare</Text>
-        <Text style={styles.blurb}>
-          Nobody is linked to this account yet. When the care home gives you access to a
-          resident, their day appears here.
-        </Text>
+        {pending ?? (
+          <Text style={styles.blurb}>
+            Nobody is linked to this account yet. When the care home gives you access to a
+            resident, their day appears here.
+          </Text>
+        )}
       </Screen>
     );
   }
@@ -163,6 +230,11 @@ export default function FamilyScreen() {
       <View>
         <Text style={styles.title}>{person ? person.displayName : 'Today'}</Text>
         <Text style={styles.blurb}>{longLabel(date)}</Text>
+
+        {/* Above the day rather than below it. Somebody reading about one parent and offered
+            access to the other should see the offer, and a card under a scrolling summary is
+            a card nobody reaches. */}
+        {pending}
 
         {/* Only with more than one. A switcher over a list of one is a control that cannot
             do anything, and two parents in the same building is the case it exists for. */}
@@ -362,6 +434,15 @@ function timeOfDay(iso: string): string {
 const styles = StyleSheet.create({
   title: { ...type.screenTitle, color: color.ink, marginTop: 8 },
   blurb: { ...type.blurb, marginBottom: 8 },
+  offer: {
+    backgroundColor: color.honeySoft,
+    borderRadius: radii.card,
+    padding: 18,
+    gap: 10,
+    marginTop: 12,
+  },
+  offerTitle: { ...type.cardTitle, color: color.ink },
+  offerBlurb: { ...type.blurb, marginBottom: 2 },
   empty: { ...type.body, color: color.ink3, paddingVertical: 24 },
   loading: { paddingVertical: 48, alignItems: 'center' },
 

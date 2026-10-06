@@ -583,3 +583,31 @@ export async function grantAccess(
 export async function withdrawAccess(residentId: string, contactId: string): Promise<void> {
   await authed(`/v1/residents/${residentId}/contacts/${contactId}`, { method: 'DELETE' });
 }
+
+
+export async function restoreAccess(residentId: string, contactId: string): Promise<void> {
+  await authed(`/v1/residents/${residentId}/contacts/${contactId}/restore`, { method: 'POST' });
+}
+
+/**
+ * A grant offered to this account and not taken up yet.
+ *
+ * It names the building rather than the resident, because an invited grant discloses nothing
+ * until it is accepted - the server cannot say whose days these are and should not. `again`
+ * is a grant that was withdrawn and offered back, which the screen says out loud: somebody
+ * whose access was taken away and returned should be told that is what happened.
+ */
+export interface WaitingGrant {
+  id: string;
+  facility: string;
+  relation: string;
+  again: boolean;
+}
+
+export async function waitingGrants(): Promise<WaitingGrant[]> {
+  return (await authed('/v1/invitations')) as WaitingGrant[];
+}
+
+export async function acceptGrant(id: string): Promise<void> {
+  await authed(`/v1/invitations/${id}/accept`, { method: 'POST' });
+}

@@ -308,6 +308,57 @@ else:
 want "while the decision stays on the record" "kept revoked with a date" "$KEPT"
 
 echo
+echo "── access offered again, and taken up"
+
+# Anna's access was withdrawn two sections above. Offering it again puts the grant back where
+# one starts rather than where it ended, so she has to accept - which is the decision in
+# access-restored.sql and the reason 'active' never means anything but that she did.
+R=$(req GET "/v1/invitations" "$ANNA")
+PENDING=$(python3 -c 'import json;d=json.load(open("/tmp/dc-body"));print(len(d) if isinstance(d,list) else -1)')
+want "nothing is waiting for her while it is withdrawn" 0 "$PENDING"
+
+R=$(req POST "/v1/residents/$CATHY/contacts/$ANNA_C/restore" "$PRIYA")
+want "a manager offers the access again" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req GET "/v1/residents" "$ANNA")
+STILL0=$(python3 -c 'import json;d=json.load(open("/tmp/dc-body"));print(len(d) if isinstance(d,list) else -1)')
+want "and she still reads nobody, because it waits for her" 0 "$STILL0"
+
+R=$(req GET "/v1/invitations" "$ANNA")
+want "but something is waiting now" 200 "${R%%$'\t'*}" "${R#*$'\t'}"
+AGAIN=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+g=d[0] if isinstance(d,list) and d else None
+print('none' if g is None else (g['facility'] + ' / again=' + str(g['again']).lower()))")
+want "and it says which building, and that it is a second offer" "Cedar House / again=true" "$AGAIN"
+GRANT=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+print(d[0]['id'] if isinstance(d,list) and d else '')")
+
+R=$(req POST "/v1/invitations/$GRANT/accept" "$MARIA")
+want "somebody else cannot accept it for her" 404 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req POST "/v1/invitations/$GRANT/accept" "$ANNA")
+want "she accepts it herself" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req GET "/v1/residents" "$ANNA")
+BACK=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+print(sum(1 for r in d if r['id']=='$CATHY') if isinstance(d,list) else -1)")
+want "and reads her mother again" 1 "$BACK"
+
+R=$(req GET "/v1/residents/$CATHY/contacts" "$PRIYA")
+MARK=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+k=next((k for k in d if k['id']=='$ANNA_C'),None) if isinstance(d,list) else None
+print('missing' if k is None else k['state'] + (' with the withdrawal still on it' if k.get('revokedAt') else ' with no withdrawal recorded'))")
+want "with the withdrawal still on the record" "active with the withdrawal still on it" "$MARK"
+
+echo
 echo "── a caregiver who leaves, without losing what they filed"
 
 # The milestone's own sentence, walked rather than asserted. A caregiver arrives, is given

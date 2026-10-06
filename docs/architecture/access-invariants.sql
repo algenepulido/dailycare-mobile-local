@@ -1523,6 +1523,138 @@ SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
 SELECT expect('and the day he filed is untouched by any of it',
   care_day_filed_by_name('94000000-0000-0000-0000-000000000094') = 'Sam');
 
+
+\echo ''
+\echo '── access taken back, and offered again'
+
+-- Three transitions, three policies, and none of them able to do another's work. The one
+-- that was missing is the middle; the one that was too wide was the first.
+
+RESET ROLE;
+\set QUIET on
+INSERT INTO users (id, email, display_name) VALUES
+  ('95000000-0000-0000-0000-000000000095', 'ruths-daughter@example.test', 'Esther');
+\set QUIET off
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
+
+INSERT INTO resident_contacts
+  (id, facility_id, resident_id, user_id, relation, granted_by, granted_at)
+VALUES ('96000000-0000-0000-0000-000000000096', 'f9000000-0000-0000-0000-000000000009',
+        '93000000-0000-0000-0000-000000000093', '95000000-0000-0000-0000-000000000095',
+        'child', app_user_id(), now());
+
+SELECT expect('a grant opens at invited, which is the column default and not a choice',
+  (SELECT state = 'invited' FROM resident_contacts
+    WHERE id = '96000000-0000-0000-0000-000000000096'));
+
+-- The hole contacts_update had. A manager could turn a disclosure on for somebody who had
+-- never accepted it; nothing did, and now nothing can.
+--
+-- This one raises where the membership refusals were silent, and which half catches it is
+-- why: contacts_withdraw admits any row that is not already revoked, so an invited grant
+-- reaches WITH CHECK, and WITH CHECK judges the row that would result and raises. The same
+-- policy refuses silently when USING is what removes the row. Whether a refusal is loud
+-- depends on the state the row is in, which is a reason to read both halves before writing
+-- a check rather than after - this one was written as a read-back first and errored.
+SELECT expect_refused('and a manager cannot accept it on their behalf',
+  $$UPDATE resident_contacts SET state = 'active', updated_at = now()
+     WHERE id = '96000000-0000-0000-0000-000000000096'$$);
+
+-- The person's own, which contact-acceptance.sql wrote and nothing had exercised from here.
+SELECT set_config('app.user_id', '95000000-0000-0000-0000-000000000095', false);
+UPDATE resident_contacts SET state = 'active', updated_at = now()
+ WHERE id = '96000000-0000-0000-0000-000000000096';
+SELECT expect('accepting is hers and it works',
+  (SELECT state = 'active' FROM resident_contacts
+    WHERE id = '96000000-0000-0000-0000-000000000096'));
+SELECT expect_rows('and now she reads her mother', 1,
+  $$SELECT id FROM residents WHERE id = '93000000-0000-0000-0000-000000000093'$$);
+
+-- Withdrawing.
+SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
+UPDATE resident_contacts
+   SET state = 'revoked', revoked_by = app_user_id(), revoked_at = now(), updated_at = now()
+ WHERE id = '96000000-0000-0000-0000-000000000096';
+SELECT expect('a manager takes it back, and the row says who did',
+  (SELECT state = 'revoked' AND revoked_at IS NOT NULL
+      AND revoked_by = '91000000-0000-0000-0000-000000000091'
+     FROM resident_contacts WHERE id = '96000000-0000-0000-0000-000000000096'));
+
+SELECT set_config('app.user_id', '95000000-0000-0000-0000-000000000095', false);
+SELECT expect_rows('and she reads nobody', 0, 'SELECT id FROM residents');
+
+-- Restoring, which lands where a grant starts rather than where it ended.
+SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
+SELECT expect_refused('a manager cannot restore it straight to active',
+  $$UPDATE resident_contacts SET state = 'active', updated_at = now()
+     WHERE id = '96000000-0000-0000-0000-000000000096'$$);
+SELECT expect('and it is still revoked after the attempt',
+  (SELECT state = 'revoked' FROM resident_contacts
+    WHERE id = '96000000-0000-0000-0000-000000000096'));
+
+UPDATE resident_contacts SET state = 'invited', updated_at = now()
+ WHERE id = '96000000-0000-0000-0000-000000000096';
+SELECT expect('and offers it again, waiting for her',
+  (SELECT state = 'invited' FROM resident_contacts
+    WHERE id = '96000000-0000-0000-0000-000000000096'));
+
+SELECT expect('with the withdrawal still on the row, which is what says it was offered again',
+  (SELECT revoked_at IS NOT NULL AND revoked_by = '91000000-0000-0000-0000-000000000091'
+     FROM resident_contacts WHERE id = '96000000-0000-0000-0000-000000000096'));
+
+SELECT set_config('app.user_id', '95000000-0000-0000-0000-000000000095', false);
+SELECT expect_rows('she still reads nobody until she accepts', 0, 'SELECT id FROM residents');
+
+-- And can see who is asking, which she could not before facilities_offered: the screen that
+-- shows her a pending grant has to name the building, and the policy built on
+-- app_my_contact_facilities() wants 'active' - so the one person a waiting grant is for was
+-- the one person who could not read whose it was.
+SELECT expect_rows('and can read the name of the building asking her', 1,
+  $$SELECT id FROM facilities WHERE id = 'f9000000-0000-0000-0000-000000000009'$$);
+SELECT expect_rows('and still none of the residents in it', 0, 'SELECT id FROM residents');
+UPDATE resident_contacts SET state = 'active', updated_at = now()
+ WHERE id = '96000000-0000-0000-0000-000000000096';
+SELECT expect_rows('and reads her mother again once she has', 1,
+  $$SELECT id FROM residents WHERE id = '93000000-0000-0000-0000-000000000093'$$);
+
+-- As the manager. The first version of these two ran as Esther, whose identity the line
+-- above left set, and both reported ALLOWED - because no policy admits her to this row at
+-- all, so the update matched nothing and raised nothing. A refusal by the wrong half, read
+-- by the wrong helper, looks exactly like the thing it was written to catch.
+SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
+
+-- Who took it back is pinned the same way who gave it is. Measured by removing the clause
+-- and watching nothing go red, which is how this check came to exist: the block proved the
+-- column was written correctly and never that it could not be written otherwise.
+SELECT expect_refused('a withdrawal cannot be attributed to somebody else',
+  $$UPDATE resident_contacts
+       SET state = 'revoked', revoked_by = '95000000-0000-0000-0000-000000000095',
+           revoked_at = now(), updated_at = now()
+     WHERE id = '96000000-0000-0000-0000-000000000096'$$);
+
+-- The date spelled out rather than left off. Leaving it off proves nothing on this row:
+-- it has been withdrawn once already and still carries that date, so the clause is
+-- satisfied by history rather than by the statement. Written as NULL, it asks the question.
+SELECT expect_refused('and cannot be made with no date on it',
+  $$UPDATE resident_contacts
+       SET state = 'revoked', revoked_by = app_user_id(), revoked_at = NULL,
+           updated_at = now()
+     WHERE id = '96000000-0000-0000-0000-000000000096'$$);
+
+-- The two columns no path writes any more. Refused by the grant with the policy satisfied,
+-- which is the only way to ask the grant anything on its own.
+DO $probe$
+BEGIN
+  UPDATE resident_contacts
+     SET state = 'revoked', revoked_by = app_user_id(), revoked_at = now(),
+         updated_at = now(), granted_by = '95000000-0000-0000-0000-000000000095'
+   WHERE id = '96000000-0000-0000-0000-000000000096';
+  RAISE NOTICE 'FAIL  ALLOWED: who made the grant was rewritten';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'PASS  refused by the grant alone: who made a grant is not rewritable';
+END $probe$;
+
 \echo ''
 RESET ROLE;
 SELECT checks_end();

@@ -101,6 +101,12 @@ func (a *API) Routes() http.Handler {
 	mux.Handle("GET /v1/residents/{id}/contacts", a.identified(a.listContacts))
 	mux.Handle("POST /v1/residents/{id}/contacts", a.identified(a.grantAccess))
 	mux.Handle("DELETE /v1/residents/{id}/contacts/{contactId}", a.identified(a.withdrawAccess))
+	mux.Handle("POST /v1/residents/{id}/contacts/{contactId}/restore", a.identified(a.restoreAccess))
+
+	// The one administrative route that is not a care manager's. A grant offered again waits
+	// for the person it is about, and this is how they say yes - see internal/records.Accept.
+	mux.Handle("GET /v1/invitations", a.identified(a.waiting))
+	mux.Handle("POST /v1/invitations/{id}/accept", a.identified(a.acceptGrant))
 
 	// /healthz is not ours to use. Cloud Run's frontend answers it before a request
 	// reaches the container, with an HTML 404 - so a probe against a deployed service
@@ -836,6 +842,55 @@ func (a *API) withdrawAccess(w http.ResponseWriter, r *http.Request, c db.Caller
 			return
 		}
 		a.fail(w, r, http.StatusInternalServerError, "could not withdraw the access", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) restoreAccess(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	contact, err := uuid.Parse(r.PathValue("contactId"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such grant", nil)
+		return
+	}
+	if err := a.records.Restore(r.Context(), c, id, contact); err != nil {
+		if a.recordsFailure(w, r, err) {
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not offer the access again", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) waiting(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	list, err := a.records.Waiting(r.Context(), c)
+	if err != nil {
+		a.fail(w, r, http.StatusInternalServerError, "could not read what is waiting", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, list)
+}
+
+// A grant that is not theirs, or not waiting, is 404 rather than 403: the id names a row
+// this session has no business knowing exists, and saying "not yours" would confirm it does.
+func (a *API) acceptGrant(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such invitation", nil)
+		return
+	}
+	if err := a.records.Accept(r.Context(), c, id); err != nil {
+		if errors.Is(err, records.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such invitation", nil)
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not accept it", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

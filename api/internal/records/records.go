@@ -939,3 +939,107 @@ func (s *Store) Withdraw(ctx context.Context, c db.Caller, resident, contact uui
 		return ErrNotTheirs
 	})
 }
+
+// Restore offers a withdrawn grant again.
+//
+// It lands on 'invited' rather than on 'active', and access-restored.sql is where the
+// reasoning is: a facility re-offering a disclosure it took back is a new decision, and
+// leaving it there keeps 'active' meaning one thing everywhere - this person accepted this
+// grant. It costs the family member a tap. What it buys is that no state in this table was
+// ever reached by somebody other than the person it is about.
+func (s *Store) Restore(ctx context.Context, c db.Caller, resident, contact uuid.UUID) error {
+	return s.read(ctx, c, resident, "resident_contacts", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE resident_contacts SET state = 'invited', updated_at = now()
+			 WHERE id = $1 AND resident_id = $2 AND state = 'revoked'`, contact, resident)
+		if err != nil {
+			return policyRefusalAdmin(err)
+		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
+		var state string
+		if err := tx.QueryRow(ctx,
+			`SELECT state::text FROM resident_contacts WHERE id = $1 AND resident_id = $2`,
+			contact, resident).Scan(&state); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotVisible
+			}
+			return err
+		}
+		// Not revoked, so there is nothing to offer again. Quiet rather than an error when
+		// it is already open, because the state the caller wanted is the state it is in.
+		if state != "revoked" {
+			return nil
+		}
+		return ErrNotTheirs
+	})
+}
+
+// Accept is a family member taking up a grant that is waiting for them.
+//
+// The one write in this package that is not a care manager's. contacts_accept has existed
+// since contact-acceptance.sql and nothing outside redeem_token exercised it: somebody
+// arriving on an invitation is activated by the redeem, and this is the other way in -
+// somebody who already has a password, whose access was offered again after being withdrawn.
+// Without it, restoring would be a dead button for everybody who already had an account.
+//
+// No resident argument and no read(): a family member cannot see a resident whose grant is
+// still 'invited', so audit_read would refuse and the thing being accepted could never be
+// accepted. What makes it safe is the policy - their own grant, invited to active, and
+// nothing else - rather than anything decided here.
+func (s *Store) Accept(ctx context.Context, c db.Caller, contact uuid.UUID) error {
+	return s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE resident_contacts SET state = 'active', updated_at = now()
+			 WHERE id = $1 AND user_id = app_user_id() AND state = 'invited'`, contact)
+		if err != nil {
+			return policyRefusalAdmin(err)
+		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
+		return ErrNotVisible
+	})
+}
+
+// Waiting is every grant offered to this account and not yet taken up.
+//
+// Read without audit_read and without naming a resident, because an invited grant discloses
+// nothing yet: app_is_contact requires 'active', so the resident behind it is not readable
+// and this returns the facility's name rather than theirs. Recording a read of a resident
+// this session cannot read is what audit_read refuses, and rightly.
+type Waiting struct {
+	ID       uuid.UUID `json:"id"`
+	Facility string    `json:"facility"`
+	Relation string    `json:"relation"`
+	Again    bool      `json:"again"`
+}
+
+func (s *Store) Waiting(ctx context.Context, c db.Caller) ([]Waiting, error) {
+	out := []Waiting{}
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT rc.id, f.name, rc.relation, rc.revoked_at IS NOT NULL
+			  FROM resident_contacts rc
+			  JOIN facilities f ON f.id = rc.facility_id
+			 WHERE rc.user_id = app_user_id() AND rc.state = 'invited'
+			 ORDER BY f.name`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var w Waiting
+			if err := rows.Scan(&w.ID, &w.Facility, &w.Relation, &w.Again); err != nil {
+				return err
+			}
+			out = append(out, w)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}

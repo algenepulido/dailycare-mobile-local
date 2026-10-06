@@ -165,6 +165,16 @@ func TestEveryUnauditedQueryInThisPackageIsDeclared(t *testing.T) {
 			"PHI-bearing table is missing one, which is the half of the audit design the " +
 			"database holds rather than the code. The second query it makes is " +
 			"facility_is_covered, which is about a building and names nobody.",
+		"Accept": "A family member taking up a grant that is waiting for them. read() calls " +
+			"audit_read, which refuses a resident this session cannot read - and an invited " +
+			"grant is exactly that, because app_is_contact wants 'active'. Routing this " +
+			"through it would mean the thing being accepted could never be accepted. The " +
+			"write is in the trail through the trigger on resident_contacts, like every " +
+			"other write to it.",
+		"Waiting": "What this account has been offered and not taken up. It names no " +
+			"resident and reads none: a grant at 'invited' discloses nothing yet, so this " +
+			"returns the facility's name and the relation, and audit_read has no resident " +
+			"to be told about.",
 	}
 
 	body, err := os.ReadFile("records.go")

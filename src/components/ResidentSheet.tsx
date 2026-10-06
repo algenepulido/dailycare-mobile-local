@@ -12,6 +12,7 @@ import {
   grantAccess,
   listContacts,
   recordDeparture,
+  restoreAccess,
   withdrawAccess,
 } from '@/data/api';
 import type { RemoteAssignment, RemoteContact, RemoteMember, RemoteResident } from '@/data/api';
@@ -153,7 +154,7 @@ export function ResidentSheet({
               confirming === a.id ? `Confirm taking ${a.displayName} off` : `${a.displayName}, take off`
             }
           >
-            <Text style={styles.rowName}>{a.displayName}</Text>
+            <Text style={[styles.rowName, styles.grow]}>{a.displayName}</Text>
             <Text style={styles.action}>{confirming === a.id ? 'Tap again' : 'Take off'}</Text>
           </Pressable>
         ))
@@ -186,8 +187,14 @@ export function ResidentSheet({
               k.state === 'revoked' && styles.rowGone,
               confirming === k.id && styles.rowAsking,
             ]}
-            disabled={busy || k.state === 'revoked'}
+            disabled={busy}
             onPress={() => {
+              // Offering access again is not a destructive act, so it does not ask twice.
+              // Taking it away is, and does.
+              if (k.state === 'revoked') {
+                void run(() => restoreAccess(resident.id, k.id));
+                return;
+              }
               if (confirming !== k.id) {
                 setConfirming(k.id);
                 return;
@@ -198,7 +205,7 @@ export function ResidentSheet({
             accessibilityRole="button"
             accessibilityLabel={
               k.state === 'revoked'
-                ? `${k.displayName}, access withdrawn`
+                ? `${k.displayName}, offer access again`
                 : confirming === k.id
                   ? `Confirm withdrawing ${k.displayName}`
                   : `${k.displayName}, withdraw access`
@@ -212,11 +219,16 @@ export function ResidentSheet({
                 {k.state === 'revoked' && k.revokedAt
                   ? ` — withdrawn ${new Date(k.revokedAt).toLocaleDateString()}`
                   : ''}
+                {k.state === 'invited' && k.revokedAt ? ' — offered again, waiting' : ''}
               </Text>
             </View>
-            {k.state !== 'revoked' ? (
-              <Text style={styles.action}>{confirming === k.id ? 'Tap again' : 'Withdraw'}</Text>
-            ) : null}
+            <Text style={styles.action}>
+              {k.state === 'revoked'
+                ? 'Offer again'
+                : confirming === k.id
+                  ? 'Tap again'
+                  : 'Withdraw'}
+            </Text>
           </Pressable>
         ))
       )}
@@ -287,7 +299,7 @@ export function ResidentSheet({
           confirming === 'depart' ? 'Confirm recording the departure' : 'Record that they have moved out'
         }
       >
-        <Text style={styles.rowName}>
+        <Text style={[styles.rowName, styles.grow]}>
           {confirming === 'depart' ? 'Tap again to record it' : 'They have moved out'}
         </Text>
       </Pressable>
@@ -317,7 +329,14 @@ const styles = StyleSheet.create({
   rowAsking: { borderColor: color.clay, backgroundColor: color.claySoft },
   rowGone: { backgroundColor: color.paper2, borderColor: color.line },
   rowText: { flex: 1, gap: 2 },
-  rowName: { ...type.cardTitle, color: color.ink, flex: 1 },
+  // No flex here. It had one, copied from the caregiver row above where the name is a direct
+  // child of the row and flex is what pushes the action to the right - but in the family row
+  // the name sits inside a column, where flex makes it share the height with the line under
+  // it and collapse to nothing. The manager's screen showed "child - withdrawn 6 Oct" with
+  // no name against it, which only a device showed: the dump had the same gap and read as
+  // ordinary, and the server had been returning the name all along.
+  rowName: { ...type.cardTitle, color: color.ink },
+  grow: { flex: 1 },
   rowUnder: { ...type.meta },
   action: { ...type.chip, color: color.clay },
   problem: {

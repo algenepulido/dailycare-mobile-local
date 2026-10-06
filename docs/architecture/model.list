@@ -46,3 +46,4 @@ medication-attribution.sql
 member-invitation.sql
 invitation-issuing.sql
 decisions-have-authors.sql
+access-restored.sql
