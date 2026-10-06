@@ -1399,6 +1399,130 @@ SET ROLE dailycare_app;
 SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
 SELECT expect_rows('a deactivated care manager', 0, 'SELECT * FROM residents');
 
+
+\echo ''
+\echo '── a caregiver who leaves, without losing what they filed'
+
+-- The milestone's own sentence, and the one clause in it that is a promise rather than a
+-- feature. Proved by doing it and reading the records back rather than by pointing at
+-- ON DELETE RESTRICT, which is what makes it possible and not what makes it true.
+--
+-- Its own building, seeded here rather than reusing Cedar. Everything above has been
+-- revoking things in sequence, so a check written against that state could pass because
+-- somebody had already been taken off something three sections earlier - which is a check
+-- passing for the wrong reason, and the thing this suite exists to catch.
+
+RESET ROLE;
+\set QUIET on
+INSERT INTO facilities (id, name, timezone) VALUES
+  ('f9000000-0000-0000-0000-000000000009', 'Willow House', 'America/Chicago');
+INSERT INTO facility_agreements
+  (facility_id, executed_on, notification_contact, notification_days, counterparty)
+VALUES ('f9000000-0000-0000-0000-000000000009', current_date - 30,
+        'compliance@willow.test', 30, 'Willow House');
+INSERT INTO users (id, email, display_name) VALUES
+  ('91000000-0000-0000-0000-000000000091', 'nora@willow.test', 'Nora'),
+  ('92000000-0000-0000-0000-000000000092', 'sam@willow.test',  'Sam');
+INSERT INTO facility_members (id, facility_id, user_id, role, state) VALUES
+  ('81000000-0000-0000-0000-000000000081', 'f9000000-0000-0000-0000-000000000009',
+   '91000000-0000-0000-0000-000000000091', 'care_manager', 'active'),
+  ('82000000-0000-0000-0000-000000000082', 'f9000000-0000-0000-0000-000000000009',
+   '92000000-0000-0000-0000-000000000092', 'caregiver', 'active');
+INSERT INTO residents (id, facility_id, display_name) VALUES
+  ('93000000-0000-0000-0000-000000000093', 'f9000000-0000-0000-0000-000000000009', 'Ruth');
+INSERT INTO assignments (facility_id, resident_id, facility_member_id) VALUES
+  ('f9000000-0000-0000-0000-000000000009', '93000000-0000-0000-0000-000000000093',
+   '82000000-0000-0000-0000-000000000082');
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at) VALUES
+  ('92000000-0000-0000-0000-000000000092', repeat('9', 64), 'sam phone',
+   now() + interval '30 days');
+\set QUIET off
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', '92000000-0000-0000-0000-000000000092', false);
+SELECT expect_rows('while Sam works here he reads the resident he is assigned to', 1,
+  $$SELECT id FROM residents WHERE id = '93000000-0000-0000-0000-000000000093'$$);
+SELECT expect('and his session works', session_is_valid(repeat('9', 64)));
+
+-- Filed as Sam, through the policy, rather than seeded as the owner. The first version of
+-- this seeded it and the trail check failed, correctly: the audit trigger takes its actor
+-- from app.user_id, and a row the owner wrote with nobody set names nobody. A check for
+-- "the trail still attributes him" is only worth running if he wrote the row.
+INSERT INTO care_days
+  (id, facility_id, resident_id, care_date, mood, appetite, sleep, note, filed_by) VALUES
+  ('94000000-0000-0000-0000-000000000094', 'f9000000-0000-0000-0000-000000000009',
+   '93000000-0000-0000-0000-000000000093', current_date - 2, 'calm', 'good', 'slept_well',
+   'A quiet afternoon in the garden.', '92000000-0000-0000-0000-000000000092');
+SELECT expect('and the day he files is his',
+  (SELECT filed_by = '92000000-0000-0000-0000-000000000092' FROM care_days
+    WHERE id = '94000000-0000-0000-0000-000000000094'));
+
+-- Ended through the policy milestone five added, as the manager, rather than by the owner
+-- reaching past it. The point is the state a care manager can actually produce.
+SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
+UPDATE facility_members SET state = 'revoked', ended_at = now(), updated_at = now()
+ WHERE id = '82000000-0000-0000-0000-000000000082';
+SELECT expect('a care manager ends the membership',
+  (SELECT ended_at IS NOT NULL FROM facility_members
+    WHERE id = '82000000-0000-0000-0000-000000000082'));
+
+-- The four halves of the promise, read back as the manager who remains.
+SELECT expect_rows('the day he filed still reads', 1,
+  $$SELECT id FROM care_days WHERE id = '94000000-0000-0000-0000-000000000094'$$);
+
+SELECT expect('with the note he wrote on it',
+  (SELECT note = 'A quiet afternoon in the garden.' FROM care_days
+    WHERE id = '94000000-0000-0000-0000-000000000094'));
+
+SELECT expect('and his name still resolves on it',
+  care_day_filed_by_name('94000000-0000-0000-0000-000000000094') = 'Sam');
+
+SELECT expect('the trail still attributes the writes to him',
+  (SELECT count(*) > 0 FROM audit_events
+    WHERE actor_user_id = '92000000-0000-0000-0000-000000000092'));
+
+-- The same question the application asks, which is a different question: internal/records
+-- reads the trail through a LEFT JOIN on users, so a row survives whether or not the name
+-- behind it resolves. The comment there says a writer who has left comes back without a
+-- name. app_shares_a_facility does not filter on the other person's state, so that should
+-- not be what happens - and this is where the two are made to agree or disagree out loud.
+SELECT expect('and the name on those rows resolves for the manager reading them',
+  (SELECT count(*) > 0 FROM audit_events a
+     JOIN users u ON u.id = a.actor_user_id
+    WHERE a.actor_user_id = '92000000-0000-0000-0000-000000000092'
+      AND u.display_name = 'Sam'));
+
+SELECT expect('and they are filed against the resident, which is what the trail reads by',
+  (SELECT count(*) > 0 FROM audit_events
+    WHERE actor_user_id = '92000000-0000-0000-0000-000000000092'
+      AND resident_id   = '93000000-0000-0000-0000-000000000093'));
+
+SELECT expect('and he is still in the building rather than gone from it',
+  (SELECT count(*) = 1 FROM facility_members
+    WHERE id = '82000000-0000-0000-0000-000000000082'));
+
+-- And what he can see, which is the other half: the record keeps him, he does not keep it.
+SELECT set_config('app.user_id', '92000000-0000-0000-0000-000000000092', false);
+SELECT expect_rows('he reads no residents the moment it ends', 0, 'SELECT id FROM residents');
+SELECT expect_rows('and none of their days',                   0, 'SELECT id FROM care_days');
+
+-- A membership ending is not the same act as an account closing, and only the second stops
+-- a phone. Both are in the card's sentence and this is where they come apart.
+SELECT expect('his phone still works, because ending a membership is not closing an account',
+  session_is_valid(repeat('9', 64)));
+
+RESET ROLE;
+\set QUIET on
+UPDATE users SET deactivated_at = now() WHERE id = '92000000-0000-0000-0000-000000000092';
+\set QUIET off
+SET ROLE dailycare_app;
+
+SELECT expect('closing the account is what stops it', NOT session_is_valid(repeat('9', 64)));
+
+SELECT set_config('app.user_id', '91000000-0000-0000-0000-000000000091', false);
+SELECT expect('and the day he filed is untouched by any of it',
+  care_day_filed_by_name('94000000-0000-0000-0000-000000000094') = 'Sam');
+
 \echo ''
 RESET ROLE;
 SELECT checks_end();

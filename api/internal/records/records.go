@@ -348,8 +348,16 @@ func (s *Store) Trail(ctx context.Context, c db.Caller, resident uuid.UUID,
 
 		// The actor's name through a join the policies decide: users_colleagues lets a
 		// manager see the people at their own building, and nothing lets them see anybody
-		// else - so a row written by somebody who has since left the facility comes back
-		// without a name rather than with one this reader should not have.
+		// else. The LEFT is what carries a row whose name does not resolve rather than
+		// dropping it, because the trail losing an entry is worse than it losing a name.
+		//
+		// This used to say a writer who had since left came back without a name. Measured
+		// while proving the milestone's "without losing what they filed", and it is not what
+		// happens: app_shares_a_facility puts no condition on the other person's state, so a
+		// caregiver whose membership ended is still a colleague and still resolves. That is
+		// the behaviour the card asks for - a day with a name on it and nothing behind the
+		// name is worse than a row saying somebody has left - so the comment was wrong and
+		// the code was right.
 		rows, err := tx.Query(ctx, `
 			SELECT a.occurred_at, a.action, u.display_name, a.actor_role, a.subject_type
 			FROM audit_events a

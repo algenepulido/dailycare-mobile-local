@@ -308,6 +308,76 @@ else:
 want "while the decision stays on the record" "kept revoked with a date" "$KEPT"
 
 echo
+echo "── a caregiver who leaves, without losing what they filed"
+
+# The milestone's own sentence, walked rather than asserted. A caregiver arrives, is given
+# somebody to look after, files a day about them, and then leaves - and the question is what
+# is still there afterwards.
+R=$(req POST "/v1/facilities/$CEDAR/members" "$PRIYA" \
+  '{"email":"sam@example.test","displayName":"Sam Okafor","role":"caregiver"}')
+want "a second caregiver is invited" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+SAM_M=$(field member.id)
+SAM_LINK=$(field link)
+SAM=$(arrive "$SAM_LINK" "a fourth reasonable passphrase")
+
+R=$(req POST "/v1/facilities/$CEDAR/assignments" "$PRIYA" \
+  "{\"residentId\":\"$CATHY\",\"memberId\":\"$SAM_M\"}")
+want "and put in front of a resident" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+SAM_A=$(field id)
+
+TODAY=$(date +%F)
+R=$(req POST "/v1/residents/$CATHY/days/$TODAY" "$SAM" \
+  '{"mood":"calm","appetite":"good","sleep":"slept_well","note":"A quiet afternoon in the garden.","shower":true,"grooming":true,"meals":[{"slot":"breakfast","happened":true},{"slot":"lunch","happened":true},{"slot":"dinner","happened":true}],"concerns":[],"medication":{"am":true,"pm":true,"supplemental":""}}')
+want "he files a day about her" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req DELETE "/v1/members/$SAM_M" "$PRIYA")
+want "then he leaves" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+# The four halves of the promise, asked as the manager who remains.
+R=$(req GET "/v1/residents/$CATHY/days/$TODAY" "$PRIYA")
+want "the day he filed still reads" 200 "${R%%$'\t'*}" "${R#*$'\t'}"
+NOTE=$(field note)
+want "with the note he wrote on it" "A quiet afternoon in the garden." "$NOTE"
+WHO=$(field filedByName)
+want "and his name still on it" "Sam Okafor" "$WHO"
+
+R=$(req GET "/v1/residents/$CATHY/trail" "$PRIYA")
+# The trail comes back wrapped - {"entries": [...]} - where the other lists are bare.
+MINE=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+e=d.get('entries') if isinstance(d,dict) else d
+print(sum(1 for x in e if (x.get('actor') or '')=='Sam Okafor') if isinstance(e,list) else 'no entries')")
+case "$MINE" in
+  ''|0|not*) want "and the trail still attributes the writes to him" "one or more" "$MINE"
+             echo "      status ${R%%$'\t'*}; actors seen: $(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+e=d.get('entries') if isinstance(d,dict) else d
+print(', '.join(sorted({(x.get('actor') or '(none)') + ' ' + x.get('action','') for x in e})) if isinstance(e,list) else 'n/a')" | cut -c1-200)" ;;
+  *) want "and the trail still attributes the writes to him" "$MINE" "$MINE" ;;
+esac
+
+R=$(req GET "/v1/facilities/$CEDAR/members" "$PRIYA")
+STILL=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+m=next((m for m in d if m['id']=='$SAM_M'),None)
+print('gone' if m is None else ('kept with a date' if m.get('endedAt') else 'kept with no date'))")
+want "he is still in the building rather than gone from it" "kept with a date" "$STILL"
+
+# The other half: the record keeps him, he does not keep it.
+R=$(req GET "/v1/residents" "$SAM")
+LEFT3=$(python3 -c 'import json;d=json.load(open("/tmp/dc-body"));print(len(d) if isinstance(d,list) else -1)')
+want "and reads nobody the moment it ends" 0 "$LEFT3"
+
+R=$(req GET "/v1/residents/$CATHY/days/$TODAY" "$SAM")
+want "not even the day he filed himself" 404 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+R=$(req DELETE "/v1/assignments/$SAM_A" "$PRIYA")
+want "and the assignment that went with him ends too" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
+
+echo
 echo "── and a resident who moves out"
 R=$(req POST "/v1/residents/$CATHY/departure" "$PRIYA" '{"on":"2026-10-06"}')
 want "a manager records a departure" 204 "${R%%$'\t'*}" "${R#*$'\t'}"
