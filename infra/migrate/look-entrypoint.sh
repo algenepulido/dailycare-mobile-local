@@ -11,6 +11,22 @@ set -euo pipefail
 echo "── who is here"
 psql -c "SELECT email, display_name, password_hash IS NOT NULL AS has_password,
                 deactivated_at IS NULL AS active FROM users ORDER BY email"
+# The buildings themselves, by name and by id.
+#
+# This asked who is here and how many residents there are and could not say which building
+# any of it was in - so anybody wanting to put somebody into one had to go and find the uuid
+# somewhere else, which is the sort of thing this job exists to stop.
+psql -c "SELECT f.id, f.name,
+                EXISTS (SELECT 1 FROM facility_agreements a
+                         WHERE a.facility_id = f.id AND a.executed_on <= current_date
+                           AND a.terminated_on IS NULL) AS covered
+           FROM facilities f ORDER BY f.name"
+psql -c "SELECT f.name AS facility, u.display_name, fm.role, fm.state,
+                fm.ended_at IS NULL AS open
+           FROM facility_members fm
+           JOIN users u ON u.id = fm.user_id
+           JOIN facilities f ON f.id = fm.facility_id
+          ORDER BY f.name, fm.role, u.display_name"
 psql -c "SELECT count(*) AS residents FROM residents"
 psql -c "SELECT count(*) AS assignments, count(assigned_by) AS with_an_author FROM assignments"
 
