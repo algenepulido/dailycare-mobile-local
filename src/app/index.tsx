@@ -43,7 +43,7 @@ const MEAL_LABEL: Record<Meal, string> = {
 };
 
 export default function CareReportScreen() {
-  const { kind, caregiver, resident, ready, startSession, account } = useSession();
+  const { kind, caregiver, resident, ready, startSession, account, signOut } = useSession();
   const [namesOpen, setNamesOpen] = useState(false);
   const [invited, setInvited] = useState(false);
 
@@ -99,6 +99,15 @@ export default function CareReportScreen() {
             variant="secondary"
             onPress={() => setNamesOpen(true)}
           />
+          {/* A way off this screen, which it did not have.
+            *
+            * Found on the device while walking the milestone's own test: a care manager who
+            * signs in on a phone that files for nobody lands here, and the two buttons were
+            * the whole of it. Somebody who signed in as the wrong person, or who is handing
+            * the phone to a caregiver, had nothing to press. The caregiver's screen signs
+            * out through the avatar and the family's has it in the footer; this one had
+            * neither, because it is the only screen that is neither. */}
+          <Button label="Sign out" variant="secondary" onPress={() => void signOut()} />
         </View>
         <SetupSheet
           open={namesOpen}

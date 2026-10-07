@@ -221,3 +221,22 @@ describe('a day as a family reads it', () => {
     expect(familyDay(day(), usual, 'Cathy', 'Maria').changed).toHaveLength(0);
   });
 });
+
+describe('the name a family reads', () => {
+  const usual: Baseline = { mood: 'Calm', appetite: 'Fair', sleep: 'Restless' };
+  const base: FiledDayFacts = {
+    mood: 'Calm', appetite: 'Fair', sleep: 'Restless', note: '', shower: true, grooming: true,
+    meals: [], concerns: [], medication: [],
+  };
+
+  it('says the given name rather than the whole one, three sentences running', () => {
+    const d = familyDay({ ...base, appetite: 'Poor' }, usual, 'Cathy Alvarez', 'Maria');
+    expect(d.changed.join(' ')).toContain("Cathy's appetite");
+    expect(d.changed.join(' ')).not.toContain('Cathy Alvarez');
+  });
+
+  it('and a single-word name is left alone', () => {
+    const d = familyDay({ ...base, appetite: 'Poor' }, usual, 'Cathy', 'Maria');
+    expect(d.changed.join(' ')).toContain("Cathy's appetite");
+  });
+});

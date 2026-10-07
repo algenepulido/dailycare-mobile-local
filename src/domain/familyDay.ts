@@ -115,7 +115,16 @@ export function familyDay(
   residentName: string,
   filedBy: string,
 ): FamilyDay {
-  const them = residentName.trim();
+  // The name a family uses, not the one the record keeps.
+  //
+  // residents.display_name is wide enough for a legal name because matching a clinical
+  // system will need one, and a care manager typing "Cathy Alvarez" at admission is doing
+  // the right thing. Three sentences in a row opening with both names is not how anybody
+  // talks about their mother, and it is what the screen did until a device showed it.
+  //
+  // The heading above these sentences still carries the whole name, so nothing is hidden -
+  // this is only how she is referred to once the reader knows who they are reading about.
+  const them = givenName(residentName);
   const changed: string[] = [];
 
   /* ------------------------------------------- how they were, against normal */
@@ -211,6 +220,19 @@ export function familyDay(
  * One sentence rather than two: under a heading that already says what it is, a family
  * scanning wants the comparison in the same breath as the observation.
  */
+/**
+ * The first word of a name, or the whole of it when there is only one.
+ *
+ * Deliberately not a parser. Names do not split reliably and this is not trying to: it takes
+ * what somebody would say out loud for the common case and falls back to the whole string,
+ * which is what a single-word name already was.
+ */
+function givenName(name: string): string {
+  const trimmed = name.trim();
+  const first = trimmed.split(/\s+/)[0];
+  return first && first.length > 0 ? first : trimmed;
+}
+
 function phrase(them: string, kind: string, value: string, usual: string): string {
   const v = value.toLowerCase();
   const u = usual.toLowerCase();
