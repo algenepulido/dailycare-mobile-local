@@ -173,10 +173,14 @@ export function ResidentSheet({
                 void run(() => endAssignment(a.id));
               }}
               accessibilityRole="button"
+              // The address out loud as well as on screen. These rows showed it and did
+              // not say it, so two people with one name were two buttons a screen reader
+              // read identically - and the driver that walks this app by those labels hit
+              // the same ambiguity, which is how it was noticed.
               accessibilityLabel={
                 confirming === a.id
-                  ? `Confirm taking ${a.displayName} off`
-                  : `${a.displayName}, take off`
+                  ? `Confirm taking ${spoken(a.displayName, address)} off`
+                  : `${spoken(a.displayName, address)}, take off`
               }
             >
               <View style={styles.rowText}>
@@ -204,7 +208,7 @@ export function ResidentSheet({
                   await assign(facilityId, resident.id, m.id);
                 })}
                 accessibilityRole="button"
-                accessibilityLabel={`${m.displayName}, assign to ${resident.displayName}`}
+                accessibilityLabel={`${spoken(m.displayName, address)}, assign to ${resident.displayName}`}
               >
                 <View style={styles.rowText}>
                   <Text style={styles.rowName}>{m.displayName}</Text>
@@ -347,6 +351,11 @@ export function ResidentSheet({
       </Pressable>
     </Sheet>
   );
+}
+
+/** A name said out loud, with the address when the name alone names two people. */
+function spoken(name: string, address: string | null): string {
+  return address === null ? name : `${name}, ${address}`;
 }
 
 const styles = StyleSheet.create({

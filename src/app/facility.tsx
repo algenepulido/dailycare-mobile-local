@@ -187,9 +187,14 @@ export default function FacilityScreen() {
               style={[styles.row, ending === m.id && styles.rowAsking]}
               onPress={() => void end(m)}
               accessibilityRole="button"
-              accessibilityLabel={
-                ending === m.id ? `Confirm ending ${m.displayName}` : `${m.displayName}, end their time here`
-              }
+              accessibilityLabel={(() => {
+                // Said as well as shown, for the same reason the line below the name
+                // exists: two people with one name are two rows, and ending the wrong
+                // membership is the mistake this prevents.
+                const address = addressFor(m.displayName, m.email, shared);
+                const who = address === null ? m.displayName : `${m.displayName}, ${address}`;
+                return ending === m.id ? `Confirm ending ${who}` : `${who}, end their time here`;
+              })()}
             >
               <View style={styles.rowText}>
                 <Text style={styles.rowName}>{m.displayName}</Text>
