@@ -40,6 +40,21 @@ ALTER TABLE residents NO FORCE ROW LEVEL SECURITY;
 INSERT INTO facilities (id, name, timezone) VALUES
  ('11111111-1111-1111-1111-111111111111','Cedar House','America/Chicago')
 ON CONFLICT (id) DO NOTHING;
+-- An agreement, because without one this seeds a building the product itself would refuse.
+--
+-- residents_insert asks facility_is_covered() as well as who is asking, so a care manager
+-- cannot admit anybody to a facility nothing has been signed for. This job writes residents
+-- as the owner and never had to answer that - which meant staging carried three residents
+-- in a building the application could not have put one into, and the first person to press
+-- "Admit a resident" there would have been told so.
+--
+-- Synthetic like everything else here, and dated in the past so it covers today.
+INSERT INTO facility_agreements
+ (id, facility_id, executed_on, notification_contact, notification_days, counterparty)
+VALUES
+ ('1a111111-1111-1111-1111-11111111111a','11111111-1111-1111-1111-111111111111',
+  current_date - 30, 'compliance@cedar.test', 30, 'Cedar House')
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO users (id, email, display_name, password_hash) VALUES
  ('22222222-2222-2222-2222-222222222222','nurse@cedar.test','Maria Santos', :'h')
 ON CONFLICT (id) DO UPDATE SET password_hash = excluded.password_hash;
