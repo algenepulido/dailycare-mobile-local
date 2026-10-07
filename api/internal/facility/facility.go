@@ -318,11 +318,25 @@ func (s *Store) Assign(ctx context.Context, c db.Caller,
 
 	var a Assignment
 	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		// ON CONFLICT against assignments_one_open_per_pair, which one-open-assignment.sql
+		// added after a screen listed the same caregiver against one resident six times.
+		// Assigning somebody who is already assigned is not a failure - it is the state the
+		// caller wanted - so it returns the row that already says so rather than a second one
+		// saying it again. The DO NOTHING leaves id unset, which is why the read below is a
+		// separate statement rather than a RETURNING.
 		var id uuid.UUID
-		if err := tx.QueryRow(ctx, `
+		err := tx.QueryRow(ctx, `
 			INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
 			VALUES ($1, $2, $3, app_user_id())
-			RETURNING id`, facility, resident, member).Scan(&id); err != nil {
+			ON CONFLICT (resident_id, facility_member_id) WHERE ended_at IS NULL DO NOTHING
+			RETURNING id`, facility, resident, member).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = tx.QueryRow(ctx, `
+				SELECT id FROM assignments
+				 WHERE resident_id = $1 AND facility_member_id = $2 AND ended_at IS NULL`,
+				resident, member).Scan(&id)
+		}
+		if err != nil {
 			return refusal(err)
 		}
 		return tx.QueryRow(ctx, `

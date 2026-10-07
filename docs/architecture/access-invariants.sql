@@ -1331,6 +1331,35 @@ SELECT expect_refused('and not in a building the manager does not manage',
     VALUES ('f2000000-0000-0000-0000-000000000002', 'e3000000-0000-0000-0000-000000000003',
             'fd000000-0000-0000-0000-00000000000d', 'b0000000-0000-0000-0000-00000000000b')$$);
 
+-- One open assignment per pair, which nothing said until a screen listed the same caregiver
+-- six times. Refused by the index rather than by a policy, which is why it raises a unique
+-- violation rather than a privilege one.
+SELECT expect_refused('the same caregiver cannot be assigned to the same resident twice',
+  $$INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+    VALUES ('f1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002',
+            'fa000000-0000-0000-0000-00000000000a', 'b0000000-0000-0000-0000-00000000000b')$$);
+
+-- And the history stays whole: ending one and making it again is what a facility does when
+-- somebody changes shift, so the index holds only the open rows.
+UPDATE assignments SET ended_at = now()
+ WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+   AND facility_member_id = 'fa000000-0000-0000-0000-00000000000a';
+
+INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002',
+        'fa000000-0000-0000-0000-00000000000a', 'b0000000-0000-0000-0000-00000000000b');
+
+SELECT expect('and assigning them again after it ended is ordinary',
+  (SELECT count(*) = 2 FROM assignments
+    WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+      AND facility_member_id = 'fa000000-0000-0000-0000-00000000000a'));
+
+SELECT expect('with exactly one of them open',
+  (SELECT count(*) = 1 FROM assignments
+    WHERE resident_id = 'e2000000-0000-0000-0000-000000000002'
+      AND facility_member_id = 'fa000000-0000-0000-0000-00000000000a'
+      AND ended_at IS NULL));
+
 -- Satisfies the policy in every respect it judges, and names one column the grant leaves
 -- out. Nothing but the grant can refuse it.
 DO $probe$

@@ -47,3 +47,4 @@ member-invitation.sql
 invitation-issuing.sql
 decisions-have-authors.sql
 access-restored.sql
+one-open-assignment.sql

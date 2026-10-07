@@ -338,3 +338,35 @@ func TestEndingAnAssignmentIsAManagersAlone(t *testing.T) {
 		t.Fatalf("an assignment at another building should be invisible, got %v", err)
 	}
 }
+
+func TestAssigningSomebodyWhoIsAlreadyAssigned(t *testing.T) {
+	w := seed(t)
+	ctx := context.Background()
+	first, err := w.store.Assign(ctx, w.priya, w.cedar, w.cathy, w.mariaMember)
+	if err != nil {
+		t.Fatalf("assigning: %v", err)
+	}
+	// Not a failure and not a second row. The screen that found this listed one caregiver
+	// against one resident six times, because the seed had been making a new assignment
+	// every run and nothing said it could not.
+	again, err := w.store.Assign(ctx, w.priya, w.cedar, w.cathy, w.mariaMember)
+	if err != nil {
+		t.Fatalf("assigning somebody already assigned should be quiet, got %v", err)
+	}
+	if again.ID != first.ID {
+		t.Error("the second assignment made a new row rather than returning the standing one")
+	}
+	list, err := w.store.Assignments(ctx, w.priya, w.cedar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := 0
+	for _, a := range list {
+		if a.ResidentID == w.cathy && a.MemberID == w.mariaMember && a.EndedAt == nil {
+			open++
+		}
+	}
+	if open != 1 {
+		t.Errorf("one open assignment per pair, found %d", open)
+	}
+}

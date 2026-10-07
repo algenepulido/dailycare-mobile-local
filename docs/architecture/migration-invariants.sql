@@ -83,6 +83,9 @@ SELECT expect('no file went in twice',
 --                         lost it. Same reason as the second entry, not the third.
 --   medication-attribution.sql  the same again, and the same reason: one function, created
 --                         by the owner of the schema.
+--   one-open-assignment.sql  closes duplicate rows on a table it owns and creates an index
+--                         on it. Neither needs CREATE on the schema; an index belongs to
+--                         the table, which this role already owns.
 --   access-restored.sql   replaces a policy on a table it owns, creates another, revokes two
 --                         column privileges it granted, and corrects the row that declared
 --                         them. All four need ownership rather than CREATE on the schema.
@@ -102,7 +105,7 @@ SELECT expect('no file went in twice',
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql','access-restored.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql','access-restored.sql','one-open-assignment.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));

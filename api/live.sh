@@ -263,6 +263,22 @@ R=$(req POST "/v1/facilities/$CEDAR/assignments" "$MARIA" \
   "{\"residentId\":\"$CATHY\",\"memberId\":\"fa000000-0000-0000-0000-00000000000a\"}")
 want "a caregiver cannot assign anybody" 403 "${R%%$'\t'*}" "${R#*$'\t'}"
 
+# Not a failure and not a second row. A screen on staging listed one caregiver against one
+# resident six times before the index that forbids it existed.
+R=$(req POST "/v1/facilities/$CEDAR/assignments" "$PRIYA" \
+  "{\"residentId\":\"$CATHY\",\"memberId\":\"fa000000-0000-0000-0000-00000000000a\"}")
+want "assigning somebody already assigned is quiet" 201 "${R%%$'\t'*}" "${R#*$'\t'}"
+SAME=$(field id)
+[ "$SAME" = "$ASSIGNMENT" ] && want "and returns the assignment that already stands" same same \
+  || want "and returns the assignment that already stands" "$ASSIGNMENT" "$SAME"
+
+R=$(req GET "/v1/facilities/$CEDAR/assignments" "$PRIYA")
+OPEN=$(python3 -c "
+import json
+d=json.load(open('/tmp/dc-body'))
+print(sum(1 for a in d if a['residentId']=='$CATHY' and not a.get('endedAt')) if isinstance(d,list) else -1)")
+want "with one open assignment for that pair, not two" 1 "$OPEN"
+
 echo
 echo "── letting her daughter read it"
 R=$(req POST "/v1/residents/$CATHY/contacts" "$PRIYA" \
