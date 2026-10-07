@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Appetite, Baseline, Mood, Sleep } from '@/domain/types';
 import { APPETITES, MOODS, SLEEPS } from '@/domain/types';
@@ -88,7 +88,6 @@ export function SetupSheet({
         </View>
       }
     >
-      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Let&rsquo;s set up daily care</Text>
         <Text style={styles.blurb}>
           Two names and what a normal day looks like. You can change these later.
@@ -142,7 +141,6 @@ export function SetupSheet({
             last
           />
         </View>
-      </ScrollView>
     </Sheet>
   );
 }

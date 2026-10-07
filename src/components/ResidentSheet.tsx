@@ -123,6 +123,13 @@ export function ResidentSheet({
 
   return (
     <Sheet open={open} onClose={close} maxHeightRatio={0.9} footer={<Button label="Done" variant="secondary" onPress={close} />}>
+      {/* The sheet's body shrinks to fit and does not scroll on its own, so content taller
+        * than it overflows underneath the pinned footer rather than becoming reachable.
+        * This had no scroller, and a resident with a few caregivers and the grant form open
+        * put "Grant access" behind "Done" - a black button with a sliver showing, and a tap
+        * meant for it closing the sheet instead. Seen on a device while recording; the
+        * accessibility dump reported the button present and gave the position it would have
+        * had, which is how it went unnoticed in every check that reads the tree. */}
       <Text style={styles.title}>{resident.displayName}</Text>
       <Text style={styles.blurb}>Who looks after them, and who may read how they are.</Text>
 

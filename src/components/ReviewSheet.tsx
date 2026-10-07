@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Image } from 'expo-image';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/data/api';
 import type { Change, ChecklistGroup } from '@/domain/rules';
@@ -113,7 +113,6 @@ export function ReviewSheet({
         )
       }
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.headerIcon}>
             <Icon name="send" size={22} color={color.clay} />
@@ -163,7 +162,6 @@ export function ReviewSheet({
             either way.
           </Text>
         )}
-      </ScrollView>
     </Sheet>
   );
 }

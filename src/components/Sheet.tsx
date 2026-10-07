@@ -5,6 +5,7 @@ import {
   Easing,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -75,7 +76,25 @@ export function Sheet({ open, onClose, children, maxHeightRatio = 0.9, footer }:
           ]}
         >
           <View style={styles.handle} />
-          <View style={styles.body}>{children}</View>
+            {/* The body scrolls, which the comment on `footer` has claimed since this was
+              * written and which was not true: it was a plain View that shrank to fit, so a
+              * sheet whose content outgrew it overflowed under the pinned footer instead of
+              * becoming reachable. The resident sheet put "Grant access" behind "Done" that
+              * way - a black button with a sliver showing, and a tap meant for it closing
+              * the sheet. Three sheets had brought their own scroller and the rest had none,
+              * which is the shape of a thing that belongs here rather than in each of them.
+              *
+              * One scroller, here, for the same reason Screen owns its own: two nested leave
+              * the inner one unbounded, and that is how the family screen lost its sign-out
+              * button in milestone four. */}
+            <ScrollView
+              style={styles.body}
+              contentContainerStyle={styles.bodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+            </ScrollView>
           {footer ? (
             <View
               style={[
@@ -122,6 +141,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginTop: 12,
   },
-  body: { paddingHorizontal: sizes.screenPaddingH, paddingTop: 14, flexShrink: 1 },
+  body: { flexShrink: 1 },
+  bodyContent: { paddingHorizontal: sizes.screenPaddingH, paddingTop: 14 },
   footer: { paddingHorizontal: sizes.screenPaddingH, paddingTop: 12 },
 });
