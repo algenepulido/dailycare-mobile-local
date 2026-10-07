@@ -39,6 +39,18 @@ interface SetupSheetProps {
    * here would only put this phone out of step with what the family is actually told.
    */
   usualIsTheirRecord?: boolean;
+  /**
+   * The residents this account is allowed to file for, where there is an account.
+   *
+   * Offered instead of a name to type, because the name has to match the building's
+   * record exactly for the phone to be matched to it and the field asked for a first
+   * name. A caregiver invited to look after Marisol Reyes, typing "Marisol" as the label
+   * above the box asks her to, got a phone that linked to nobody - and the review sheet
+   * then told her to go and ask for an assignment she already had. Picking cannot miss.
+   */
+  choices?: { id: string; displayName: string; baseline: Baseline }[];
+  /** There is an account on this phone, so an empty list of choices means something. */
+  signedIn?: boolean;
 }
 
 /**
@@ -58,6 +70,8 @@ export function SetupSheet({
   firstRun = false,
   onSignIn,
   usualIsTheirRecord = false,
+  choices,
+  signedIn = false,
 }: SetupSheetProps) {
   const [caregiver, setCaregiver] = useState(caregiverName);
   const [resident, setResident] = useState(residentName);
@@ -71,7 +85,17 @@ export function SetupSheet({
     setUsual(baseline);
   }, [open, caregiverName, residentName, baseline]);
 
-  const complete = caregiver.trim().length > 0 && resident.trim().length > 0;
+  // Where the account has a list, the resident comes off it and the "usual" comes with
+  // them: picked from the building's record, it is the building's record, and the family's
+  // screen is compared against the same one.
+  const offered = choices ?? [];
+  const picking = offered.length > 0;
+  // Signed in with nothing to pick is not a form to fill in. It used to fall through to a
+  // name to type, which could not match anything and produced a phone that filed days
+  // nowhere.
+  const nothingToFileFor = signedIn && offered.length === 0 && firstRun;
+  const fromRecord = usualIsTheirRecord || (picking && offered.some((c) => c.displayName === resident));
+  const complete = caregiver.trim().length > 0 && resident.trim().length > 0 && !nothingToFileFor;
 
   return (
     <Sheet
@@ -80,7 +104,25 @@ export function SetupSheet({
       footer={
         <View style={styles.footer}>
           <Button
-            label={complete ? (firstRun ? 'Start daily care' : 'Save changes') : 'Add both names to continue'}
+            // What is still missing, rather than a count of what a form wants. It said
+            // "add your name and pick who" to somebody who had already picked.
+            label={
+              nothingToFileFor
+                ? 'Nobody to file for yet'
+                : complete
+                  ? firstRun
+                    ? 'Start daily care'
+                    : 'Save changes'
+                  : caregiver.trim() === '' && resident.trim() === ''
+                    ? picking
+                      ? 'Add your name and pick who'
+                      : 'Add both names to continue'
+                    : caregiver.trim() === ''
+                      ? 'Add your name'
+                      : picking
+                        ? 'Pick who you are caring for'
+                        : 'Add their name'
+            }
             disabled={!complete}
             disabledAppearance="muted"
             onPress={() => onSave(caregiver.trim(), resident.trim(), usual)}
@@ -116,18 +158,41 @@ export function SetupSheet({
         <View style={styles.gap} />
 
         <Text style={styles.label}>Who you&rsquo;re caring for</Text>
-        <Field
-          value={resident}
-          onChangeText={setResident}
-          placeholder="Their first name"
-          accessibilityLabel="Who you're caring for"
-          autoCapitalize="words"
-          sheet
-        />
+        {nothingToFileFor ? (
+          <Text style={styles.hint}>
+            The care home has not put this account in front of anybody yet. Ask them to
+            assign you, then sign in again.
+          </Text>
+        ) : picking ? (
+          <View style={styles.chips}>
+            {offered.map((person) => (
+              <Chip
+                key={person.id}
+                label={person.displayName}
+                selected={resident === person.displayName}
+                onPress={() => {
+                  setResident(person.displayName);
+                  setUsual(person.baseline);
+                }}
+              />
+            ))}
+          </View>
+        ) : (
+          <Field
+            value={resident}
+            onChangeText={setResident}
+            placeholder="Their first name"
+            accessibilityLabel="Who you're caring for"
+            autoCapitalize="words"
+            sheet
+          />
+        )}
 
+        {nothingToFileFor ? null : (
+          <>
         <Text style={styles.sectionLabel}>What&rsquo;s usual for them</Text>
         <Text style={styles.hint}>
-          {usualIsTheirRecord
+          {fromRecord
             ? 'Each day is compared against this, so the family only hears about what changed. It is their record at the care home, and it is changed there.'
             : 'Each day is compared against this, so the family only hears about what changed.'}
         </Text>
@@ -138,14 +203,14 @@ export function SetupSheet({
             options={MOODS}
             value={usual.mood}
             onChange={(mood: Mood) => setUsual((current) => ({ ...current, mood }))}
-            fixed={usualIsTheirRecord}
+            fixed={fromRecord}
           />
           <UsualRow
             label="Usual appetite"
             options={APPETITES}
             value={usual.appetite}
             onChange={(appetite: Appetite) => setUsual((current) => ({ ...current, appetite }))}
-            fixed={usualIsTheirRecord}
+            fixed={fromRecord}
           />
           <UsualRow
             label="Usual sleep"
@@ -153,9 +218,11 @@ export function SetupSheet({
             value={usual.sleep}
             onChange={(sleep: Sleep) => setUsual((current) => ({ ...current, sleep }))}
             last
-            fixed={usualIsTheirRecord}
+            fixed={fromRecord}
           />
         </View>
+          </>
+        )}
     </Sheet>
   );
 }

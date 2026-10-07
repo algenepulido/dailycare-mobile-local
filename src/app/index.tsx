@@ -20,11 +20,12 @@ import {
   Screen,
   SectionHeading,
 } from '@/components';
-import { fetchDay, fileDay, uploadPhoto } from '@/data/api';
+import { fetchDay, fileDay, listResidents, uploadPhoto } from '@/data/api';
+import type { RemoteResident } from '@/data/api';
 import { forgetUpload } from '@/data/uploads';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
-import { toWire } from '@/data/wire';
+import { baselineFromWire, toWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { buildChanges, buildChecklist } from '@/domain/rules';
 import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS } from '@/domain/rules';
@@ -46,6 +47,31 @@ export default function CareReportScreen() {
   const { kind, caregiver, resident, ready, startSession, account, signOut } = useSession();
   const [namesOpen, setNamesOpen] = useState(false);
   const [invited, setInvited] = useState(false);
+  // Who this account may file for, so the setup sheet offers them rather than asking for a
+  // name to be typed. Only before there is a resident on this phone: afterwards the sheet
+  // is an edit to what is stored and the list would be a second question.
+  const [theirs, setTheirs] = useState<RemoteResident[]>([]);
+  useEffect(() => {
+    if (!account || resident) return;
+    let live = true;
+    void (async () => {
+      try {
+        const rows = await listResidents();
+        if (live) setTheirs(rows);
+      } catch {
+        // Offline, or an account the redirect above is about to take elsewhere. The sheet
+        // falls back to a typed name, which is what a phone with no account does anyway.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [account, resident]);
+  const offered = theirs.map((person) => ({
+    id: person.id,
+    displayName: person.displayName,
+    baseline: baselineFromWire(person.baseline),
+  }));
 
   if (!ready) {
     return (
@@ -115,6 +141,8 @@ export default function CareReportScreen() {
           caregiverName=""
           residentName=""
           baseline={DEFAULT_BASELINE}
+          choices={offered}
+          signedIn={account !== null}
           onClose={() => setNamesOpen(false)}
           onSignIn={() => setInvited(true)}
           onSave={(caregiverName, residentName, baseline) =>
@@ -141,6 +169,8 @@ export default function CareReportScreen() {
             caregiverName=""
             residentName=""
             baseline={DEFAULT_BASELINE}
+            choices={offered}
+            signedIn={account !== null}
             onClose={() => {}}
             onSignIn={() => setInvited(true)}
             onSave={(caregiverName, residentName, baseline) =>
