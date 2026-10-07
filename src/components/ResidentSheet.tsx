@@ -16,6 +16,7 @@ import {
   withdrawAccess,
 } from '@/data/api';
 import type { RemoteAssignment, RemoteContact, RemoteMember, RemoteResident } from '@/data/api';
+import { addressFor } from '@/domain/people';
 import { color, radii, sizes, type } from '@/theme/tokens';
 
 interface ResidentSheetProps {
@@ -24,6 +25,8 @@ interface ResidentSheetProps {
   facilityId: string;
   members: RemoteMember[];
   assignments: RemoteAssignment[];
+  /** Worked out by the building, not here, so a name is qualified on every list or on none. */
+  sharedNames: Set<string>;
   onClose: () => void;
   onDone: () => void;
 }
@@ -43,6 +46,7 @@ export function ResidentSheet({
   facilityId,
   members,
   assignments,
+  sharedNames,
   onClose,
   onDone,
 }: ResidentSheetProps) {
@@ -139,57 +143,78 @@ export function ResidentSheet({
         </Text>
       ) : null}
 
+      {/* One list, not two controls. Putting somebody on a resident used to be a row of
+        * pills reading "Assign <name>", which fails twice over: a pill is one clipped line,
+        * so the address that tells two Maria Santoses apart cannot fit in it, and forty
+        * staff is a wall of them. A row carries the address on its own line exactly as the
+        * row above it does, and the two halves of this section now differ only in what
+        * their action says. */}
       <Text style={styles.heading}>Caregivers</Text>
       {theirs.length === 0 ? (
         <Text style={styles.empty}>Nobody is assigned to them.</Text>
       ) : (
-        theirs.map((a) => (
-          <Pressable
-            key={a.id}
-            style={[styles.row, confirming === a.id && styles.rowAsking]}
-            disabled={busy}
-            onPress={() => {
-              if (confirming !== a.id) {
-                setConfirming(a.id);
-                return;
+        theirs.map((a) => {
+          const address = addressFor(
+            a.displayName,
+            members.find((m) => m.id === a.memberId)?.email,
+            sharedNames,
+          );
+          return (
+            <Pressable
+              key={a.id}
+              style={[styles.row, confirming === a.id && styles.rowAsking]}
+              disabled={busy}
+              onPress={() => {
+                if (confirming !== a.id) {
+                  setConfirming(a.id);
+                  return;
+                }
+                setConfirming(null);
+                void run(() => endAssignment(a.id));
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={
+                confirming === a.id
+                  ? `Confirm taking ${a.displayName} off`
+                  : `${a.displayName}, take off`
               }
-              setConfirming(null);
-              void run(() => endAssignment(a.id));
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={
-              confirming === a.id ? `Confirm taking ${a.displayName} off` : `${a.displayName}, take off`
-            }
-          >
-            <View style={styles.rowText}>
-              <Text style={styles.rowName}>{a.displayName}</Text>
-              {/* Same reason as the building's list: two people with one name are two
-                * people, and taking the wrong one off a resident is the mistake this
-                * prevents. members carries the address already, so no second request. */}
-              {theirs.filter((o) => o.displayName === a.displayName).length > 1 ? (
-                <Text style={styles.rowUnder}>
-                  {members.find((m) => m.id === a.memberId)?.email ?? ''}
-                </Text>
-              ) : null}
-            </View>
-            <Text style={styles.action}>{confirming === a.id ? 'Tap again' : 'Take off'}</Text>
-          </Pressable>
-        ))
+            >
+              <View style={styles.rowText}>
+                <Text style={styles.rowName}>{a.displayName}</Text>
+                {address !== null ? <Text style={styles.rowUnder}>{address}</Text> : null}
+              </View>
+              <Text style={styles.action}>{confirming === a.id ? 'Tap again' : 'Take off'}</Text>
+            </Pressable>
+          );
+        })
       )}
       {unassigned.length > 0 ? (
-        <View style={styles.chips}>
-          {unassigned.map((m) => (
-            <Chip
-              key={m.id}
-              label={`Assign ${m.displayName}`}
-              selected={false}
-              disabled={busy}
-              onPress={() => void run(async () => {
-                await assign(facilityId, resident.id, m.id);
-              })}
-            />
-          ))}
-        </View>
+        <>
+          <Text style={styles.note}>Anybody else who works here</Text>
+          {unassigned.map((m) => {
+            const address = addressFor(m.displayName, m.email, sharedNames);
+            return (
+              <Pressable
+                key={m.id}
+                style={[styles.row, styles.rowOffered]}
+                disabled={busy}
+                // Putting somebody on a resident is not a destructive act, so it does not
+                // ask twice. Taking them off is, and does.
+                onPress={() => void run(async () => {
+                  await assign(facilityId, resident.id, m.id);
+                })}
+                accessibilityRole="button"
+                accessibilityLabel={`${m.displayName}, assign to ${resident.displayName}`}
+              >
+                <View style={styles.rowText}>
+                  <Text style={styles.rowName}>{m.displayName}</Text>
+                  {address !== null ? <Text style={styles.rowUnder}>{address}</Text> : null}
+                </View>
+                <Text style={styles.action}>Assign</Text>
+              </Pressable>
+            );
+          })}
+        </>
       ) : null}
 
       <Text style={styles.heading}>Family who may read it</Text>
@@ -345,6 +370,8 @@ const styles = StyleSheet.create({
   },
   rowAsking: { borderColor: color.clay, backgroundColor: color.claySoft },
   rowGone: { backgroundColor: color.paper2, borderColor: color.line },
+  // Quieter than an assigned row, so the list reads as "on them" above "could be".
+  rowOffered: { backgroundColor: color.paper2, borderColor: color.line },
   rowText: { flex: 1, gap: 2 },
   // No flex here. It had one, copied from the caregiver row above where the name is a direct
   // child of the row and flex is what pushes the action to the right - but in the family row

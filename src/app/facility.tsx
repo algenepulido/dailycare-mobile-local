@@ -15,6 +15,7 @@ import {
   listResidents,
 } from '@/data/api';
 import type { RemoteAssignment, RemoteMember, RemoteResident } from '@/data/api';
+import { addressFor, nameList, sharedNames } from '@/domain/people';
 import { useSession } from '@/state/session';
 import { color, radii, sizes, type } from '@/theme/tokens';
 
@@ -119,6 +120,11 @@ export default function FacilityScreen() {
   const working = members?.filter((m) => !m.endedAt) ?? [];
   const gone = members?.filter((m) => m.endedAt) ?? [];
   const here = residents ?? [];
+  // Worked out once, from everybody - including the people who have left, whose names still
+  // appear below and on days they filed. Every list on this screen and in the sheet it opens
+  // is handed the same answer, so a name is qualified in all of them or in none.
+  const shared = sharedNames(members ?? []);
+  const addressOf = (memberId: string) => members?.find((m) => m.id === memberId)?.email;
 
   return (
     <Screen
@@ -159,7 +165,13 @@ export default function FacilityScreen() {
                     <Text style={styles.rowUnder}>
                       {theirs.length === 0
                         ? 'Nobody is assigned'
-                        : theirs.map((a) => a.displayName).join(', ')}
+                        : nameList(
+                            theirs.map((a) => ({
+                              displayName: a.displayName,
+                              email: addressOf(a.memberId),
+                            })),
+                            shared,
+                          )}
                     </Text>
                   </View>
                 </Pressable>
@@ -185,15 +197,10 @@ export default function FacilityScreen() {
                   {m.role === 'care_manager' ? 'Care manager' : 'Caregiver'}
                   {m.state === 'invited' ? ' — invited, not here yet' : ''}
                 </Text>
-                {/* The address, where two people in a building share a name.
-                  *
-                  * Two Maria Santoses is not a contrivance - it is what a staging instance
-                  * already had and what a care home with forty staff will have. A list that
-                  * cannot tell them apart is a list a manager cannot end the right
-                  * membership from. Shown only when it is needed, because an address under
-                  * every name is noise the rest of the time, and it is the thing a manager
-                  * typed to invite them. */}
-                {working.filter((o) => o.displayName === m.displayName).length > 1 ? (
+                {/* The address, where two people in the building share a name. Shown only
+                  * when it is needed, because an address under every name is noise the rest
+                  * of the time, and it is the thing a manager typed to invite them. */}
+                {addressFor(m.displayName, m.email, shared) !== null ? (
                   <Text style={styles.rowUnder}>{m.email}</Text>
                 ) : null}
               </View>
@@ -243,6 +250,7 @@ export default function FacilityScreen() {
         facilityId={building.id}
         members={working}
         assignments={assignments ?? []}
+        sharedNames={shared}
         onClose={() => setLooking(null)}
         onDone={() => void load()}
       />
