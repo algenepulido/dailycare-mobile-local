@@ -13,6 +13,8 @@ import type { ReactNode } from 'react';
 
 import * as api from '@/data/api';
 import type { AccountKind } from '@/data/api';
+import { baselineFromWire } from '@/data/wire';
+import { governingBaseline } from '@/domain/baseline';
 import {
   forgetKind,
   forgetTokens,
@@ -182,7 +184,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     );
     if (!match) return;
 
-    const linked = { ...here, remoteId: match.id };
+    // And take the building's baseline with the link.
+    //
+    // This copied only the id, and the two halves of the product then compared the same
+    // day against two different normals. A family member never sets a baseline up, so
+    // their screen reads the one the building holds - the one a care manager typed when
+    // she admitted the resident. The caregiver's review sheet read the one on the phone,
+    // which starts at the app's default and had never heard of the admission. So the
+    // sheet said "this is what the family sees" above a sentence the family would not be
+    // shown, and the better the care manager filled the admission in, the further apart
+    // they drifted.
+    //
+    // The building's record wins because it is the one the family is told against, and
+    // because it is the one somebody is accountable for having typed.
+    const linked = {
+      ...here,
+      remoteId: match.id,
+      baseline: governingBaseline(baselineFromWire(match.baseline), here.baseline),
+    };
     await repository.saveResident(linked);
     setResident(linked);
   }, []);
@@ -243,7 +262,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setCaregiver(next);
       }
       if (resident) {
-        const next = { ...resident, displayName: residentName.trim(), baseline };
+        // A linked phone does not keep its own copy of what is usual for somebody: the
+        // building's record is what the family is told against, so editing it here would
+        // only move this phone out of step until the next sign-in put it back. The sheet
+        // shows it as the building's and does not offer to change it, so nothing is typed
+        // here to be dropped.
+        const usual = governingBaseline(resident.remoteId ? resident.baseline : null, baseline);
+        const next = { ...resident, displayName: residentName.trim(), baseline: usual };
         await repository.saveResident(next);
         setResident(next);
         // And match it to the server's again, because the name is what the match is made

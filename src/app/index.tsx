@@ -500,6 +500,7 @@ function CareReport({
         caregiverName={caregiver.displayName}
         residentName={resident.displayName}
         baseline={resident.baseline}
+        usualIsTheirRecord={Boolean(resident.remoteId)}
         onClose={() => setNamesOpen(false)}
         onSave={(caregiverName, residentName, baseline) => {
           void updateSetup(caregiverName, residentName, baseline);

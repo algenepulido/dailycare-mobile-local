@@ -30,6 +30,15 @@ interface SetupSheetProps {
    * could type the invitation she had been sent.
    */
   onSignIn?: () => void;
+  /**
+   * The phone is matched to a resident the building holds, so what is usual for them is
+   * the building's record rather than this phone's.
+   *
+   * Shown rather than hidden, and read-only rather than editable. A care manager typed it
+   * when she admitted them, the family's screen is compared against it, and a copy edited
+   * here would only put this phone out of step with what the family is actually told.
+   */
+  usualIsTheirRecord?: boolean;
 }
 
 /**
@@ -48,6 +57,7 @@ export function SetupSheet({
   onClose,
   firstRun = false,
   onSignIn,
+  usualIsTheirRecord = false,
 }: SetupSheetProps) {
   const [caregiver, setCaregiver] = useState(caregiverName);
   const [resident, setResident] = useState(residentName);
@@ -117,7 +127,9 @@ export function SetupSheet({
 
         <Text style={styles.sectionLabel}>What&rsquo;s usual for them</Text>
         <Text style={styles.hint}>
-          Each day is compared against this, so the family only hears about what changed.
+          {usualIsTheirRecord
+            ? 'Each day is compared against this, so the family only hears about what changed. It is their record at the care home, and it is changed there.'
+            : 'Each day is compared against this, so the family only hears about what changed.'}
         </Text>
 
         <View style={styles.card}>
@@ -126,12 +138,14 @@ export function SetupSheet({
             options={MOODS}
             value={usual.mood}
             onChange={(mood: Mood) => setUsual((current) => ({ ...current, mood }))}
+            fixed={usualIsTheirRecord}
           />
           <UsualRow
             label="Usual appetite"
             options={APPETITES}
             value={usual.appetite}
             onChange={(appetite: Appetite) => setUsual((current) => ({ ...current, appetite }))}
+            fixed={usualIsTheirRecord}
           />
           <UsualRow
             label="Usual sleep"
@@ -139,6 +153,7 @@ export function SetupSheet({
             value={usual.sleep}
             onChange={(sleep: Sleep) => setUsual((current) => ({ ...current, sleep }))}
             last
+            fixed={usualIsTheirRecord}
           />
         </View>
     </Sheet>
@@ -155,22 +170,29 @@ function UsualRow<T extends string>({
   value,
   onChange,
   last = false,
+  fixed = false,
 }: {
   label: string;
   options: readonly T[];
   value: NoInfer<T>;
   onChange: (value: NoInfer<T>) => void;
   last?: boolean;
+  /** Set somewhere else, so shown and not offered. */
+  fixed?: boolean;
 }) {
   return (
     <View style={last ? styles.usualLast : styles.usual}>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.chips}>
-        {options.map((option) => (
+        {/* Only the answer, when it is not this phone's to change. A row of greyed-out
+          * alternatives invites a tap that does nothing, and the one that matters is
+          * harder to find among four that are refused. */}
+        {(fixed ? options.filter((option) => option === value) : options).map((option) => (
           <Chip
             key={option}
             label={option}
             selected={value === option}
+            disabled={fixed}
             onPress={() => onChange(option)}
           />
         ))}
