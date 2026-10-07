@@ -161,6 +161,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  /**
+   * Find this resident on the server and remember which one they are.
+   *
+   * The local id was made on the phone and the server has never seen it, so a day filed
+   * against it is refused - correctly, and confusingly, because everything on the screen
+   * looks right. Matching is by name for now, which is enough while a caregiver has one
+   * resident and is the wrong answer the moment two of them are called Margaret. A real
+   * one is picking from the server's list, and that is a screen rather than a line.
+   */
+  const linkResident = useCallback(async () => {
+    const local = await repository.getActiveIds();
+    if (!local.residentId) return;
+    const here = await repository.getResident(local.residentId);
+    if (!here) return;
+
+    const theirs = await api.listResidents();
+    const match = theirs.find(
+      (r) => r.displayName.trim().toLowerCase() === here.displayName.trim().toLowerCase(),
+    );
+    if (!match) return;
+
+    const linked = { ...here, remoteId: match.id };
+    await repository.saveResident(linked);
+    setResident(linked);
+  }, []);
+
   const startSession = useCallback<SessionValue['startSession']>(
     async ({ caregiverName, residentName, baseline }) => {
       const timestamp = nowIso();
@@ -187,8 +213,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       setCaregiver(nextCaregiver);
       setResident(nextResident);
+
+      // And point it at the server's resident, if there is an account to ask.
+      //
+      // This did not, and the gap is the path milestone five created: a caregiver invited by
+      // a manager signs in first and sets the phone up afterwards, so linkResident ran at
+      // sign-in with nothing to link and never ran again. Her phone then held a resident the
+      // server had never heard of, the review sheet correctly offered no send, and the day
+      // stayed on the device - while the sheet said nothing is sent until somebody signs in,
+      // to somebody who had.
+      //
+      // Caught by walking the milestone's own test rather than by a test: every unit test
+      // that files a day starts from a device that was already linked.
+      await linkResident();
     },
-    [],
+    [linkResident],
   );
 
   const updateResident = useCallback<SessionValue['updateResident']>(async (next) => {
@@ -207,36 +246,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const next = { ...resident, displayName: residentName.trim(), baseline };
         await repository.saveResident(next);
         setResident(next);
+        // And match it to the server's again, because the name is what the match is made
+        // on. Changing who this phone is for without re-matching leaves it pointing at the
+        // person it used to be for, or at nobody - which is the state a caregiver sees as a
+        // day that will not send and no way to find out why.
+        //
+        // Found walking the milestone's test twice: once when the phone was set up after
+        // signing in, and once when the name was corrected afterwards. Both are the same
+        // gap, which is that the link was only ever made at sign-in.
+        if (next.displayName !== resident.displayName) await linkResident();
       }
     },
-    [caregiver, resident],
+    [caregiver, resident, linkResident],
   );
 
-  /**
-   * Find this resident on the server and remember which one they are.
-   *
-   * The local id was made on the phone and the server has never seen it, so a day filed
-   * against it is refused - correctly, and confusingly, because everything on the screen
-   * looks right. Matching is by name for now, which is enough while a caregiver has one
-   * resident and is the wrong answer the moment two of them are called Margaret. A real
-   * one is picking from the server's list, and that is a screen rather than a line.
-   */
-  const linkResident = useCallback(async () => {
-    const local = await repository.getActiveIds();
-    if (!local.residentId) return;
-    const here = await repository.getResident(local.residentId);
-    if (!here) return;
-
-    const theirs = await api.listResidents();
-    const match = theirs.find(
-      (r) => r.displayName.trim().toLowerCase() === here.displayName.trim().toLowerCase(),
-    );
-    if (!match) return;
-
-    const linked = { ...here, remoteId: match.id };
-    await repository.saveResident(linked);
-    setResident(linked);
-  }, []);
 
   const signIn = useCallback<SessionValue['signIn']>(
     async (email, password) => {

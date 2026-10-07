@@ -523,6 +523,7 @@ function CareReport({
         // The server's id, not the device's. A day addressed to a uuid the phone invented
         // is refused with "no such resident", which is correct and reads on screen like
         // something else entirely.
+        signedIn={account !== null}
         onSend={
           account && resident.remoteId
             ? async () => {

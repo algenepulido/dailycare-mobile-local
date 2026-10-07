@@ -185,6 +185,17 @@ export default function FacilityScreen() {
                   {m.role === 'care_manager' ? 'Care manager' : 'Caregiver'}
                   {m.state === 'invited' ? ' — invited, not here yet' : ''}
                 </Text>
+                {/* The address, where two people in a building share a name.
+                  *
+                  * Two Maria Santoses is not a contrivance - it is what a staging instance
+                  * already had and what a care home with forty staff will have. A list that
+                  * cannot tell them apart is a list a manager cannot end the right
+                  * membership from. Shown only when it is needed, because an address under
+                  * every name is noise the rest of the time, and it is the thing a manager
+                  * typed to invite them. */}
+                {working.filter((o) => o.displayName === m.displayName).length > 1 ? (
+                  <Text style={styles.rowUnder}>{m.email}</Text>
+                ) : null}
               </View>
               <Text style={styles.action}>
                 {ending === m.id ? 'Tap again to end it' : 'End'}

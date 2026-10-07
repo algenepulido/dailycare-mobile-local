@@ -154,7 +154,17 @@ export function ResidentSheet({
               confirming === a.id ? `Confirm taking ${a.displayName} off` : `${a.displayName}, take off`
             }
           >
-            <Text style={[styles.rowName, styles.grow]}>{a.displayName}</Text>
+            <View style={styles.rowText}>
+              <Text style={styles.rowName}>{a.displayName}</Text>
+              {/* Same reason as the building's list: two people with one name are two
+                * people, and taking the wrong one off a resident is the mistake this
+                * prevents. members carries the address already, so no second request. */}
+              {theirs.filter((o) => o.displayName === a.displayName).length > 1 ? (
+                <Text style={styles.rowUnder}>
+                  {members.find((m) => m.id === a.memberId)?.email ?? ''}
+                </Text>
+              ) : null}
+            </View>
             <Text style={styles.action}>{confirming === a.id ? 'Tap again' : 'Take off'}</Text>
           </Pressable>
         ))

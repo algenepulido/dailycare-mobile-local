@@ -19,6 +19,14 @@ interface ReviewSheetProps {
    * the day is already on the device either way and an account is what lets it travel.
    */
   onSend?: () => Promise<void>;
+  /**
+   * Whether somebody is signed in, which is not the same question as whether the day can
+   * travel. onSend can be absent for a second reason: the phone is set up for somebody this
+   * account cannot see. The sheet said "until somebody signs in" for both, which is false to
+   * the face of a caregiver who just did - and that is the state an invited caregiver was
+   * left in until startSession learned to link.
+   */
+  signedIn?: boolean;
   clientName: string;
   dateLabel: string;
   changes: Change[];
@@ -45,6 +53,7 @@ export function ReviewSheet({
   note,
   photoUri,
   onSend,
+  signedIn = false,
 }: ReviewSheetProps) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -143,7 +152,12 @@ export function ReviewSheet({
             This is what the family sees. Your medication ticks go with it, as your record
             of them.
           </Text>
-        ) : (
+          ) : signedIn ? (
+            <Text style={styles.footnote}>
+              This phone is set up for somebody the care home has not given this account, so
+              the day stays here. Ask them to assign you, then sign in again.
+            </Text>
+          ) : (
           <Text style={styles.footnote}>
             Nothing is sent from this phone until somebody signs in. The day is saved here
             either way.
