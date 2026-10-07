@@ -108,7 +108,25 @@ func bootstrap(ctx context.Context, args []string) error {
 	// would refuse it after the user row was written, leaving an account attached to
 	// nothing. Checked here, before anything is created.
 	switch *role {
-	case "caregiver", "care_manager":
+	case "caregiver":
+	case "care_manager":
+		// A care manager is not assigned to anybody and must not be. The policies give
+		// them every resident in their own facility, and an assignment on top of that
+		// puts their name on a resident's card among the people who look after them -
+		// which is a different claim from running the building, and the wrong one.
+		//
+		// Refused rather than quietly dropped. The residents can arrive from the
+		// environment: a job's command line is fixed when it is created, so the deployed
+		// job is told through BOOTSTRAP_RESIDENTS and carries one already. Making a care
+		// manager through it therefore assigned her to a resident while the closing
+		// message said assignments were not needed here - the job saying one thing and
+		// doing another, which is worse than either. Found by reading the building screen
+		// afterwards and seeing her listed as somebody's caregiver.
+		if len(residents) > 0 {
+			return fmt.Errorf("-role care_manager takes no -resident, and got %d: a care "+
+				"manager already sees every resident in the facility, and an assignment "+
+				"would also list them as one of that resident's caregivers", len(residents))
+		}
 	case "family":
 		switch *relation {
 		case "self", "spouse", "child", "sibling", "other_family", "friend", "power_of_attorney":
