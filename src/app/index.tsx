@@ -52,7 +52,15 @@ export default function CareReportScreen() {
   // is an edit to what is stored and the list would be a second question.
   const [theirs, setTheirs] = useState<RemoteResident[]>([]);
   useEffect(() => {
-    if (!account || resident) return;
+    // No account, nothing to offer - and nothing to keep. Returning early here left the
+    // last list in memory, so the sheet shown straight after "remove this device's data"
+    // still named everybody who lives in the building. The button has to take those with
+    // it. Seen on a device, pressing it.
+    if (!account) {
+      setTheirs([]);
+      return;
+    }
+    if (resident) return;
     let live = true;
     void (async () => {
       try {
@@ -66,7 +74,14 @@ export default function CareReportScreen() {
     return () => {
       live = false;
     };
-  }, [account, resident]);
+    // namesOpen as well as the account, so the list is what the building holds now.
+    //
+    // Without it this ran once and the answer was kept. A care manager who admits somebody
+    // and then sets this phone up to file for them is the ordinary case, and the resident
+    // she just added was not on the list - which also means the warning about two people
+    // with one name could not fire on the pair she had just created. Seen on a device,
+    // doing exactly that.
+  }, [account, resident, namesOpen]);
   const offered = theirs.map((person) => ({
     id: person.id,
     displayName: person.displayName,
@@ -173,6 +188,7 @@ export default function CareReportScreen() {
             signedIn={account !== null}
             onClose={() => {}}
             onSignIn={() => setInvited(true)}
+            onSignOut={() => void signOut()}
             onSave={(caregiverName, residentName, baseline, remoteId) =>
               void startSession({ caregiverName, residentName, baseline, remoteId })
             }
@@ -215,7 +231,7 @@ function CareReport({
   namesOpen: boolean;
   setNamesOpen: (open: boolean) => void;
 }) {
-  const { updateSetup, account, signOut } = useSession();
+  const { updateSetup, account, signOut, clear } = useSession();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -547,6 +563,10 @@ function CareReport({
         residentName={resident.displayName}
         baseline={resident.baseline}
         usualIsTheirRecord={Boolean(resident.remoteId)}
+        onForget={() => {
+          setNamesOpen(false);
+          void clear();
+        }}
         onClose={() => setNamesOpen(false)}
         onSave={(caregiverName, residentName, baseline) => {
           void updateSetup(caregiverName, residentName, baseline);

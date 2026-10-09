@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Appetite, Baseline, Mood, Sleep } from '@/domain/types';
+import { sharedNames } from '@/domain/people';
 import { APPETITES, MOODS, SLEEPS } from '@/domain/types';
 import { color, radii, type } from '@/theme/tokens';
 
@@ -50,6 +51,25 @@ interface SetupSheetProps {
    */
   usualIsTheirRecord?: boolean;
   /**
+   * Take everything this phone holds off it.
+   *
+   * Offered because signing out deliberately does not. Signing out is the end of a shift;
+   * this is a ward tablet being handed on or a phone being given back, and until now there
+   * was no way to say so - the records, the photographs and the day in progress stayed
+   * where the next person to open the app would find them.
+   */
+  onForget?: () => void;
+  /**
+   * A way off this sheet for somebody who is signed in and should not be looking at it.
+   *
+   * The first-run sheet cannot be dismissed, correctly - there is nothing behind it. But
+   * a care manager's phone renders it for as long as the app does not yet know she manages
+   * a building, and it does not know until /v1/me answers. On a slow connection that is a
+   * moment; with no connection it never answers, and she is asked to name a caregiver and
+   * a resident with no way out. Seen on a device, opening the app offline.
+   */
+  onSignOut?: () => void;
+  /**
    * The residents this account is allowed to file for, where there is an account.
    *
    * Offered instead of a name to type, because the name has to match the building's
@@ -82,11 +102,14 @@ export function SetupSheet({
   usualIsTheirRecord = false,
   choices,
   signedIn = false,
+  onForget,
+  onSignOut,
 }: SetupSheetProps) {
   const [caregiver, setCaregiver] = useState(caregiverName);
   const [resident, setResident] = useState(residentName);
   const [usual, setUsual] = useState<Baseline>(baseline);
   const [picked, setPicked] = useState<string | null>(null);
+  const [forgetting, setForgetting] = useState(false);
 
   // Reopening shows what is stored now, not what was typed and abandoned last time.
   useEffect(() => {
@@ -94,6 +117,7 @@ export function SetupSheet({
     setCaregiver(caregiverName);
     setResident(residentName);
     setPicked(null);
+    setForgetting(false);
     setUsual(baseline);
   }, [open, caregiverName, residentName, baseline]);
 
@@ -107,6 +131,12 @@ export function SetupSheet({
   // nowhere.
   const nothingToFileFor = signedIn && offered.length === 0 && firstRun;
   const fromRecord = usualIsTheirRecord || (picking && offered.some((c) => c.displayName === resident));
+  // Two residents with one name is rarer than two staff with one name and has no address
+  // to tell them apart - a resident has a name and nothing else a caregiver would
+  // recognise. Picking either one is safe, because what travels is the id and not the
+  // name. What is not safe is a person choosing between two identical buttons and
+  // believing they chose. So it says so.
+  const twoAlike = picking && sharedNames(offered).size > 0;
   const complete = caregiver.trim().length > 0 && resident.trim().length > 0 && !nothingToFileFor;
 
   return (
@@ -139,7 +169,7 @@ export function SetupSheet({
             disabledAppearance="muted"
             onPress={() => onSave(caregiver.trim(), resident.trim(), usual, picked ?? undefined)}
           />
-          {firstRun && onSignIn ? (
+          {firstRun && onSignIn && !signedIn ? (
             <Pressable
               onPress={onSignIn}
               accessibilityRole="button"
@@ -147,6 +177,16 @@ export function SetupSheet({
               style={({ pressed }) => [styles.invited, pressed && styles.invitedPressed]}
             >
               <Text style={styles.invitedText}>I was sent an invitation</Text>
+            </Pressable>
+          ) : null}
+          {firstRun && signedIn && onSignOut ? (
+            <Pressable
+              onPress={onSignOut}
+              accessibilityRole="button"
+              accessibilityLabel="This is not my account"
+              style={({ pressed }) => [styles.invited, pressed && styles.invitedPressed]}
+            >
+              <Text style={styles.invitedText}>This is not my account</Text>
             </Pressable>
           ) : null}
         </View>
@@ -176,6 +216,13 @@ export function SetupSheet({
             assign you, then sign in again.
           </Text>
         ) : picking ? (
+          <>
+            {twoAlike ? (
+              <Text style={styles.hint}>
+                Two of these have the same name. Ask the care manager which one this phone
+                is for before you choose.
+              </Text>
+            ) : null}
           <View style={styles.chips}>
             {offered.map((person) => (
               <Chip
@@ -190,6 +237,7 @@ export function SetupSheet({
               />
             ))}
           </View>
+          </>
         ) : (
           <Field
             value={resident}
@@ -236,6 +284,40 @@ export function SetupSheet({
         </View>
           </>
         )}
+
+        {/* Two taps, and the second is on a row that has already changed to ask - the same
+          * shape as ending a membership, because this is the same kind of act. */}
+        {onForget && !firstRun ? (
+          <>
+            <Text style={styles.sectionLabel}>This phone</Text>
+            <Text style={styles.hint}>
+              Everything filed from here that reached the care home stays there. What goes
+              is this phone&rsquo;s own copy: the names above, the photographs taken on it,
+              and anything filed here that has not reached the care home yet.
+            </Text>
+            <Pressable
+              style={[styles.forget, forgetting && styles.forgetAsking]}
+              onPress={() => {
+                if (!forgetting) {
+                  setForgetting(true);
+                  return;
+                }
+                setForgetting(false);
+                onForget();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={
+                forgetting
+                  ? "Confirm removing this device's data"
+                  : "Remove this device's data"
+              }
+            >
+              <Text style={styles.forgetText}>
+                {forgetting ? 'Tap again to remove it' : "Remove this device's data"}
+              </Text>
+            </Pressable>
+          </>
+        ) : null}
     </Sheet>
   );
 }
@@ -291,6 +373,18 @@ const styles = StyleSheet.create({
   blurb: { ...type.blurb, marginTop: 6, marginBottom: 20 },
   label: { ...type.fieldLabel, marginBottom: 8 },
   gap: { height: 16 },
+
+  forget: {
+    marginTop: 4,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderRadius: radii.setupCard,
+    borderWidth: 1,
+    borderColor: color.line,
+    backgroundColor: color.white,
+  },
+  forgetAsking: { borderColor: color.flag, backgroundColor: color.flagSoft },
+  forgetText: { ...type.body, color: color.flag },
 
   sectionLabel: { ...type.sectionLabel, marginTop: 24 },
   hint: { ...type.hint, marginTop: 6, marginBottom: 12 },
