@@ -31,22 +31,31 @@ export function AdmitSheet({ open, facilityId, onClose, onDone }: AdmitSheetProp
   // The screen's words, translated on the way out by the same tables the day form uses.
   // Two places writing these values with two spellings is how a baseline comes to disagree
   // with the days compared against it.
-  const [mood, setMood] = useState<Mood>('Calm');
-  const [appetite, setAppetite] = useState<Appetite>('Fair');
-  const [sleep, setSleep] = useState<Sleep>('Restless');
+  // Nothing chosen to begin with, which is the opposite of how this read.
+  //
+  // It opened on Calm, Fair and Restless, and a care manager who admitted somebody without
+  // looking at this card had stated a normal for them by not touching it. That one answer
+  // is what every later day is compared against, so a baseline accepted by default makes
+  // "what changed today" wrong for as long as nobody notices - and the family hears the
+  // wrong thing, or hears nothing at all. The rule the day form already follows, that a
+  // usual answer is never pre-marked, belongs here most of all.
+  const [mood, setMood] = useState<Mood | null>(null);
+  const [appetite, setAppetite] = useState<Appetite | null>(null);
+  const [sleep, setSleep] = useState<Sleep | null>(null);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const close = () => {
     setName('');
-    setMood('Calm');
-    setAppetite('Fair');
-    setSleep('Restless');
+    setMood(null);
+    setAppetite(null);
+    setSleep(null);
     setProblem(null);
     onClose();
   };
 
   const admit = async () => {
+    if (mood === null || appetite === null || sleep === null) return;
     setSaving(true);
     setProblem(null);
     try {
@@ -67,7 +76,7 @@ export function AdmitSheet({ open, facilityId, onClose, onDone }: AdmitSheetProp
   function row<T extends string>(
     label: string,
     options: readonly T[],
-    value: T,
+    value: T | null,
     set: (v: T) => void,
   ) {
     return (
@@ -88,9 +97,24 @@ export function AdmitSheet({ open, facilityId, onClose, onDone }: AdmitSheetProp
       onClose={close}
       footer={
         <Button
-          label={saving ? 'Admitting…' : 'Admit'}
+          label={
+            saving
+              ? 'Admitting…'
+              : name.trim() === ''
+                ? 'Add their name'
+                : mood === null || appetite === null || sleep === null
+                  ? 'Say what is usual for them'
+                  : 'Admit'
+          }
           onPress={() => void admit()}
-          disabled={saving || name.trim() === ''}
+          disabled={
+            saving ||
+            name.trim() === '' ||
+            mood === null ||
+            appetite === null ||
+            sleep === null
+          }
+          disabledAppearance="muted"
         />
       }
     >
