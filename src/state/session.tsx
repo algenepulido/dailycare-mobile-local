@@ -15,6 +15,7 @@ import * as api from '@/data/api';
 import type { AccountKind } from '@/data/api';
 import { baselineFromWire } from '@/data/wire';
 import { governingBaseline } from '@/domain/baseline';
+import { theOnlyMatch } from '@/domain/people';
 import {
   forgetKind,
   forgetTokens,
@@ -74,10 +75,16 @@ interface SessionValue {
   signingIn: boolean;
   /** False until storage has been read once, so screens do not flash an empty state. */
   ready: boolean;
+  /**
+   * `remoteId` is the resident the caregiver picked, where there was a list to pick from.
+   * Without it the phone falls back to matching the typed name, which only answers when
+   * the name belongs to exactly one person.
+   */
   startSession(input: {
     caregiverName: string;
     residentName: string;
     baseline: Baseline;
+    remoteId?: string;
   }): Promise<void>;
   updateResident(resident: Resident): Promise<void>;
   /**
@@ -179,9 +186,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!here) return;
 
     const theirs = await api.listResidents();
-    const match = theirs.find(
-      (r) => r.displayName.trim().toLowerCase() === here.displayName.trim().toLowerCase(),
-    );
+    // By id wherever this phone was told which resident it is for, and by name only when
+    // the name can mean exactly one person.
+    //
+    // It matched on name and took the first hit. The picker added on 7 October hands back
+    // an id and this never saw it, so a caregiver choosing the second of two residents
+    // called Maria Santos got a phone linked to the first - and her day, her medication
+    // record and her photograph went to that resident and to that resident's family. The
+    // commit that added the picker exists because two people can share a name, and this
+    // is where it stopped being true.
+    const match = here.remoteId
+      ? (theirs.find((r) => r.id === here.remoteId) ?? null)
+      : theOnlyMatch(theirs, here.displayName);
     if (!match) return;
 
     // And take the building's baseline with the link.
@@ -207,7 +223,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startSession = useCallback<SessionValue['startSession']>(
-    async ({ caregiverName, residentName, baseline }) => {
+    async ({ caregiverName, residentName, baseline, remoteId }) => {
       const timestamp = nowIso();
       const nextCaregiver: Caregiver = {
         id: newId(),
@@ -219,6 +235,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         displayName: residentName.trim(),
         baseline,
         createdAt: timestamp,
+        // Carried from the moment it was chosen, so nothing downstream has to work out
+        // which of two people with one name was meant.
+        remoteId: remoteId ?? null,
       };
 
       await Promise.all([
@@ -268,7 +287,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // shows it as the building's and does not offer to change it, so nothing is typed
         // here to be dropped.
         const usual = governingBaseline(resident.remoteId ? resident.baseline : null, baseline);
-        const next = { ...resident, displayName: residentName.trim(), baseline: usual };
+        // A new name is a different person until something says otherwise, so the old
+        // link goes with the old name. Keeping it would leave the phone filing to the
+        // resident it used to be for under a name that no longer matches them.
+        const renamed = residentName.trim() !== resident.displayName;
+        const next = {
+          ...resident,
+          displayName: residentName.trim(),
+          baseline: usual,
+          remoteId: renamed ? null : resident.remoteId,
+        };
         await repository.saveResident(next);
         setResident(next);
         // And match it to the server's again, because the name is what the match is made
@@ -279,7 +307,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // Found walking the milestone's test twice: once when the phone was set up after
         // signing in, and once when the name was corrected afterwards. Both are the same
         // gap, which is that the link was only ever made at sign-in.
-        if (next.displayName !== resident.displayName) await linkResident();
+        if (renamed) await linkResident();
       }
     },
     [caregiver, resident, linkResident],

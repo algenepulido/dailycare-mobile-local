@@ -1,4 +1,4 @@
-import { addressFor, nameList, sharedNames } from './people';
+import { addressFor, nameList, sharedNames, theOnlyMatch } from './people';
 
 const maria = { id: 'm1', displayName: 'Maria Santos', email: 'nurse@cedar.test' };
 const otherMaria = { id: 'm2', displayName: 'Maria Santos', email: 'maria.santos@cedar.test' };
@@ -52,5 +52,30 @@ describe('telling two people with one name apart', () => {
     // choosing between two identical rows.
     const shared = sharedNames([maria, otherMaria, tomas]);
     expect(nameList([maria], shared)).toBe('Maria Santos (nurse@cedar.test)');
+  });
+});
+
+describe('the one resident a name can mean', () => {
+  const alma = { id: 'r1', displayName: 'Alma Vidal' };
+  const maria = { id: 'r2', displayName: 'Maria Santos' };
+  const otherMaria = { id: 'r3', displayName: 'Maria Santos' };
+
+  it('finds the one person a name names', () => {
+    expect(theOnlyMatch([alma, maria], 'Alma Vidal')).toBe(alma);
+  });
+
+  it('is not case or whitespace sensitive, because the name was typed', () => {
+    expect(theOnlyMatch([alma, maria], '  alma vidal ')).toBe(alma);
+  });
+
+  it('refuses to pick when two people answer to the name', () => {
+    // The whole point. Taking the first here filed a day against the wrong resident and
+    // showed it to the wrong family.
+    expect(theOnlyMatch([maria, otherMaria], 'Maria Santos')).toBeNull();
+  });
+
+  it('refuses when nobody answers to it, the same way', () => {
+    expect(theOnlyMatch([alma], 'Marisol Reyes')).toBeNull();
+    expect(theOnlyMatch([alma], '   ')).toBeNull();
   });
 });

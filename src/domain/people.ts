@@ -76,3 +76,25 @@ export function nameList(
     })
     .join(', ');
 }
+
+/**
+ * The one resident a typed name can mean, or null when it cannot mean exactly one.
+ *
+ * Never guesses. Matching a name against a list and taking the first hit is what put a
+ * caregiver's day, her medication record and her photograph on a different resident and in
+ * front of a different family: the building holds two people called Maria Santos, a
+ * caregiver picked the second, and the phone linked to the first.
+ *
+ * Null for none and null for several, deliberately. "I do not know which" and "there is no
+ * such person" lead to the same place - this phone is not linked and must not file to the
+ * server - and a caller that treats them differently is a caller inventing a third answer.
+ */
+export function theOnlyMatch<T extends { displayName: string }>(
+  people: T[],
+  name: string,
+): T | null {
+  const wanted = name.trim().toLowerCase();
+  if (wanted === '') return null;
+  const matches = people.filter((p) => p.displayName.trim().toLowerCase() === wanted);
+  return matches.length === 1 ? matches[0] : null;
+}

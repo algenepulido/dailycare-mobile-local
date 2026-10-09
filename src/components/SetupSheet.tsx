@@ -15,7 +15,17 @@ interface SetupSheetProps {
   caregiverName: string;
   residentName: string;
   baseline: Baseline;
-  onSave: (caregiverName: string, residentName: string, baseline: Baseline) => void;
+  /**
+   * `remoteId` is set when the resident was picked from the list rather than typed. It is
+   * the only thing that tells two people with one name apart, so it travels with the
+   * name rather than being worked out again from it later.
+   */
+  onSave: (
+    caregiverName: string,
+    residentName: string,
+    baseline: Baseline,
+    remoteId?: string,
+  ) => void;
   onClose: () => void;
   /** First run introduces the app; every later visit is an edit to what is stored. */
   firstRun?: boolean;
@@ -76,12 +86,14 @@ export function SetupSheet({
   const [caregiver, setCaregiver] = useState(caregiverName);
   const [resident, setResident] = useState(residentName);
   const [usual, setUsual] = useState<Baseline>(baseline);
+  const [picked, setPicked] = useState<string | null>(null);
 
   // Reopening shows what is stored now, not what was typed and abandoned last time.
   useEffect(() => {
     if (!open) return;
     setCaregiver(caregiverName);
     setResident(residentName);
+    setPicked(null);
     setUsual(baseline);
   }, [open, caregiverName, residentName, baseline]);
 
@@ -125,7 +137,7 @@ export function SetupSheet({
             }
             disabled={!complete}
             disabledAppearance="muted"
-            onPress={() => onSave(caregiver.trim(), resident.trim(), usual)}
+            onPress={() => onSave(caregiver.trim(), resident.trim(), usual, picked ?? undefined)}
           />
           {firstRun && onSignIn ? (
             <Pressable
@@ -173,6 +185,7 @@ export function SetupSheet({
                 onPress={() => {
                   setResident(person.displayName);
                   setUsual(person.baseline);
+                  setPicked(person.id);
                 }}
               />
             ))}

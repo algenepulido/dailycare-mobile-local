@@ -145,8 +145,8 @@ export default function CareReportScreen() {
           signedIn={account !== null}
           onClose={() => setNamesOpen(false)}
           onSignIn={() => setInvited(true)}
-          onSave={(caregiverName, residentName, baseline) =>
-            void startSession({ caregiverName, residentName, baseline })
+          onSave={(caregiverName, residentName, baseline, remoteId) =>
+            void startSession({ caregiverName, residentName, baseline, remoteId })
           }
         />
       </View>
@@ -173,8 +173,8 @@ export default function CareReportScreen() {
             signedIn={account !== null}
             onClose={() => {}}
             onSignIn={() => setInvited(true)}
-            onSave={(caregiverName, residentName, baseline) =>
-              void startSession({ caregiverName, residentName, baseline })
+            onSave={(caregiverName, residentName, baseline, remoteId) =>
+              void startSession({ caregiverName, residentName, baseline, remoteId })
             }
           />
         )}
