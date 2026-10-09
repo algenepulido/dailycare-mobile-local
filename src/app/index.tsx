@@ -214,11 +214,16 @@ export default function CareReportScreen() {
  *
  * Both come down as props rather than being read from the session again here. They were
  * read here and narrowed with an early return, which put `useCheckInForm` below a
- * `return null` - a hook behind a condition. The render that clears the session renders
- * this component one last time with nothing in it, React counts fewer hooks than last
- * time, and the screen crashes instead of closing. Unreachable until now only because
- * nothing could clear a resident; the device-data button added alongside this is exactly
- * the thing that reaches it.
+ * `return null` - a hook behind a condition, which React's rules forbid and the linter
+ * flags.
+ *
+ * What it does not do is crash, and that is worth recording because the review that found
+ * it said it would and so did the first version of this comment. The old code was put back
+ * and built to check: clearing the session re-renders the parent first, the parent stops
+ * rendering this component, and it never renders with nothing in it. So the count never
+ * falls. The violation is real and the fix stands - a refactor that renders this from
+ * somewhere else reaches it immediately - but the consequence was asserted rather than
+ * seen, by them and then by me.
  */
 function CareReport({
   caregiver,
