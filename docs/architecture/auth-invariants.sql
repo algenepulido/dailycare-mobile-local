@@ -134,6 +134,51 @@ SELECT expect('and that failed attempt issued nothing',
   NOT session_is_valid(h('r3')));
 
 
+-- ── a session that went idle ───────────────────────────────────────────────────
+--
+-- Automatic logoff lives in two columns and both have to hold. expires_at is how long
+-- somebody may stay signed in at all; idle_expires_at is how long a phone left on a med
+-- cart in a corridor stays useful. session_owner has always read both.
+--
+-- Rotation read only the first, and wrote a row carrying neither the idle limit nor the
+-- deadline it came from - so a client that kept refreshing never went idle, and its
+-- absolute expiry walked forward with it. Nothing in this suite rotated a session after
+-- idle expiry, which is the only reason it passed.
+
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at, idle_expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', h('idle'), 'left on a cart',
+        now() + interval '30 days', now() - interval '1 minute');
+\set QUIET off
+
+SELECT expect('a session left alone past its idle window is not valid',
+  NOT session_is_valid(h('idle')));
+
+SELECT expect('and nobody owns it', (SELECT session_owner(h('idle')) IS NULL));
+
+SELECT expect('and refreshing cannot bring it back',
+  (SELECT rotate_session(h('idle'), h('idle2')) IS NULL));
+
+SELECT expect('and that attempt issued nothing',
+  NOT session_is_valid(h('idle2')));
+
+-- The other half. A live session that rotates has to come back with an idle limit of its
+-- own, and with the deadline it already had rather than a fresh thirty days.
+\set QUIET on
+INSERT INTO sessions (user_id, refresh_hash, device_label, expires_at, idle_expires_at)
+VALUES ('a0000000-0000-0000-0000-00000000000a', h('live'), 'a working phone',
+        now() + interval '2 days', now() + interval '8 hours');
+SELECT rotate_session(h('live'), h('live2'));
+\set QUIET off
+
+SELECT expect('a refreshed session still has an idle limit',
+  (SELECT idle_expires_at IS NOT NULL FROM sessions WHERE refresh_hash = h('live2')));
+
+SELECT expect('and refreshing does not push the absolute deadline out',
+  (SELECT expires_at < now() + interval '3 days'
+     FROM sessions WHERE refresh_hash = h('live2')));
+
+
 -- ── single-use tokens ──────────────────────────────────────────────────────────
 
 \echo ''
