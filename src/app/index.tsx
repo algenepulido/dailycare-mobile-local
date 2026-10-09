@@ -29,7 +29,7 @@ import { baselineFromWire, toWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { buildChanges, buildChecklist } from '@/domain/rules';
 import { ALERT_APPETITES, ALERT_MOODS, ALERT_SLEEPS } from '@/domain/rules';
-import type { CheckIn, Meal } from '@/domain/types';
+import type { Caregiver, CheckIn, Meal, Resident } from '@/domain/types';
 import { APPETITES, CONCERNS, DEFAULT_BASELINE, MEALS, MOODS, SLEEPS } from '@/domain/types';
 import type { CheckInDraft } from '@/state/checkInForm';
 import { draftFromFiled, useCheckInForm } from '@/state/checkInForm';
@@ -182,29 +182,45 @@ export default function CareReportScreen() {
     );
   }
 
-  return <CareReport namesOpen={namesOpen} setNamesOpen={setNamesOpen} />;
+  return (
+    <CareReport
+      caregiver={caregiver}
+      resident={resident}
+      namesOpen={namesOpen}
+      setNamesOpen={setNamesOpen}
+    />
+  );
 }
 
 /**
  * Split out so the form hook only runs once a resident exists. Calling it above the
  * redirect would mean loading a day for a resident that is not there yet.
+ *
+ * Both come down as props rather than being read from the session again here. They were
+ * read here and narrowed with an early return, which put `useCheckInForm` below a
+ * `return null` - a hook behind a condition. The render that clears the session renders
+ * this component one last time with nothing in it, React counts fewer hooks than last
+ * time, and the screen crashes instead of closing. Unreachable until now only because
+ * nothing could clear a resident; the device-data button added alongside this is exactly
+ * the thing that reaches it.
  */
 function CareReport({
+  caregiver,
+  resident,
   namesOpen,
   setNamesOpen,
 }: {
+  caregiver: Caregiver;
+  resident: Resident;
   namesOpen: boolean;
   setNamesOpen: (open: boolean) => void;
 }) {
-  const { caregiver, resident, updateSetup, account, signOut } = useSession();
+  const { updateSetup, account, signOut } = useSession();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
-
-  // Guarded by the caller, but narrowing has to happen for the compiler too.
-  if (!caregiver || !resident) return null;
 
   const form = useCheckInForm({
     residentId: resident.id,
