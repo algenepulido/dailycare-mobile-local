@@ -19,7 +19,29 @@ import {
   type Tokens,
 } from '@/data/credentials';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:8080';
+/**
+ * Where this build talks to, and a refusal rather than a guess when nobody said.
+ *
+ * This was `?? 'http://10.0.2.2:8080'`, which is the Android emulator's name for the
+ * machine running it. A release build with the variable unset therefore pointed at a
+ * development server that does not exist on a real phone - silently, and all the way into
+ * a store build, because eas.json sets no value on any profile. It has already caught me
+ * once building by hand; a store is the wrong place for it to catch anybody else.
+ *
+ * So the fallback is development only. A release build without a URL stops here, by name,
+ * instead of shipping and failing later as "the network is down".
+ */
+export function baseUrl(configured: string | undefined, development: boolean): string {
+  const url = (configured ?? '').trim();
+  if (url !== '') return url;
+  if (development) return 'http://10.0.2.2:8080';
+  throw new Error(
+    'EXPO_PUBLIC_API_URL is not set in this build. Set it on the EAS profile this was ' +
+      'built from, or in .env.local when building by hand.',
+  );
+}
+
+const BASE_URL = baseUrl(process.env.EXPO_PUBLIC_API_URL, __DEV__);
 
 export class ApiError extends Error {
   constructor(

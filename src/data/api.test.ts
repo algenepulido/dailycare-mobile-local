@@ -30,7 +30,7 @@ jest.mock('expo-secure-store', () => ({
   }),
 }));
 
-import { listResidents, redeem, signIn, SignedOut } from '@/data/api';
+import { baseUrl, listResidents, redeem, signIn, SignedOut } from '@/data/api';
 
 type Handler = (url: string, init?: RequestInit) => Response;
 
@@ -153,4 +153,24 @@ test('a link the server refuses is the server sentence, not a status code', asyn
   await expect(redeem('nope', 'a perfectly fine passphrase', 'x')).rejects.toThrow(
     'that link cannot be used',
   );
+});
+
+describe('where a build talks to', () => {
+  it('uses what it was given', () => {
+    expect(baseUrl('https://api.example.test', false)).toBe('https://api.example.test');
+    expect(baseUrl('  https://api.example.test  ', false)).toBe('https://api.example.test');
+  });
+
+  it('falls back to the emulator only while developing', () => {
+    expect(baseUrl(undefined, true)).toBe('http://10.0.2.2:8080');
+    expect(baseUrl('', true)).toBe('http://10.0.2.2:8080');
+  });
+
+  it('refuses to be a release build with no server', () => {
+    // The whole point. This used to fall through to the emulator address, which is
+    // reachable from nothing a resident's family is holding, and nothing stopped that
+    // reaching a store.
+    expect(() => baseUrl(undefined, false)).toThrow(/EXPO_PUBLIC_API_URL/);
+    expect(() => baseUrl('   ', false)).toThrow(/EXPO_PUBLIC_API_URL/);
+  });
 });
