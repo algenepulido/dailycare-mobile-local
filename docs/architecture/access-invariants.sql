@@ -221,6 +221,30 @@ SELECT expect_rows('and nobody in Birch', 0,
   $$SELECT * FROM residents WHERE facility_id = 'f2000000-0000-0000-0000-000000000002'$$);
 SELECT expect_rows('every care day in her building', 2, 'SELECT * FROM care_days');
 
+-- She may put a caregiver in front of her residents. Only her own caregivers.
+--
+-- From an independent review, which proved it: the policy asks whether she manages the
+-- facility on the row and nothing asks whether the member on the row works there. The
+-- foreign key points at facility_members(id) alone, so a member from any building
+-- satisfies it. A Cedar manager could hand a Cedar resident to a Birch caregiver, who
+-- could then read and write that resident's record.
+--
+-- The API refused it only by accident. The insert, the conflict read and the read-back
+-- are one transaction and the read-back fails under row security, so the row rolls back -
+-- but it comes out as a 500 rather than a refusal, and a control that works by crashing
+-- is not a control.
+SELECT expect_refused('a caregiver from another building cannot be given her resident', $$
+  INSERT INTO assignments (facility_id, resident_id, facility_member_id, assigned_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001',
+          'e1000000-0000-0000-0000-000000000001',
+          'fd000000-0000-0000-0000-00000000000d',
+          'b0000000-0000-0000-0000-00000000000b')
+$$);
+
+SELECT expect('and one of her own still can be',
+  (SELECT count(*) = 1 FROM assignments
+    WHERE resident_id = 'e1000000-0000-0000-0000-000000000001' AND ended_at IS NULL));
+
 
 -- ── the family member ──────────────────────────────────────────────────────────
 

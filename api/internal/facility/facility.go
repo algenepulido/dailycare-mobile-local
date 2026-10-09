@@ -310,9 +310,18 @@ func (s *Store) Assignments(ctx context.Context, c db.Caller, facility uuid.UUID
 // the requester, so sending anything else is refused - which makes the column an answer to
 // "who gave them access to her" rather than a field a client fills in.
 //
-// A resident at another building is refused by the foreign key on the pair rather than by
-// the policy, and a caregiver who is not a member of this one by the policy. Both arrive
-// here as the same refusal, which is the right amount of detail to give back.
+// Both halves of "this pair belongs to this building" are the database's, and only one of
+// them used to be. The policy asks whether the caller manages the facility on the row; it
+// never asked whether the member named on the row works there, and the foreign key pointed
+// at facility_members(id) alone, so a member of any building satisfied it. An independent
+// review proved a Cedar manager could hand a Cedar resident to a Birch caregiver.
+//
+// This comment said the policy refused that. It did not, and a comment describing a control
+// that is not there is worse than no comment - it is why nobody went looking.
+//
+// assignments-stay-in-the-building.sql adds the composite key, so the pair is now refused
+// by the key and a caregiver who is not a member at all by the policy. Both arrive here as
+// the same refusal, which is the right amount of detail to give back.
 func (s *Store) Assign(ctx context.Context, c db.Caller,
 	facility, resident, member uuid.UUID) (Assignment, error) {
 

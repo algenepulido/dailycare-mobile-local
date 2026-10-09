@@ -83,6 +83,13 @@ SELECT expect('no file went in twice',
 --                         lost it. Same reason as the second entry, not the third.
 --   medication-attribution.sql  the same again, and the same reason: one function, created
 --                         by the owner of the schema.
+--   assignments-stay-in-the-building.sql  adds a unique constraint and a foreign key to
+--                         two tables it owns, and replaces one function. All three are the
+--                         owner's to do, and none of them grants anything.
+--   idle-sessions-expire.sql  drops and recreates one function and grants EXECUTE on it.
+--                         The owner of the schema may do both; the grant is the same line
+--                         authentication.sql already carried, because the signature did
+--                         not change.
 --   one-open-assignment.sql  closes duplicate rows on a table it owns and creates an index
 --                         on it. Neither needs CREATE on the schema; an index belongs to
 --                         the table, which this role already owns.
@@ -105,7 +112,7 @@ SELECT expect('no file went in twice',
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql','access-restored.sql','one-open-assignment.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql','access-restored.sql','one-open-assignment.sql','idle-sessions-expire.sql','assignments-stay-in-the-building.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));
