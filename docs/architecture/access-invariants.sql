@@ -693,6 +693,78 @@ SELECT expect_rows('the ordinary upload is there', 1,
 RESET ROLE;
 
 
+-- ── the resident's own photograph ──────────────────────────────────────────────
+--
+-- A media row with no day against it. Which one is current is the last that actually
+-- arrived, and resident_photograph is where that rule lives.
+
+\echo ''
+\echo '── a face on the record'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'b0000000-0000-0000-0000-00000000000b', false);
+
+\set QUIET on
+INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                           byte_size, uploaded_by, uploaded_at)
+VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+        'dailycare-media','f1000000-0000-0000-0000-000000000001/face-1.jpg','image/jpeg',10,
+        'b0000000-0000-0000-0000-00000000000b', now() - interval '2 days');
+\set QUIET off
+
+SELECT expect('a care manager may put a face on her resident''s record',
+  (SELECT resident_photograph('e1000000-0000-0000-0000-000000000001') IS NOT NULL));
+
+SELECT expect('and the day photographs are not it',
+  (SELECT care_day_id IS NULL FROM media_objects
+    WHERE id = resident_photograph('e1000000-0000-0000-0000-000000000001')));
+
+-- Replacing one is uploading another, because the application cannot delete a media row.
+\set QUIET on
+INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                           byte_size, uploaded_by, uploaded_at)
+VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+        'dailycare-media','f1000000-0000-0000-0000-000000000001/face-2.jpg','image/jpeg',10,
+        'b0000000-0000-0000-0000-00000000000b', now());
+\set QUIET off
+
+SELECT expect('the one that arrived last is the one that stands',
+  (SELECT object_path LIKE '%face-2.jpg' FROM media_objects
+    WHERE id = resident_photograph('e1000000-0000-0000-0000-000000000001')));
+
+-- A row written before its object exists. A phone that lost signal leaves one of these,
+-- and counting it would put an empty frame on the family's screen.
+\set QUIET on
+INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                           byte_size, uploaded_by)
+VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+        'dailycare-media','f1000000-0000-0000-0000-000000000001/face-3.jpg','image/jpeg',10,
+        'b0000000-0000-0000-0000-00000000000b');
+\set QUIET off
+
+SELECT expect('a photograph that never arrived is not the one that stands',
+  (SELECT object_path LIKE '%face-2.jpg' FROM media_objects
+    WHERE id = resident_photograph('e1000000-0000-0000-0000-000000000001')));
+
+-- The function runs as the caller, which is the whole of why it is safe to grant.
+SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false);
+SELECT expect('a caregiver at another building cannot find her face',
+  (SELECT resident_photograph('e1000000-0000-0000-0000-000000000001') IS NULL));
+
+SELECT set_config('app.user_id', 'c0000000-0000-0000-0000-00000000000c', false);
+SELECT expect('her daughter can',
+  (SELECT resident_photograph('e1000000-0000-0000-0000-000000000001') IS NOT NULL));
+
+SELECT expect_refused('and cannot put one there herself', $$
+  INSERT INTO media_objects (facility_id, resident_id, bucket, object_path, content_type,
+                             byte_size, uploaded_by)
+  VALUES ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+          'dailycare-media','f1000000-0000-0000-0000-000000000001/hers.jpg','image/jpeg',10,
+          'c0000000-0000-0000-0000-00000000000c')
+$$);
+RESET ROLE;
+
+
 -- ── the clinical feed, which could not write at all ────────────────────────────
 --
 -- The matrix said the feed may insert a medication event with a source and a reference.

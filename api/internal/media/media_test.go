@@ -403,3 +403,128 @@ func TestAResidentYouCannotSeeHasNoPhotographs(t *testing.T) {
 		t.Fatalf("got %v, want ErrNotVisible", err)
 	}
 }
+
+// ── the resident's own face ────────────────────────────────────────────────────
+
+// A photograph with no day against it, which is what makes it hers rather than one of
+// her Tuesdays.
+func TestTheFaceIsThePhotographWithNoDayAgainstIt(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	// One of her day, so the answer has to choose rather than take the only row there is.
+	day := aDay(t, s, caller, facility, resident, on)
+	ofTheDay, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024)
+	if err != nil {
+		t.Fatalf("offering the day's: %v", err)
+	}
+	if err := s.Arrived(ctx, caller, ofTheDay.ObjectID); err != nil {
+		t.Fatalf("confirming the day's: %v", err)
+	}
+
+	hers, err := s.Offer(ctx, caller, resident, nil, "image/jpeg", 1024)
+	if err != nil {
+		t.Fatalf("offering hers: %v", err)
+	}
+	if err := s.Arrived(ctx, caller, hers.ObjectID); err != nil {
+		t.Fatalf("confirming hers: %v", err)
+	}
+
+	got, err := s.Portrait(ctx, caller, resident)
+	if err != nil {
+		t.Fatalf("reading her face: %v", err)
+	}
+	if got.ID != hers.ObjectID {
+		t.Fatalf("got the day's photograph as her face")
+	}
+}
+
+// Replacing one is adding another, because nothing here may delete a media row.
+func TestTheNewestOneThatArrivedIsTheFace(t *testing.T) {
+	s, _, caller, resident, _ := ward(t)
+	ctx := context.Background()
+
+	var last uuid.UUID
+	for i := 0; i < 3; i++ {
+		up, err := s.Offer(ctx, caller, resident, nil, "image/jpeg", 1024)
+		if err != nil {
+			t.Fatalf("offering %d: %v", i, err)
+		}
+		if err := s.Arrived(ctx, caller, up.ObjectID); err != nil {
+			t.Fatalf("confirming %d: %v", i, err)
+		}
+		last = up.ObjectID
+	}
+
+	got, err := s.Portrait(ctx, caller, resident)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if got.ID != last {
+		t.Fatalf("an older photograph is still her face")
+	}
+}
+
+// A phone that lost signal between asking for somewhere to put it and putting it there.
+// Counting that row would put an empty frame on a daughter's screen.
+func TestOneThatNeverArrivedIsNotTheFace(t *testing.T) {
+	s, _, caller, resident, _ := ward(t)
+	ctx := context.Background()
+
+	good, err := s.Offer(ctx, caller, resident, nil, "image/jpeg", 1024)
+	if err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	if err := s.Arrived(ctx, caller, good.ObjectID); err != nil {
+		t.Fatalf("confirming: %v", err)
+	}
+	if _, err := s.Offer(ctx, caller, resident, nil, "image/jpeg", 1024); err != nil {
+		t.Fatalf("offering the one that never lands: %v", err)
+	}
+	// Deliberately no Arrived on the second.
+
+	got, err := s.Portrait(ctx, caller, resident)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if got.ID != good.ObjectID {
+		t.Fatalf("a photograph that never arrived became her face")
+	}
+}
+
+// Nothing there yet, which most residents will be for a while. Its own error, because the
+// screen draws an initial for this and the caller should not have to read a message to
+// know which of the two happened.
+func TestAResidentWithNoPhotographSaysSo(t *testing.T) {
+	s, _, caller, resident, _ := ward(t)
+	_, err := s.Portrait(context.Background(), caller, resident)
+	if !errors.Is(err, ErrNoPhotograph) {
+		t.Fatalf("got %v, want ErrNoPhotograph", err)
+	}
+}
+
+// Two real wards, both populated. The wall, not an invented uuid that would fail for the
+// wrong reason.
+func TestAnotherBuildingsCaregiverCannotSeeHerFace(t *testing.T) {
+	cedar, _, atCedar, cathy, _ := ward(t)
+	birch, _, atBirch, _, _ := ward(t)
+	ctx := context.Background()
+
+	hers, err := cedar.Offer(ctx, atCedar, cathy, nil, "image/jpeg", 1024)
+	if err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	if err := cedar.Arrived(ctx, atCedar, hers.ObjectID); err != nil {
+		t.Fatalf("confirming: %v", err)
+	}
+	// Her own building can see it, so the next assertion is about the wall rather than
+	// about an empty table.
+	if _, err := cedar.Portrait(ctx, atCedar, cathy); err != nil {
+		t.Fatalf("cedar's own caregiver cannot see her face: %v", err)
+	}
+
+	if _, err := birch.Portrait(ctx, atBirch, cathy); !errors.Is(err, ErrNotVisible) {
+		t.Fatalf("got %v, want ErrNotVisible", err)
+	}
+}

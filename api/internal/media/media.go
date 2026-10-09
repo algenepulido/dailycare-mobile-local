@@ -33,6 +33,11 @@ const UploadWindow = 10 * time.Minute
 
 var ErrNotVisible = errors.New("media: no such resident, or not one this session may read")
 
+// Nobody has put a face on this record yet. Separate from ErrNotVisible, because the
+// screen shows initials for one and nothing at all for the other, and because a caller
+// who may not read the resident must not learn whether there is a photograph of them.
+var ErrNoPhotograph = errors.New("media: this resident has no photograph")
+
 // Signer is whatever can sign a URL for the bucket. In a deployed environment it is the
 // Cloud Storage client using the service account's own signBlob, so no key exists anywhere
 // - which is what makes iam.disableServiceAccountKeyCreation possible to enforce.
@@ -255,4 +260,43 @@ func (s *Store) ForDay(ctx context.Context, c db.Caller, resident uuid.UUID,
 		out = append(out, Photograph{ID: f.id, URL: url, ExpiresAt: until})
 	}
 	return out, nil
+}
+
+// Portrait is the resident's own photograph rather than one of their days.
+//
+// Which one that is lives in resident_photograph, in the model: a media row of theirs with
+// no day against it, the last that actually arrived. The function runs as the caller, so
+// media_read is what decides whether there is an answer - this is not a way round the
+// policy, it is the same policy asked a narrower question.
+func (s *Store) Portrait(ctx context.Context, c db.Caller, resident uuid.UUID) (*Photograph, error) {
+	var id uuid.UUID
+	var bucket, path string
+
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		// audit_read first, and it is also the access check. Looking at a photograph of
+		// somebody's mother is a read of her record and leaves a trail like any other.
+		if _, err := tx.Exec(ctx, `SELECT audit_read($1, $2)`, resident, "media_objects"); err != nil {
+			return ErrNotVisible
+		}
+		err := tx.QueryRow(ctx, `
+			SELECT m.id, m.bucket, m.object_path
+			  FROM media_objects m
+			 WHERE m.id = resident_photograph($1)`, resident).Scan(&id, &bucket, &path)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNoPhotograph
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Signed outside the transaction, same as a day's photographs: it is a network call to
+	// IAM and a database connection should not be held open across it.
+	until := time.Now().Add(viewFor)
+	url, err := s.signer.SignedGetURL(ctx, bucket, path, until)
+	if err != nil {
+		return nil, err
+	}
+	return &Photograph{ID: id, URL: url, ExpiresAt: until}, nil
 }

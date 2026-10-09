@@ -415,6 +415,22 @@ export async function fetchDayPhotos(residentId: string, date: string): Promise<
   return Array.isArray(body) ? body : [];
 }
 
+/**
+ * The resident's own photograph, or null when there is not one.
+ *
+ * Null for both answers the server gives: no photograph, and no resident this session may
+ * read. The screen falls back to initials either way, and a caller learning which of the
+ * two it was would be learning whether somebody they cannot see exists.
+ */
+export async function fetchResidentPhoto(residentId: string): Promise<DayPhoto | null> {
+  try {
+    return (await authed(`/v1/residents/${residentId}/photo`)) as DayPhoto;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
 export async function uploadPhoto(
   residentId: string,
   uri: string,

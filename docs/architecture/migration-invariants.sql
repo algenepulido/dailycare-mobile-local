@@ -86,6 +86,9 @@ SELECT expect('no file went in twice',
 --   assignments-stay-in-the-building.sql  adds a unique constraint and a foreign key to
 --                         two tables it owns, and replaces one function. All three are the
 --                         owner's to do, and none of them grants anything.
+--   a-face-on-the-record.sql  creates one function, grants EXECUTE on it, and adds an
+--                         index to a table it owns. No new policy and no new column: the
+--                         photograph is a media row that already says whose it is.
 --   idle-sessions-expire.sql  drops and recreates one function and grants EXECUTE on it.
 --                         The owner of the schema may do both; the grant is the same line
 --                         authentication.sql already carried, because the signature did
@@ -112,7 +115,7 @@ SELECT expect('no file went in twice',
 --
 -- This going red means a file was appended and nobody said why it may run there.
 SELECT expect('nothing ran after the revoke but the files declared to be safe there',
-  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql','access-restored.sql','one-open-assignment.sql','idle-sessions-expire.sql','assignments-stay-in-the-building.sql'])), true)
+  (SELECT coalesce(bool_and(filename = ANY (ARRAY['care-history.sql','audit-attribution.sql','family-access.sql','contact-acceptance.sql','care-attribution.sql','medication-attribution.sql','member-invitation.sql','invitation-issuing.sql','decisions-have-authors.sql','access-restored.sql','one-open-assignment.sql','idle-sessions-expire.sql','assignments-stay-in-the-building.sql','a-face-on-the-record.sql'])), true)
      FROM schema_migrations
     WHERE position > (SELECT max(position) FROM schema_migrations
                        WHERE filename = 'schema-privileges.sql')));

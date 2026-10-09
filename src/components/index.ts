@@ -18,3 +18,4 @@ export { SectionHeading } from './SectionHeading';
 export { SetupSheet } from './SetupSheet';
 export { Sheet } from './Sheet';
 export { SignInSheet } from './SignInSheet';
+export { Face } from './Face';

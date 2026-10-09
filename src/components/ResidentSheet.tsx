@@ -3,11 +3,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from './Button';
 import { Chip } from './Chip';
+import { Face } from './Face';
 import { Field } from './Field';
 import { Sheet } from './Sheet';
 import {
   ApiError,
   assign,
+  fetchResidentPhoto,
+  uploadPhoto,
   endAssignment,
   grantAccess,
   listContacts,
@@ -15,7 +18,8 @@ import {
   restoreAccess,
   withdrawAccess,
 } from '@/data/api';
-import type { RemoteAssignment, RemoteContact, RemoteMember, RemoteResident } from '@/data/api';
+import type { DayPhoto, RemoteAssignment, RemoteContact, RemoteMember, RemoteResident } from '@/data/api';
+import { PHOTO_READ_ERROR, pickPhoto } from '@/data/photos';
 import { addressFor } from '@/domain/people';
 import { color, radii, sizes, type } from '@/theme/tokens';
 
@@ -59,11 +63,16 @@ export function ResidentSheet({
   const [link, setLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<DayPhoto | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!resident) return;
     try {
       setContacts(await listContacts(resident.id));
+      // Not awaited into the same answer. A link that could not be signed is a missing
+      // face, not a sheet that failed to open.
+      void fetchResidentPhoto(resident.id).then(setPhoto).catch(() => setPhoto(null));
       setProblem(null);
     } catch (error) {
       setProblem(error instanceof ApiError ? error.message : 'That could not be read just now.');
@@ -82,6 +91,7 @@ export function ResidentSheet({
     setLink(null);
     setProblem(null);
     setConfirming(null);
+    setPhoto(null);
     onClose();
   };
 
@@ -100,6 +110,26 @@ export function ResidentSheet({
   };
 
   if (!resident) return null;
+
+  // Replacing one is adding another, because the application cannot delete a photograph -
+  // that is the retention handshake's and deliberately out of reach here. The newest that
+  // actually arrived is the one that shows, which the model decides rather than this.
+  async function addPhoto(source: 'camera' | 'library') {
+    if (!resident) return;
+    setPhotoBusy(true);
+    setProblem(null);
+    try {
+      const picked = await pickPhoto(source);
+      if (picked.failed) setProblem(PHOTO_READ_ERROR);
+      if (!picked.uri) return;
+      await uploadPhoto(resident.id, picked.uri);
+      setPhoto(await fetchResidentPhoto(resident.id));
+    } catch (error) {
+      setProblem(error instanceof ApiError ? error.message : 'That photograph could not be added.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   const theirs = assignments.filter((a) => a.residentId === resident.id && !a.endedAt);
   const unassigned = members.filter(
@@ -134,8 +164,32 @@ export function ResidentSheet({
         * meant for it closing the sheet instead. Seen on a device while recording; the
         * accessibility dump reported the button present and gave the position it would have
         * had, which is how it went unnoticed in every check that reads the tree. */}
-      <Text style={styles.title}>{resident.displayName}</Text>
-      <Text style={styles.blurb}>Who looks after them, and who may read how they are.</Text>
+      {/* The face first, because it is who the rest of this sheet is about. A resident
+        * without one shows the first letter of their name rather than a grey silhouette:
+        * most will not have a photograph for a while, and the app should not look like it
+        * is missing something for all of them. */}
+      <View style={styles.who}>
+        <Face name={resident.displayName} url={photo?.url} size={56} />
+        <View style={styles.whoText}>
+          <Text style={styles.title}>{resident.displayName}</Text>
+          <Text style={styles.blurb}>Who looks after them, and who may read how they are.</Text>
+        </View>
+      </View>
+
+      <View style={styles.chips}>
+        <Chip
+          label={photoBusy ? 'Adding…' : photo ? 'Take another' : 'Take a photograph'}
+          selected={false}
+          disabled={photoBusy || busy}
+          onPress={() => void addPhoto('camera')}
+        />
+        <Chip
+          label={photo ? 'Choose another' : 'Choose a photograph'}
+          selected={false}
+          disabled={photoBusy || busy}
+          onPress={() => void addPhoto('library')}
+        />
+      </View>
 
       {problem ? (
         <Text style={styles.problem} accessibilityLiveRegion="polite">
@@ -359,8 +413,10 @@ function spoken(name: string, address: string | null): string {
 }
 
 const styles = StyleSheet.create({
+  who: { flexDirection: 'row', alignItems: 'center', gap: sizes.cardGap },
+  whoText: { flex: 1 },
   title: { ...type.sheetTitle, color: color.ink },
-  blurb: { ...type.blurb, marginTop: 6, marginBottom: sizes.sectionGap },
+  blurb: { ...type.blurb, marginTop: 6 },
   heading: { ...type.fieldLabel, marginTop: sizes.sectionGap, marginBottom: sizes.cardGap },
   label: { ...type.fieldLabel, marginTop: sizes.cardGap, marginBottom: 6 },
   note: { ...type.hint, marginTop: 6, marginBottom: sizes.cardGap },

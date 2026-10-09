@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
+  Face,
   AlreadyFiled,
   Button,
   Card,
@@ -20,8 +21,8 @@ import {
   Screen,
   SectionHeading,
 } from '@/components';
-import { fetchDay, fileDay, listResidents, uploadPhoto } from '@/data/api';
-import type { RemoteResident } from '@/data/api';
+import { fetchDay, fetchResidentPhoto, fileDay, listResidents, uploadPhoto } from '@/data/api';
+import type { DayPhoto, RemoteResident } from '@/data/api';
 import { forgetUpload } from '@/data/uploads';
 import { PHOTO_READ_ERROR, deletePhoto, pickPhoto } from '@/data/photos';
 import type { PhotoSource } from '@/data/photos';
@@ -242,6 +243,26 @@ function CareReport({
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
+  // The resident's own face, where the building holds one. Keyed on remoteId, so a phone
+  // filing for somebody no building holds simply never asks.
+  const [face, setFace] = useState<DayPhoto | null>(null);
+  useEffect(() => {
+    if (!resident.remoteId) {
+      setFace(null);
+      return;
+    }
+    let live = true;
+    void fetchResidentPhoto(resident.remoteId)
+      .then((p) => {
+        if (live) setFace(p);
+      })
+      .catch(() => {
+        if (live) setFace(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [resident.remoteId]);
 
   const form = useCheckInForm({
     residentId: resident.id,
@@ -351,7 +372,10 @@ function CareReport({
           accessibilityLabel="Change who is logging"
           style={({ pressed }) => [styles.avatarLarge, pressed && styles.pressed]}
         >
-          <Text style={styles.avatarLargeText}>{initials(caregiver.displayName)}</Text>
+          {/* The caregiver, who has no photograph and is not getting one: what a family
+            * is shown is the resident and the name of whoever filed the day. This is the
+            * same component so the two faces on this screen cannot drift apart. */}
+          <Face name={caregiver.displayName} size={sizes.avatarLarge} />
         </Pressable>
         <View style={styles.badge}>
           <Text style={styles.badgeText}>Caregiver</Text>
@@ -385,9 +409,7 @@ function CareReport({
           accessibilityLabel={`Logging for ${resident.displayName}. Tap to change.`}
           style={({ pressed }) => [styles.clientButton, pressed && styles.pressed]}
         >
-          <View style={styles.avatarSmall}>
-            <Text style={styles.avatarSmallText}>{initials(resident.displayName)}</Text>
-          </View>
+          <Face name={resident.displayName} url={face?.url} size={sizes.avatarSmall} />
           <Text style={styles.clientName}>{resident.displayName}</Text>
         </Pressable>
         <Text style={styles.separator}>·</Text>
@@ -691,10 +713,6 @@ function asCheckIn(draft: CheckInDraft): CheckIn {
   };
 }
 
-function initials(name: string): string {
-  return name.trim().charAt(0).toUpperCase() || '?';
-}
-
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: color.paper },
   choice: { paddingHorizontal: 28, gap: 12, alignSelf: 'stretch' },
@@ -711,7 +729,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarLargeText: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 16, color: color.ink2 },
   account: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -736,15 +753,6 @@ const styles = StyleSheet.create({
 
   clientRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
   clientButton: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatarSmall: {
-    width: sizes.avatarSmall,
-    height: sizes.avatarSmall,
-    borderRadius: radii.chip,
-    backgroundColor: color.claySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarSmallText: { fontFamily: type.buttonPrimary.fontFamily, fontSize: 11, color: color.ink2 },
   clientName: { fontFamily: type.chip.fontFamily, fontSize: 15, color: color.ink },
   historyLink: { alignSelf: 'flex-start', paddingVertical: 8, marginTop: 2, marginBottom: 6 },
   historyLinkText: { ...type.chip, color: color.clay },

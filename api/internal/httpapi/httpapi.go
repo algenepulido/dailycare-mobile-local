@@ -86,6 +86,7 @@ func (a *API) Routes() http.Handler {
 	// that produced them whether or not anybody opened a photograph would be handing out
 	// links nobody asked for.
 	mux.Handle("GET /v1/residents/{id}/days/{date}/photos", a.identified(a.dayPhotos))
+	mux.Handle("GET /v1/residents/{id}/photo", a.identified(a.residentPhoto))
 
 	// Administering a building. Every one of these is refused by the database for a
 	// facility the caller does not manage, so what is here is the translation and not the
@@ -332,6 +333,33 @@ func (a *API) dayPhotos(w http.ResponseWriter, r *http.Request, c db.Caller) {
 		return
 	}
 	a.ok(w, r, http.StatusOK, photos)
+}
+
+// residentPhoto is the face on the record rather than a photograph of a day.
+//
+// 404 for a resident this session may not read and 404 for one with no photograph. The
+// same answer on purpose: a caller who cannot see the resident must not learn from the
+// difference whether there is a photograph of her.
+func (a *API) residentPhoto(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	if a.media == nil {
+		a.fail(w, r, http.StatusServiceUnavailable, "photographs are not set up on this server", nil)
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	photo, err := a.media.Portrait(r.Context(), c, id)
+	if err != nil {
+		if errors.Is(err, media.ErrNotVisible) || errors.Is(err, media.ErrNoPhotograph) {
+			a.fail(w, r, http.StatusNotFound, "no photograph", nil)
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read the photograph", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, photo)
 }
 
 func (a *API) photoArrived(w http.ResponseWriter, r *http.Request, c db.Caller) {

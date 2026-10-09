@@ -2,12 +2,13 @@ import { Image } from 'expo-image';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
-import { Button, Icon, Screen, SignInSheet } from '@/components';
+import { Button, Face, Icon, Screen, SignInSheet } from '@/components';
 import {
   SignedOut,
   acceptGrant,
   fetchDay,
   fetchDayPhotos,
+  fetchResidentPhoto,
   listResidents,
   waitingGrants,
 } from '@/data/api';
@@ -44,6 +45,7 @@ export default function FamilyScreen() {
 
   const [day, setDay] = useState<FiledSummary | null | undefined>();
   const [photos, setPhotos] = useState<DayPhoto[] | undefined>();
+  const [face, setFace] = useState<DayPhoto | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   // What this account has been offered and not taken up. Asked for alongside the residents
@@ -123,6 +125,8 @@ export default function FamilyScreen() {
     setDay(undefined);
     setPhotos(undefined);
     try {
+      // Her face, which does not change with the date and is not refetched with it.
+      void fetchResidentPhoto(chosen).then(setFace).catch(() => setFace(null));
       const filed = await fetchDay(chosen, date);
       setDay(filed);
       // Only if there is a day. Asking for the photographs of a day nobody filed mints
@@ -228,8 +232,17 @@ export default function FamilyScreen() {
           lines of the summary. It is meant to read as paragraphs rather than as a stack of
           separate things. */}
       <View>
-        <Text style={styles.title}>{person ? person.displayName : 'Today'}</Text>
-        <Text style={styles.blurb}>{longLabel(date)}</Text>
+        {/* Her face above her name. This is the screen a daughter opens in the evening,
+            and it should look like it is about her mother rather than about a record of
+            her mother. Without a photograph it is the first letter of her name, which is
+            what it has always been. */}
+        <View style={styles.whoRow}>
+          <Face name={person ? person.displayName : 'Today'} url={face?.url} size={52} />
+          <View style={styles.whoText}>
+            <Text style={styles.title}>{person ? person.displayName : 'Today'}</Text>
+            <Text style={styles.blurb}>{longLabel(date)}</Text>
+          </View>
+        </View>
 
         {/* Above the day rather than below it. Somebody reading about one parent and offered
             access to the other should see the offer, and a card under a scrolling summary is
@@ -432,6 +445,8 @@ function timeOfDay(iso: string): string {
 }
 
 const styles = StyleSheet.create({
+  whoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 2 },
+  whoText: { flex: 1 },
   title: { ...type.screenTitle, color: color.ink, marginTop: 8 },
   blurb: { ...type.blurb, marginBottom: 8 },
   offer: {
