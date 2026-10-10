@@ -289,6 +289,44 @@ describe('familyWeek', () => {
       expect(lines).not.toContain('not every meal was written down');
     });
 
+    /**
+     * The other half of the rule, and the half the first version got wrong.
+     *
+     * Holding today back whatever it said was too blunt. At the end of a shift with all
+     * three meals ticked there is nothing still to come, and "so far" understates a day
+     * that is fully in. What is kept out is an answer that has not happened yet.
+     */
+    it('counts today once its meals are all in', () => {
+      const days = [...steady.slice(0, 6), steady[6]];
+      expect(readToday(days).lines[0]).toBe('Alma ate every meal, every day this week.');
+    });
+
+    it('still holds today back while one of its meals is outstanding', () => {
+      const days = [...steady.slice(0, 6), { on: LAST, day: partDay }];
+      expect(readToday(days).lines[0]).toBe('Alma ate every meal, every day this week so far.');
+    });
+
+    it('marks a complete today as today all the same', () => {
+      const out = readToday(steady);
+      expect(out.days[0]).toMatchObject({ on: LAST, inProgress: true, meals: 3, of: 3 });
+    });
+
+    it('counts a complete today alongside a short day behind it', () => {
+      const days = [
+        ...steady.slice(0, 5),
+        { on: '2026-10-06', day: day({ meals: [
+          { slot: 'breakfast', happened: true, amount: 'most' },
+          { slot: 'lunch', happened: false, amount: null },
+          { slot: 'dinner', happened: true, amount: 'most' },
+        ] }) },
+        steady[6],
+      ];
+      expect(readToday(days).lines.slice(0, 2)).toEqual([
+        'Alma ate every day this week.',
+        'On one of them not every meal was written down.',
+      ]);
+    });
+
     /** A finished day that really is short still counts, with today left out of it. */
     it('still reports a day behind today that went unwritten', () => {
       const days = [...steady.slice(0, 5), { on: '2026-10-06', day: partDay }, { on: LAST, day: partDay }];

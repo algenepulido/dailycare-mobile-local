@@ -22,11 +22,13 @@ import type { Baseline } from './types';
  *   - it will not count a meal nobody ticked as a meal she did not eat. That is the same
  *     distinction familyDay holds for a single day - not recorded is not not done - and it
  *     is easier to lose across seven days than on one.
- *   - it will not judge today. Today is unfinished: at two in the afternoon lunch and dinner
- *     are not written down because they have not happened, and a sentence that reads that as
- *     a missed meal would alarm a family every single evening. Found by reading a part-filed
- *     day on a phone, where the week said she had left something and the day right above it
- *     said the meals were not recorded yet.
+ *   - it will not judge a meal today has not reached. At two in the afternoon lunch and
+ *     dinner are not written down because they have not happened, and a sentence reading
+ *     that as a missed meal would alarm a family every single evening. Once today's meals
+ *     are all in it counts like any other day - the thing held back is an answer that has
+ *     not happened yet, not the day it belongs to. Both halves came off a phone: the first
+ *     from a part-filed afternoon, the second from a shift that ended with the day complete
+ *     and the week still saying "so far".
  */
 
 /** Monday to Sunday is somebody's calendar. This is the seven days ending on the day being read. */
@@ -120,7 +122,11 @@ export function familyWeek({
   // can answer that a day cannot. Only over days that are finished: today is on the screen
   // above this and speaks for itself.
   const withMeals = written.filter((d) => d.of > 0);
-  const done = withMeals.filter((d) => !d.inProgress);
+  // Today counts once there is nothing left to come. Holding it back whatever it says was
+  // too blunt: at the end of a shift with all three meals ticked, the week still said "so
+  // far", which understates a day that is fully in. What has to be kept out is an answer
+  // that has not happened yet, not the day it belongs to.
+  const done = withMeals.filter((d) => !d.inProgress || d.meals === d.of);
 
   if (withMeals.length === 0) {
     lines.push('No meals have been written down this week.');
