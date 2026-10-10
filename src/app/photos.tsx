@@ -267,9 +267,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
+    // Clear of the screen's own footer, which sits under the scrim and still reads
+    // through it. Read this day landed half a finger above Back, so a family member
+    // reaching for the day left the gallery instead.
+    paddingBottom: 150,
     gap: 14,
   },
-  large: { width: '100%', height: '80%' },
+  large: { width: '100%', height: '70%' },
   largeWhen: { ...type.meta, color: color.paper2 },
   toDay: { paddingVertical: 10, paddingHorizontal: 18 },
   toDayText: { ...type.body, color: color.paper, textDecorationLine: 'underline' },
