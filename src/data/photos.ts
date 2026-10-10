@@ -84,11 +84,46 @@ function extensionFor(uri: string): string {
  * Copies a picked asset into permanent storage and returns its URI.
  * The name is a generated ID, so two photos taken in the same second cannot collide.
  */
-function persist(sourceUri: string): string {
+async function persist(sourceUri: string): Promise<string> {
   const source = new File(sourceUri);
   const destination = new File(photoDirectory(), `${newId()}.${extensionFor(sourceUri)}`);
-  source.copy(destination);
+  // Awaited. copy() returns a promise and this did not wait for it, so the path came back
+  // before the bytes did - and anything that read the file straight away read an empty
+  // one. The day's photograph never showed it because a caregiver picks one and sends the
+  // day a minute or two later, by which time the copy has landed. A caregiver who takes a
+  // photograph and sends immediately was filing an empty one, and before the guard in
+  // photoBytes that empty object was marked as arrived and shown to a family as a broken
+  // image.
+  await source.copy(destination);
   return destination.uri;
+}
+
+/** Nothing to send. Named so a caller can tell it from a refusal or a network failure. */
+export const PHOTO_EMPTY = 'that photograph has no image in it';
+
+/**
+ * How many bytes are actually on disk, refusing none.
+ *
+ * The uploader builds its body with fetch(), which is right - React Native blobs come
+ * from responses and cannot be made from a byte array. What fetch cannot do is tell the
+ * difference between a file with nothing in it and a file that is fine, because an empty
+ * response is a successful one.
+ *
+ * So the size is read from the file system first. An empty photograph uploaded anyway
+ * puts an object with no image in the bucket and a row saying it arrived, and a family is
+ * then shown a broken picture - which is worse than a row saying it never came, because
+ * that one is on a list to be tidied up.
+ *
+ * This existed because persist() did not wait for the copy it started, so a photograph
+ * read straight after being picked was empty. That is fixed. The guard stays: the next
+ * thing that writes a file late should be caught here rather than in front of a family.
+ */
+export function photoSize(uri: string): number {
+  const onDisk = new File(uri);
+  if (!onDisk.exists) throw new Error(PHOTO_EMPTY);
+  const size = onDisk.size ?? 0;
+  if (size === 0) throw new Error(PHOTO_EMPTY);
+  return size;
 }
 
 /**
@@ -139,7 +174,7 @@ export async function pickPhoto(source: PhotoSource): Promise<PickResult> {
 
     if (result.canceled || result.assets.length === 0) return { uri: null, failed: false };
 
-    return { uri: persist(result.assets[0].uri), failed: false };
+    return { uri: await persist(result.assets[0].uri), failed: false };
   } catch {
     // A device with no camera, or a picker the system refused to open. Saying so beats
     // a button that looks broken.

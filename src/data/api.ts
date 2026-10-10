@@ -7,7 +7,7 @@
  * should stop somebody working.
  */
 
-import { contentTypeFor } from '@/data/photos';
+import { contentTypeFor, photoSize } from '@/data/photos';
 import { rememberUpload, uploadedAs } from '@/data/uploads';
 import { fromWire } from '@/data/wire';
 import type { FiledDay, FiledSummary, WireDay } from '@/data/wire';
@@ -442,6 +442,16 @@ export async function uploadPhoto(
   const already = await uploadedAs(uri);
   if (already) return already;
 
+  // What is on disk, asked of the file system before anything is sent. An empty file
+  // uploads cleanly and is then marked as arrived, which is how a family ends up looking
+  // at a broken picture - see photoSize.
+  let size: number;
+  try {
+    size = photoSize(uri);
+  } catch {
+    throw new ApiError(0, 'that photograph could not be read from this phone');
+  }
+
   const file = await fetch(uri);
   if (!file.ok) throw new ApiError(0, 'that photograph could not be read from this phone');
   const bytes = await file.blob();
@@ -456,7 +466,7 @@ export async function uploadPhoto(
     method: 'POST',
     body: JSON.stringify({
       contentType,
-      byteSize: bytes.size,
+      byteSize: size,
       ...(careDayId ? { careDayId } : {}),
     }),
   })) as PhotoPlace;

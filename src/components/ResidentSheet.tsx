@@ -125,7 +125,11 @@ export function ResidentSheet({
       await uploadPhoto(resident.id, picked.uri);
       setPhoto(await fetchResidentPhoto(resident.id));
     } catch (error) {
-      setProblem(error instanceof ApiError ? error.message : 'That photograph could not be added.');
+      // The message, not a sentence about one. A photograph failing to attach has three
+      // or four different causes and a single "could not be added" makes them one thing
+      // nobody can act on - including me, looking at it on a device.
+      const said = error instanceof Error ? error.message : String(error);
+      setProblem(said || 'That photograph could not be added.');
     } finally {
       setPhotoBusy(false);
     }

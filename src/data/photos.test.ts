@@ -7,7 +7,42 @@
  * URI on Android and the fallback looked like it was working.
  */
 
-import { contentTypeFor } from '@/data/photos';
+// A file system that holds whatever a test puts on it, so the guard below can be shown
+// the two cases that matter: a file that is not there, and one with nothing in it.
+jest.mock('expo-file-system', () => {
+  const shelf: Record<string, { exists: boolean; size: number | null }> = {};
+  class MockFile {
+    at: string;
+    constructor(at: string) {
+      this.at = at;
+    }
+    get exists() {
+      return shelf[this.at] ? shelf[this.at].exists : false;
+    }
+    get size() {
+      return shelf[this.at] ? shelf[this.at].size : null;
+    }
+  }
+  class MockDirectory {
+    exists = true;
+    create() {}
+  }
+  return {
+    File: MockFile,
+    Directory: MockDirectory,
+    Paths: { document: 'file:///documents' },
+    __shelf: shelf,
+  };
+});
+
+import { PHOTO_EMPTY, contentTypeFor, photoSize } from '@/data/photos';
+
+// Puts a file on the shelf the mock above reads from.
+function onDisk(uri: string, exists: boolean, size: number | null) {
+  const shelf = (jest.requireMock('expo-file-system') as { __shelf: Record<string, unknown> })
+    .__shelf;
+  shelf[uri] = { exists, size };
+}
 
 test.each([
   ['file:///data/user/0/app/files/photos/abc.jpg', 'image/jpeg'],
@@ -45,4 +80,34 @@ test('every type this can return is one the server accepts', () => {
   for (const type of produced) {
     expect(accepted).toContain(type);
   }
+});
+
+/**
+ * Reading a photograph back off the phone.
+ *
+ * The guard matters more than the reader. An empty file uploaded anyway puts a row in the
+ * table saying a photograph arrived with nothing behind it, and a family is then shown a
+ * broken image. That is worse than a row saying it never came, because that one is on a
+ * list to be tidied up.
+ */
+describe('reading a photograph off the phone', () => {
+  const uri = 'file:///data/user/0/app/files/photos/a.jpg';
+
+  it('hands back what is on disk', () => {
+    onDisk(uri, true, 4096);
+    expect(photoSize(uri)).toBe(4096);
+  });
+
+  it('refuses a file that is not there', () => {
+    onDisk(uri, false, null);
+    expect(() => photoSize(uri)).toThrow(PHOTO_EMPTY);
+  });
+
+  it('refuses one with no image in it', () => {
+    // The case that actually happened: persist() did not wait for the copy it started,
+    // so a photograph picked and uploaded in the same breath was empty, and the upload
+    // went ahead with it - an object with nothing in it, marked as arrived.
+    onDisk(uri, true, 0);
+    expect(() => photoSize(uri)).toThrow(PHOTO_EMPTY);
+  });
 });
