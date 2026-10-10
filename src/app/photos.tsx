@@ -4,20 +4,20 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   Modal,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 
 import { Button, Screen } from '@/components';
 import { SignedOut, fetchPhotoRange } from '@/data/api';
 import type { DatedPhoto } from '@/data/api';
 import { daysEnding, longLabel, today } from '@/domain/dates';
-import { color, radii, type } from '@/theme/tokens';
+import { color, radii, sizes, type } from '@/theme/tokens';
 
 /**
  * Three weeks of photographs, as a family looks back through them.
@@ -60,6 +60,12 @@ export default function PhotosScreen() {
   const [problem, setProblem] = useState<'refused' | 'signedOut' | null>(null);
   const [open, setOpen] = useState<DatedPhoto | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Measured rather than computed once at module load: a width read before the first
+  // render is a width that never changes again, and three across becomes two the moment
+  // the phone is turned. The first version was off by the screen's own padding, which it
+  // had guessed at rather than taken from the token the screen uses - 404 points of room
+  // and 408 points of photographs, so the third one wrapped onto its own line.
+  const cell = cellWidth(useWindowDimensions().width);
   // Bumped to ask again. The links expire, so coming back is the answer rather than caching.
   const [again, setAgain] = useState(0);
 
@@ -91,21 +97,16 @@ export default function PhotosScreen() {
   }, [residentId, span.from, span.to, again]);
 
   /**
-   * The photographs gathered under the day they belong to, newest day first.
+   * Newest first.
    *
-   * The server returns them oldest first so a gallery that wanted that order would not have
-   * to think; this screen wants the other one, because the thing a family opens the gallery
-   * for is the most recent picture of their mother.
+   * The server returns them oldest first, which is the order a range should come back in;
+   * this screen wants the other one, because the thing a family opens a gallery for is the
+   * most recent picture of their mother.
    */
-  const byDay = useMemo(() => {
-    const groups = new Map<string, DatedPhoto[]>();
-    for (const photo of photos ?? []) {
-      const existing = groups.get(photo.on);
-      if (existing) existing.push(photo);
-      else groups.set(photo.on, [photo]);
-    }
-    return [...groups.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [photos]);
+  const inOrder = useMemo(
+    () => [...(photos ?? [])].sort((a, b) => (a.on < b.on ? 1 : -1)),
+    [photos],
+  );
 
   const count = photos?.length ?? 0;
 
@@ -155,35 +156,35 @@ export default function PhotosScreen() {
               ? 'One photo from the last three weeks.'
               : `${count} photos from the last three weeks, newest first.`}
           </Text>
-          {byDay.map(([on, ofThatDay]) => (
-            <View key={on}>
+          {/* One grid rather than a block per day.
+            *
+            * Grouped under day headings first, which looked right with several photographs
+            * on a day and wrong with one: a heading, one small square, and an empty row
+            * beside it, five times down the screen. A home sends a photograph now and then
+            * rather than daily, so one a day is the ordinary case and the layout has to suit
+            * it. Each keeps its date underneath, so nothing is lost by dropping the headings
+            * - a photograph without its day is a picture, and with it, part of the record. */}
+          <View style={styles.grid}>
+            {inOrder.map((photo) => (
               <Pressable
-                onPress={() => openTheDay(on)}
-                accessibilityRole="button"
-                accessibilityLabel={`${longLabel(on)}, read this day`}
+                key={photo.id}
+                onPress={() => setOpen(photo)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel={`A photo from ${longLabel(photo.on)}, open it larger`}
+                style={({ pressed }) => [{ width: cell }, pressed && styles.pressed]}
               >
-                <Text style={styles.day}>{longLabel(on)}</Text>
+                <Image
+                  source={{ uri: photo.url }}
+                  style={[styles.thumb, { width: cell, height: cell }]}
+                  contentFit="cover"
+                  transition={120}
+                />
+                <Text style={styles.cellWhen} numberOfLines={2}>
+                  {longLabel(photo.on)}
+                </Text>
               </Pressable>
-              <View style={styles.grid}>
-                {ofThatDay.map((photo) => (
-                  <Pressable
-                    key={photo.id}
-                    onPress={() => setOpen(photo)}
-                    accessibilityRole="imagebutton"
-                    accessibilityLabel={`A photo from ${longLabel(photo.on)}, open it larger`}
-                    style={({ pressed }) => [styles.cell, pressed && styles.pressed]}
-                  >
-                    <Image
-                      source={{ uri: photo.url }}
-                      style={styles.thumb}
-                      contentFit="cover"
-                      transition={120}
-                    />
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          ))}
+            ))}
+          </View>
         </>
       )}
 
@@ -213,6 +214,24 @@ export default function PhotosScreen() {
                 accessibilityLabel={`A photo from ${longLabel(open.on)}`}
               />
               <Text style={styles.largeWhen}>{longLabel(open.on)}</Text>
+              {/* The way to the day, here rather than under the thumbnail.
+                *
+                * Looking at a photograph is when somebody wonders what the day was like,
+                * and a tap target the size of a date caption in a grid is one a family
+                * member misses. A press here reaches the child rather than the scrim, so
+                * it opens the day instead of closing the photograph. */}
+              <Pressable
+                onPress={() => {
+                  const on = open.on;
+                  setOpen(null);
+                  openTheDay(on);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Read ${longLabel(open.on)}`}
+                style={({ pressed }) => [styles.toDay, pressed && styles.pressed]}
+              >
+                <Text style={styles.toDayText}>Read this day</Text>
+              </Pressable>
             </>
           ) : null}
         </Pressable>
@@ -221,21 +240,26 @@ export default function PhotosScreen() {
   );
 }
 
-// Three across on a phone, computed rather than guessed: a fixed cell width leaves a ragged
-// margin on a narrow screen and clips on a wide one.
+// Three across on a phone, from the room the screen actually has: a fixed cell width
+// leaves a ragged margin on a narrow screen and clips on a wide one.
 const GUTTER = 6;
-const CELL = Math.floor((Dimensions.get('window').width - 40 - GUTTER * 2) / 3);
+const ACROSS = 3;
+function cellWidth(windowWidth: number): number {
+  const room = windowWidth - sizes.screenPaddingH * 2 - GUTTER * (ACROSS - 1);
+  return Math.floor(room / ACROSS);
+}
 
 const styles = StyleSheet.create({
   title: { ...type.screenTitle, marginBottom: 6 },
   blurb: { ...type.blurb, marginBottom: 10 },
   spinner: { alignSelf: 'flex-start', marginTop: 20 },
 
-  day: { ...type.sectionLabel, color: color.ink3, marginTop: 20, marginBottom: 6 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GUTTER },
-  cell: { borderRadius: radii.photoThumb, overflow: 'hidden' },
+  // Aligned to the top so a date that wraps onto a second line at large text lengthens
+  // its own cell rather than pushing the row's other photographs down with it.
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GUTTER, alignItems: 'flex-start', marginTop: 8 },
   pressed: { opacity: 0.7 },
-  thumb: { width: CELL, height: CELL, backgroundColor: color.paper2 },
+  thumb: { borderRadius: radii.photoThumb, backgroundColor: color.paper2 },
+  cellWhen: { ...type.meta, color: color.ink3, marginTop: 5 },
 
   scrim: {
     flex: 1,
@@ -247,4 +271,6 @@ const styles = StyleSheet.create({
   },
   large: { width: '100%', height: '80%' },
   largeWhen: { ...type.meta, color: color.paper2 },
+  toDay: { paddingVertical: 10, paddingHorizontal: 18 },
+  toDayText: { ...type.body, color: color.paper, textDecorationLine: 'underline' },
 });
