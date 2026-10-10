@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import type { ScrollViewProps } from 'react-native';
@@ -20,17 +21,39 @@ interface ScreenProps {
    * the family screen rendered perfectly and had no way to sign out.
    */
   refreshControl?: ScrollViewProps['refreshControl'];
+  /**
+   * Back to the top whenever this changes.
+   *
+   * For a screen where choosing something further down replaces what is above it. The
+   * family's earlier days do exactly that: tap a day three weeks back and the day at the
+   * top becomes that one, while the reader is still looking at the list they tapped in.
+   * The thing they asked for is then off the top of the screen, and nothing says it
+   * arrived. Seen on a device, tapping a day and watching nothing appear to happen.
+   */
+  topWhen?: string;
 }
 
 /** Paper surface, 22pt gutters, and enough bottom padding to clear the fixed action. */
-export function Screen({ children, scroll = true, footer, refreshControl }: ScreenProps) {
+export function Screen({
+  children,
+  scroll = true,
+  footer,
+  refreshControl,
+  topWhen,
+}: ScreenProps) {
   const insets = useSafeAreaInsets();
+  const scroller = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (topWhen === undefined) return;
+    scroller.current?.scrollTo({ y: 0, animated: true });
+  }, [topWhen]);
   const keyboardInset = useKeyboardHeight();
   // Same edge-to-edge correction the sheet makes: the IME height excludes the nav inset.
   const keyboard = keyboardInset > 0 ? keyboardInset + insets.bottom : 0;
 
   const body = scroll ? (
     <ScrollView
+      ref={scroller}
       contentContainerStyle={[styles.content, keyboard > 0 && { paddingBottom: keyboard }]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}

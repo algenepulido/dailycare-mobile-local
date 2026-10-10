@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
@@ -8,16 +9,19 @@ import {
   acceptGrant,
   fetchDay,
   fetchDayPhotos,
+  fetchHistory,
   fetchResidentPhoto,
   listResidents,
   waitingGrants,
 } from '@/data/api';
-import type { DayPhoto, RemoteResident, WaitingGrant } from '@/data/api';
+import type { DayPhoto, HistoryDay, RemoteResident, WaitingGrant } from '@/data/api';
 import { baselineFromWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
-import { longLabel, today } from '@/domain/dates';
+import { dayNumberLabel, longLabel, today, weekdayLabel } from '@/domain/dates';
 import { STEADY_DAY, familyDay } from '@/domain/familyDay';
-import type { CareGroup, FamilyDay } from '@/domain/familyDay';
+import type { CareGroup, FamilyDay, FiledDayFacts } from '@/domain/familyDay';
+import { familyWeek } from '@/domain/familyWeek';
+import type { WeekDay } from '@/domain/familyWeek';
 import { DEFAULT_BASELINE } from '@/domain/types';
 import { useSession } from '@/state/session';
 import { color, radii, type } from '@/theme/tokens';
@@ -55,8 +59,25 @@ export default function FamilyScreen() {
   const [waiting, setWaiting] = useState<WaitingGrant[]>([]);
   const [accepting, setAccepting] = useState<string | null>(null);
 
-  const date = today();
+  // The day being read, which starts at today and is the only thing scrolling back
+  // changes. Everything below already keys off it, so moving between days is one piece of
+  // state rather than a second screen.
+  const [date, setDate] = useState(today());
+  const [earlier, setEarlier] = useState<HistoryDay[] | null>(null);
   const signedIn = Boolean(account);
+
+  /**
+   * A day asked for from somewhere else - the gallery, when somebody taps the date over a
+   * photograph and wants to read what happened that day.
+   *
+   * Followed rather than used as an initial value: the gallery comes back to this screen
+   * rather than opening a second copy of it, so the parameter arrives when the screen is
+   * already mounted and useState would never see it.
+   */
+  const asked = useLocalSearchParams<{ date?: string }>().date;
+  useEffect(() => {
+    if (asked) setDate(asked);
+  }, [asked]);
 
   /** Who this account may read. The server decides; this shows what came back. */
   const loadPeople = useCallback(async () => {
@@ -145,8 +166,40 @@ export default function FamilyScreen() {
     void loadDay();
   }, [loadDay]);
 
+  /**
+   * The days behind this one.
+   *
+   * Keyed on the resident rather than the date: scrolling back through them must not
+   * refetch the list it is being scrolled through. The server's window is three weeks and
+   * it returns only the days somebody filed, so a gap in the list is a day nobody wrote
+   * rather than a day this screen failed to ask for.
+   */
+  useEffect(() => {
+    if (!chosen) return;
+    let live = true;
+    void fetchHistory(chosen)
+      .then((rows) => {
+        if (live) setEarlier(rows);
+      })
+      .catch(() => {
+        if (live) setEarlier(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [chosen]);
+
+  // Every day the server returned except the one being read, so the list never offers a
+  // way to the day already on screen.
+  const behind = (earlier ?? []).filter((entry) => entry.on !== date);
+
+
   async function pullToRefresh() {
     setRefreshing(true);
+    // Not back to today. Somebody three weeks down the list who pulls to refresh is
+    // asking for that day again, not to be returned to this one - and losing their place
+    // to a gesture they made by accident is worse than not refreshing at all. The way
+    // back is the link at the top, which is on the screen where they can see it.
     await loadPeople();
     await loadDay();
     setRefreshing(false);
@@ -221,12 +274,28 @@ export default function FamilyScreen() {
 
   const person = people?.find((p) => p.id === chosen) ?? null;
 
+  /**
+   * The week the day on screen sits in.
+   *
+   * No second request: it is the three weeks already fetched, narrowed. And it follows the
+   * day being read rather than always meaning the last seven days, so somebody three weeks
+   * back is not shown a week that disagrees with the day in front of them.
+   */
+  const week = familyWeek({
+    filed: (earlier ?? []).map((entry) => ({ on: entry.on, day: factsOf(entry.summary) })),
+    baseline: person ? baselineFromWire(person.baseline) : DEFAULT_BASELINE,
+    residentName: person?.displayName ?? 'They',
+    upTo: date,
+    todayIs: today(),
+  });
+
   return (
     <Screen
       footer={<Button label="Sign out" variant="secondary" onPress={() => void signOut()} />}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={pullToRefresh} tintColor={color.clay} />
       }
+      topWhen={date}
     >
       {/* One view, so the screen's own gap between children does not open up between the
           lines of the summary. It is meant to read as paragraphs rather than as a stack of
@@ -243,6 +312,20 @@ export default function FamilyScreen() {
             <Text style={styles.blurb}>{longLabel(date)}</Text>
           </View>
         </View>
+
+        {/* Only when there is somewhere to come back from. Pull-to-refresh does the same
+          * thing and nobody would find it: a reader three weeks down a list needs the way
+          * out on the screen, not in a gesture. */}
+        {date !== today() ? (
+          <Pressable
+            onPress={() => setDate(today())}
+            accessibilityRole="button"
+            accessibilityLabel="Back to today"
+            style={({ pressed }) => [styles.backToday, pressed && styles.earlierPressed]}
+          >
+            <Text style={styles.backTodayText}>Back to today</Text>
+          </Pressable>
+        ) : null}
 
         {/* Above the day rather than below it. Somebody reading about one parent and offered
             access to the other should see the offer, and a card under a scrolling summary is
@@ -282,6 +365,91 @@ export default function FamilyScreen() {
         ) : (
           <Filed day={day} photos={photos} summary={summaryOf(day, person)} />
         )}
+
+        {/* How the week went, above the days that make it up.
+          *
+          * The card's own test is a family member seeing that their mother ate every day, and
+          * that is a sentence about a run of days rather than about any one of them. The strip
+          * is the week at a glance and the lines under it are the answer in words; both are
+          * built from what was recorded and neither invents a day nobody filed.
+          *
+          * Hidden entirely when nothing in the week was filed, rather than drawn empty. A
+          * blank week reads as a home that recorded nothing, and the screen does not know
+          * that - the resident may have been admitted on Friday. */}
+        {week.lines.length > 0 ? (
+          <>
+            <Text style={styles.heading}>
+              {date === today() ? 'This week' : `The week to ${longLabel(date)}`}
+            </Text>
+            <View style={styles.strip}>
+              {/* Oldest first, left to right. The list below runs the other way, because a
+                * list is read from the top and a week is read across. */}
+              {[...week.days].reverse().map((entry) => (
+                <WeekColumn key={entry.on} day={entry} onPress={() => setDate(entry.on)} />
+              ))}
+            </View>
+            {week.lines.map((line) => (
+              <Text key={line} style={styles.weekLine}>
+                {line}
+              </Text>
+            ))}
+          </>
+        ) : null}
+
+        {/* All of the photographs, in one place.
+          *
+          * A link rather than a section, because a gallery of three weeks on the end of this
+          * screen is a screen of its own - and because it costs the server a signed link per
+          * photograph, which is not a bill to run for somebody who came to read today.
+          *
+          * Only for a resident this account actually holds, since the gallery is asked for by
+          * id and there is nothing to show without one. */}
+        {person ? (
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/photos',
+                params: { id: person.id, name: person.displayName },
+              })
+            }
+            accessibilityRole="button"
+            accessibilityLabel={`See all photos of ${person.displayName}`}
+            style={({ pressed }) => [styles.toPhotos, pressed && styles.earlierPressed]}
+          >
+            <Icon name="camera" size={18} color={color.clay} />
+            <Text style={styles.toPhotosText}>See all photos</Text>
+          </Pressable>
+        ) : null}
+
+        {/* The days behind this one.
+          *
+          * The point of an app over an email: an evening's update is one day, and this is
+          * the week it sits in. A row says how the day went in the same words the day
+          * itself would, with the meals under it, because "she ate every day" is a thing
+          * somebody sees by scrolling rather than by reading.
+          *
+          * Only the days somebody filed. Blank rows for the rest would turn a quiet
+          * weekend into a wall of nothing recorded. */}
+        {behind.length > 0 ? (
+          <>
+            <Text style={styles.heading}>Earlier days</Text>
+            {behind.map((entry) => (
+              <Pressable
+                key={entry.on}
+                onPress={() => setDate(entry.on)}
+                accessibilityRole="button"
+                accessibilityLabel={`${longLabel(entry.on)}, read this day`}
+                style={({ pressed }) => [styles.earlier, pressed && styles.earlierPressed]}
+              >
+                <Text style={styles.earlierWhen}>{longLabel(entry.on)}</Text>
+                <Text style={styles.earlierHow} numberOfLines={2}>
+                  {howItWent(entry.summary, person)}
+                </Text>
+                <Text style={styles.earlierMeals}>{mealsOn(entry.summary)}</Text>
+              </Pressable>
+            ))}
+          </>
+        ) : null}
       </View>
     </Screen>
   );
@@ -298,23 +466,110 @@ export default function FamilyScreen() {
  * what a family is told rather than about how it looks, so it is testable without a screen
  * and survives the design pass untouched.
  */
+/** How a day went, in one line, in the same voice the day itself uses. */
+function howItWent(day: FiledSummary, person: RemoteResident | null): string {
+  const read = summaryOf(day, person);
+  return read.changed.length === 0 ? STEADY_DAY : read.changed[0];
+}
+
+/**
+ * The meals, counted.
+ *
+ * On every row rather than only when something is wrong, because the question a daughter
+ * is actually asking is whether her mother is eating, and the answer to that is a run of
+ * ordinary days rather than one alarming one.
+ */
+function mealsOn(day: FiledSummary): string {
+  const had = day.meals.filter((m) => m.happened).length;
+  return `${had} of ${day.meals.length} meals`;
+}
+
+/**
+ * The filed row narrowed to what a family is told.
+ *
+ * One place rather than two: the day and the week read the same facts, and a field added to
+ * one and forgotten in the other would have them describing different days.
+ */
+function factsOf(day: FiledSummary): FiledDayFacts {
+  return {
+    mood: day.mood,
+    appetite: day.appetite,
+    sleep: day.sleep,
+    note: day.note,
+    shower: day.shower,
+    grooming: day.grooming,
+    meals: day.meals,
+    concerns: day.concerns,
+    medication: day.medication,
+  };
+}
+
 function summaryOf(day: FiledSummary, person: RemoteResident | null): FamilyDay {
   return familyDay(
-    {
-      mood: day.mood,
-      appetite: day.appetite,
-      sleep: day.sleep,
-      note: day.note,
-      shower: day.shower,
-      grooming: day.grooming,
-      meals: day.meals,
-      concerns: day.concerns,
-      medication: day.medication,
-    },
+    factsOf(day),
     person ? baselineFromWire(person.baseline) : DEFAULT_BASELINE,
     person?.displayName ?? 'They',
     day.filedByName,
   );
+}
+
+/**
+ * One day in the week strip.
+ *
+ * Text rather than a dot, deliberately. A family member is the reader most likely to have
+ * large text turned on, and a dot is a fixed size with nothing inside it to grow - so the
+ * day is a weekday, a date and the meals counted, all of which scale with the setting, and
+ * the row they sit in wraps rather than squeezing them.
+ *
+ * A day nobody filed is drawn flat and does nothing when pressed. It is not a bad day and
+ * must not look like one, and there is nothing behind it to open.
+ */
+function WeekColumn({ day, onPress }: { day: WeekDay; onPress: () => void }) {
+  // Today is not short of anything, it is unfinished. Colouring it would put a mark on
+  // every evening of the week in turn.
+  const short = day.recorded && !day.inProgress && day.of > 0 && day.meals < day.of;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!day.recorded}
+      accessibilityRole={day.recorded ? 'button' : undefined}
+      accessibilityLabel={weekColumnLabel(day)}
+      style={({ pressed }) => [
+        styles.column,
+        !day.recorded && styles.columnBlank,
+        !day.steady && styles.columnNoted,
+        day.inProgress && styles.columnToday,
+        pressed && styles.earlierPressed,
+      ]}
+    >
+      <Text style={styles.columnDay} numberOfLines={1}>
+        {weekdayLabel(day.on)}
+      </Text>
+      <Text style={styles.columnDate} numberOfLines={1}>
+        {dayNumberLabel(day.on)}
+      </Text>
+      <Text
+        style={[styles.columnMeals, short && styles.columnMealsShort]}
+        numberOfLines={1}
+      >
+        {day.recorded && day.of > 0 ? `${day.meals}/${day.of}` : '\u2013'}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** What the strip says out loud. Said in full, because a column read aloud is three numbers. */
+function weekColumnLabel(day: WeekDay): string {
+  const when = day.inProgress ? 'Today' : longLabel(day.on);
+  if (!day.recorded) return `${when}, nothing written down`;
+  // "so far" on today for the same reason the week's own sentences say it: the meals that
+  // are not ticked are the ones the day has not reached.
+  const meals =
+    day.of > 0
+      ? `${day.meals} of ${day.of} meals${day.inProgress ? ' so far' : ''}`
+      : 'no meals written down';
+  const noted = day.steady ? '' : ', something was different';
+  return `${when}, ${meals}${noted}, read this day`;
 }
 
 function Nothing({ name }: { name: string }) {
@@ -446,6 +701,61 @@ function timeOfDay(iso: string): string {
 
 const styles = StyleSheet.create({
   whoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 2 },
+  earlier: {
+    backgroundColor: color.white,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: color.frame,
+    padding: 16,
+    marginBottom: 10,
+    gap: 3,
+  },
+  earlierPressed: { opacity: 0.7 },
+
+  // Wraps rather than squeezes: at the largest text setting seven columns do not fit across
+  // a phone, and two rows of four read fine where seven clipped columns do not.
+  strip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  column: {
+    flexGrow: 1,
+    flexBasis: 40,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: radii.innerCard,
+    borderWidth: 1,
+    borderColor: color.frame,
+    backgroundColor: color.white,
+    gap: 1,
+  },
+  columnBlank: { backgroundColor: color.paper, borderColor: color.line },
+  columnNoted: { backgroundColor: color.honeySoft, borderColor: color.warnSoft },
+  // Today reads as the day you are on rather than as a day with something in it.
+  columnToday: { borderColor: color.clay, borderWidth: 2 },
+  columnDay: { ...type.meta, color: color.ink3 },
+  columnDate: { ...type.fieldLabel, color: color.ink },
+  columnMeals: { ...type.meta, color: color.ink3 },
+  columnMealsShort: { color: color.clay },
+  weekLine: { ...type.body, color: color.ink2, marginTop: 6 },
+  backToday: { paddingVertical: 8, alignSelf: 'flex-start' },
+  toPhotos: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    marginTop: 18,
+    alignSelf: 'flex-start',
+  },
+  toPhotosText: { ...type.body, color: color.clay, textDecorationLine: 'underline' },
+  backTodayText: { ...type.body, color: color.clay, textDecorationLine: 'underline' },
+  earlierWhen: { ...type.cardTitle, color: color.ink },
+  earlierHow: { ...type.body, color: color.ink2 },
+  earlierMeals: { ...type.meta, color: color.ink3, marginTop: 2 },
   whoText: { flex: 1 },
   title: { ...type.screenTitle, color: color.ink, marginTop: 8 },
   blurb: { ...type.blurb, marginBottom: 8 },

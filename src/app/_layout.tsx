@@ -11,7 +11,9 @@ import { color, fontAssets } from '@/theme/tokens';
  * The names sheet and the review sheet are sheets over the day, not routes,
  * so the report stays visible underneath and closing puts something down rather than
  * navigating away. History is a route because it is somewhere you go and come back from,
- * and because a sheet that scrolls three weeks is a screen wearing a sheet's clothes.
+ * and because a sheet that scrolls three weeks is a screen wearing a sheet's clothes. The
+ * photo gallery is a route for the same two reasons; the one photograph it opens large is a
+ * modal, because that is a closer look at something already on the screen.
  */
 export default function RootLayout() {
   const [fontsReady] = useFonts(fontAssets);
@@ -35,6 +37,7 @@ export default function RootLayout() {
           <Stack.Screen name="history" />
           <Stack.Screen name="residents" />
           <Stack.Screen name="family" />
+          <Stack.Screen name="photos" />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>

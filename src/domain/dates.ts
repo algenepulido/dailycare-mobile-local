@@ -72,3 +72,19 @@ export function relativeLabel(careDate: string): string {
   if (careDate === window[1]) return 'Yesterday';
   return longLabel(careDate);
 }
+
+/**
+ * The calendar days ending on this one, most recent first.
+ *
+ * The calendar rather than the records, deliberately: a week is seven days whether or not
+ * anybody wrote in them, and a view built from the filed days alone would quietly stretch
+ * a week over ten days whenever a weekend went unrecorded.
+ */
+export function daysEnding(careDate: string, count: number): string[] {
+  const end = fromCareDate(careDate);
+  const dates: string[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    dates.push(toCareDate(new Date(end.getFullYear(), end.getMonth(), end.getDate() - offset)));
+  }
+  return dates;
+}
