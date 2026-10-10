@@ -528,3 +528,185 @@ func TestAnotherBuildingsCaregiverCannotSeeHerFace(t *testing.T) {
 		t.Fatalf("got %v, want ErrNotVisible", err)
 	}
 }
+
+// A gallery's worth of photographs in one read.
+//
+// Oldest first, each carrying the day it was filed against rather than the time it arrived,
+// and only the days inside the span.
+func TestAGalleryComesBackInOneReadOldestFirst(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+
+	days := []time.Time{
+		time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC),
+	}
+	// Offered newest first on purpose, so an ordering that followed the upload time rather
+	// than the care date would come back the wrong way round.
+	for i := len(days) - 1; i >= 0; i-- {
+		day := aDay(t, s, caller, facility, resident, days[i])
+		up, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024)
+		if err != nil {
+			t.Fatalf("offering %s: %v", days[i].Format("2006-01-02"), err)
+		}
+		if err := s.Arrived(ctx, caller, up.ObjectID); err != nil {
+			t.Fatalf("confirming %s: %v", days[i].Format("2006-01-02"), err)
+		}
+	}
+
+	got, err := s.OverRange(ctx, caller, resident, days[0], days[2])
+	if err != nil {
+		t.Fatalf("reading the range: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("wanted three photographs across the range, got %d", len(got))
+	}
+	want := []string{"2026-09-20", "2026-09-23", "2026-09-25"}
+	for i, w := range want {
+		if got[i].On != w {
+			t.Errorf("photograph %d is on %s, want %s", i, got[i].On, w)
+		}
+		if got[i].URL == "" || got[i].ExpiresAt.IsZero() {
+			t.Errorf("photograph %d came back without a link: %+v", i, got[i])
+		}
+	}
+}
+
+// The range is the range. A day either side of it is not in the gallery.
+func TestAGalleryStopsAtItsEdges(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+
+	for _, on := range []time.Time{
+		time.Date(2026, 9, 19, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC),
+	} {
+		day := aDay(t, s, caller, facility, resident, on)
+		up, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024)
+		if err != nil {
+			t.Fatalf("offering %s: %v", on.Format("2006-01-02"), err)
+		}
+		if err := s.Arrived(ctx, caller, up.ObjectID); err != nil {
+			t.Fatalf("confirming: %v", err)
+		}
+	}
+
+	got, err := s.OverRange(ctx, caller, resident,
+		time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("reading the range: %v", err)
+	}
+	// Inclusive at both ends: the 20th and the 25th are in, the 19th and the 26th are not.
+	var on []string
+	for _, p := range got {
+		on = append(on, p.On)
+	}
+	if len(on) != 2 || on[0] != "2026-09-20" || on[1] != "2026-09-25" {
+		t.Fatalf("the range did not stop at its edges: %v", on)
+	}
+}
+
+// The same trap ForDay has: a correction makes a new care_days row and the photograph stays
+// with the one it was filed against. Resolving by resident and date is what reaches it.
+func TestAGallerySurvivesACorrection(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	day := aDay(t, s, caller, facility, resident, on)
+
+	up, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024)
+	if err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	if err := s.Arrived(ctx, caller, up.ObjectID); err != nil {
+		t.Fatalf("confirming: %v", err)
+	}
+	correct(t, s, caller, facility, resident, day, on)
+
+	got, err := s.OverRange(ctx, caller, resident, on.AddDate(0, 0, -3), on.AddDate(0, 0, 3))
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("a correction lost the photograph from the gallery: got %d", len(got))
+	}
+	if got[0].On != "2026-09-23" {
+		t.Errorf("the photograph moved day: %s", got[0].On)
+	}
+}
+
+// An upload that never finished is an object that is not in the bucket, and a link to it is
+// a broken image in a gallery rather than in one day.
+func TestAGalleryLeavesOutWhatNeverArrived(t *testing.T) {
+	s, _, caller, resident, facility := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	day := aDay(t, s, caller, facility, resident, on)
+
+	if _, err := s.Offer(ctx, caller, resident, &day, "image/jpeg", 1024); err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	// Deliberately no Arrived.
+
+	got, err := s.OverRange(ctx, caller, resident, on, on)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("an upload that never finished turned up in a gallery: %+v", got)
+	}
+}
+
+// The wall between two buildings, asked the range question. Both wards are populated, so a
+// policy that had stopped working would not be hidden by an empty fixture.
+func TestAnotherBuildingsCaregiverGetsNoGallery(t *testing.T) {
+	cedar, _, atCedar, cathy, cedarID := ward(t)
+	birch, _, atBirch, _, _ := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	day := aDay(t, cedar, atCedar, cedarID, cathy, on)
+	up, err := cedar.Offer(ctx, atCedar, cathy, &day, "image/jpeg", 2048)
+	if err != nil {
+		t.Fatalf("offering: %v", err)
+	}
+	if err := cedar.Arrived(ctx, atCedar, up.ObjectID); err != nil {
+		t.Fatalf("confirming: %v", err)
+	}
+
+	mine, err := cedar.OverRange(ctx, atCedar, cathy, on, on)
+	if err != nil || len(mine) != 1 {
+		t.Fatalf("cedar's caregiver should see one photograph, got %d (%v)", len(mine), err)
+	}
+
+	got, err := birch.OverRange(ctx, atBirch, cathy, on, on)
+	if len(got) != 0 {
+		t.Fatalf("another building's caregiver got %d of Cathy's photographs", len(got))
+	}
+	if !errors.Is(err, ErrNotVisible) {
+		t.Fatalf("got %v, want ErrNotVisible", err)
+	}
+}
+
+// A range that cannot be served is refused rather than served slowly. The work here is one
+// signed link per photograph, so an unbounded span is an unbounded number of network calls.
+func TestAGalleryRefusesARangeItCannotServe(t *testing.T) {
+	s, _, caller, resident, _ := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	if _, err := s.OverRange(ctx, caller, resident, on, on.AddDate(0, 0, -1)); !errors.Is(err, ErrBadRange) {
+		t.Errorf("a range the wrong way round gave %v, want ErrBadRange", err)
+	}
+	if _, err := s.OverRange(ctx, caller, resident, on.AddDate(-5, 0, 0), on); !errors.Is(err, ErrBadRange) {
+		t.Errorf("a five-year range gave %v, want ErrBadRange", err)
+	}
+	// And the refusal is about the range, not about everything: one day is fine.
+	if _, err := s.OverRange(ctx, caller, resident, on, on); err != nil {
+		t.Errorf("a single day was refused: %v", err)
+	}
+}

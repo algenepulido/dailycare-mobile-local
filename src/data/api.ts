@@ -415,6 +415,33 @@ export async function fetchDayPhotos(residentId: string, date: string): Promise<
   return Array.isArray(body) ? body : [];
 }
 
+/** A photograph with the day it was filed against. */
+export interface DatedPhoto extends DayPhoto {
+  /** The care date, not the moment the file arrived. */
+  on: string;
+}
+
+/**
+ * Every photograph filed for a resident across a span of days, oldest first.
+ *
+ * One request rather than one per day. Asking day by day over three weeks would be
+ * twenty-one requests and twenty-one signing calls on the server, for a screen somebody
+ * scrolls through in a second.
+ *
+ * The links are as short-lived as a single day's are, so a gallery left open stops working
+ * and asking again is the answer rather than caching them.
+ */
+export async function fetchPhotoRange(
+  residentId: string,
+  from: string,
+  to: string,
+): Promise<DatedPhoto[]> {
+  const body = (await authed(
+    `/v1/residents/${residentId}/photos?from=${from}&to=${to}`,
+  )) as { photos?: DatedPhoto[] };
+  return Array.isArray(body?.photos) ? body.photos : [];
+}
+
 /**
  * The resident's own photograph, or null when there is not one.
  *

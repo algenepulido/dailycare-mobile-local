@@ -86,6 +86,7 @@ func (a *API) Routes() http.Handler {
 	// that produced them whether or not anybody opened a photograph would be handing out
 	// links nobody asked for.
 	mux.Handle("GET /v1/residents/{id}/days/{date}/photos", a.identified(a.dayPhotos))
+	mux.Handle("GET /v1/residents/{id}/photos", a.identified(a.photoRange))
 	mux.Handle("GET /v1/residents/{id}/photo", a.identified(a.residentPhoto))
 
 	// Administering a building. Every one of these is refused by the database for a
@@ -335,6 +336,50 @@ func (a *API) dayPhotos(w http.ResponseWriter, r *http.Request, c db.Caller) {
 	a.ok(w, r, http.StatusOK, photos)
 }
 
+// photoRange is a resident's day photographs across a span: GET .../photos?from=&to=
+//
+// One request for a gallery rather than one per day. The family screen shows three weeks,
+// so asking day by day would be twenty-one requests, each of them minting signed links over
+// the network - for a screen somebody scrolls past in a second.
+//
+// Same refusal as the day's photographs and the day itself: 404 for a resident this session
+// may not read, because a refusal is not a failure and a 500 here would tell a caller that
+// the resident exists.
+func (a *API) photoRange(w http.ResponseWriter, r *http.Request, c db.Caller) {
+	if a.media == nil {
+		a.fail(w, r, http.StatusServiceUnavailable, "photographs are not set up on this server", nil)
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+		return
+	}
+	from, to, ok := a.careRange(w, r)
+	if !ok {
+		return
+	}
+
+	photos, err := a.media.OverRange(r.Context(), c, id, from, to)
+	if err != nil {
+		if errors.Is(err, media.ErrNotVisible) {
+			a.fail(w, r, http.StatusNotFound, "no such resident", nil)
+			return
+		}
+		if errors.Is(err, media.ErrBadRange) {
+			a.fail(w, r, http.StatusBadRequest, "that is not a range of days this takes", nil)
+			return
+		}
+		a.fail(w, r, http.StatusInternalServerError, "could not read the photographs", err)
+		return
+	}
+	a.ok(w, r, http.StatusOK, map[string]any{
+		"from":   from.Format("2006-01-02"),
+		"to":     to.Format("2006-01-02"),
+		"photos": photos,
+	})
+}
+
 // residentPhoto is the face on the record rather than a photograph of a day.
 //
 // 404 for a resident this session may not read and 404 for one with no photograph. The
@@ -469,39 +514,58 @@ func (a *API) trail(w http.ResponseWriter, r *http.Request, c db.Caller) {
 	a.ok(w, r, http.StatusOK, map[string]any{"entries": entries})
 }
 
-// history is a resident's days over a range: GET .../days?from=&to=
+// The widest span either range route will serve, and the default span both of them use.
 //
-// Both bounds are optional. to defaults to today and from to three weeks before it, which
-// is the span the product shows and the span a caregiver backdates within. A range is
-// capped rather than refused when it is too wide - a client asking for a year gets the
-// most recent ninety days rather than an error, because the honest failure here is a slow
-// query, not a malformed request.
+// Twenty-one days inclusive is what the family screen shows and what a caregiver backdates
+// within. The cap exists because the work is proportional to the span - a query for the
+// history, a signed link per photograph - and a client asking for a year should get the
+// recent end of it rather than an error.
+const (
+	rangeDefaultDays = 20
+	rangeMaxDays     = 89
+)
+
+// careRange reads the optional from/to pair off a range request.
+//
+// Shared by the two routes that take one so they cannot drift apart: a client that learns
+// the history's date format and cap should not have to learn a second set for the
+// photographs of the same days.
+func (a *API) careRange(w http.ResponseWriter, r *http.Request) (time.Time, time.Time, bool) {
+	var err error
+	to := time.Now().UTC().Truncate(24 * time.Hour)
+	if v := r.URL.Query().Get("to"); v != "" {
+		if to, err = time.Parse("2006-01-02", v); err != nil {
+			a.fail(w, r, http.StatusBadRequest, "to is a date, as 2006-01-02", nil)
+			return to, to, false
+		}
+	}
+	from := to.AddDate(0, 0, -rangeDefaultDays)
+	if v := r.URL.Query().Get("from"); v != "" {
+		if from, err = time.Parse("2006-01-02", v); err != nil {
+			a.fail(w, r, http.StatusBadRequest, "from is a date, as 2006-01-02", nil)
+			return from, to, false
+		}
+	}
+	if from.After(to) {
+		a.fail(w, r, http.StatusBadRequest, "from is after to", nil)
+		return from, to, false
+	}
+	if earliest := to.AddDate(0, 0, -rangeMaxDays); from.Before(earliest) {
+		from = earliest
+	}
+	return from, to, true
+}
+
+// history is a resident's days over a range: GET .../days?from=&to=
 func (a *API) history(w http.ResponseWriter, r *http.Request, c db.Caller) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		a.fail(w, r, http.StatusNotFound, "no such resident", nil)
 		return
 	}
-	to := time.Now().UTC().Truncate(24 * time.Hour)
-	if v := r.URL.Query().Get("to"); v != "" {
-		if to, err = time.Parse("2006-01-02", v); err != nil {
-			a.fail(w, r, http.StatusBadRequest, "to is a date, as 2006-01-02", nil)
-			return
-		}
-	}
-	from := to.AddDate(0, 0, -20) // twenty-one days inclusive
-	if v := r.URL.Query().Get("from"); v != "" {
-		if from, err = time.Parse("2006-01-02", v); err != nil {
-			a.fail(w, r, http.StatusBadRequest, "from is a date, as 2006-01-02", nil)
-			return
-		}
-	}
-	if from.After(to) {
-		a.fail(w, r, http.StatusBadRequest, "from is after to", nil)
+	from, to, ok := a.careRange(w, r)
+	if !ok {
 		return
-	}
-	if earliest := to.AddDate(0, 0, -89); from.Before(earliest) {
-		from = earliest
 	}
 
 	days, err := a.records.History(r.Context(), c, id, from, to)

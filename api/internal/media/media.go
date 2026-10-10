@@ -38,6 +38,10 @@ var ErrNotVisible = errors.New("media: no such resident, or not one this session
 // who may not read the resident must not learn whether there is a photograph of them.
 var ErrNoPhotograph = errors.New("media: this resident has no photograph")
 
+// A range a gallery would not ask for. Refused rather than served slowly: the cost of this
+// read is one signed link per photograph, so an unbounded range is an unbounded bill.
+var ErrBadRange = errors.New("media: that is not a range of days this takes")
+
 // Signer is whatever can sign a URL for the bucket. In a deployed environment it is the
 // Cloud Storage client using the service account's own signBlob, so no key exists anywhere
 // - which is what makes iam.disableServiceAccountKeyCreation possible to enforce.
@@ -184,6 +188,11 @@ func (s *Store) Arrived(ctx context.Context, c db.Caller, object uuid.UUID) erro
 // happens to that row afterwards - so the lifetime is the control, and it is the only one.
 const viewFor = 5 * time.Minute
 
+// The widest span this will mint links for. The HTTP layer caps a wide request down to its
+// own ninety-day limit before it gets here, so this is a backstop against a caller inside
+// the server asking for a decade, not a rule a client meets.
+const maxRange = 92 * 24 * time.Hour
+
 type Photograph struct {
 	ID        uuid.UUID `json:"id"`
 	URL       string    `json:"url"`
@@ -258,6 +267,91 @@ func (s *Store) ForDay(ctx context.Context, c db.Caller, resident uuid.UUID,
 			return nil, err
 		}
 		out = append(out, Photograph{ID: f.id, URL: url, ExpiresAt: until})
+	}
+	return out, nil
+}
+
+// Dated is a photograph with the day it was filed against.
+type Dated struct {
+	Photograph
+	// On is the care date, not the time the file arrived. A photograph taken on Tuesday and
+	// uploaded on Wednesday belongs to Tuesday.
+	On string `json:"on"`
+}
+
+// OverRange returns a resident's day photographs across a span of dates, oldest first.
+//
+// One request rather than one per day. A family looking back three weeks would otherwise ask
+// twenty-one times, and each of those asks mints signed links over the network - so the cost
+// of a gallery would be twenty-one round trips to IAM for a screen somebody scrolls past.
+//
+// Same resolution as ForDay, by resident and care date rather than by one care_days row, for
+// the same reason: a correction makes a new row and the photograph stays with the one it was
+// filed against.
+//
+// The range is inclusive at both ends and capped, so a caller asking for a decade gets a
+// refusal rather than a slow answer and a bill for the links.
+func (s *Store) OverRange(ctx context.Context, c db.Caller, resident uuid.UUID,
+	from, to time.Time) ([]Dated, error) {
+	if to.Before(from) {
+		return nil, ErrBadRange
+	}
+	if to.Sub(from) > maxRange {
+		return nil, ErrBadRange
+	}
+
+	type found struct {
+		id     uuid.UUID
+		bucket string
+		path   string
+		on     time.Time
+	}
+	var rows []found
+
+	err := s.db.InSession(ctx, c, func(tx pgx.Tx) error {
+		// audit_read first, in the same transaction, and it is the access check as well as
+		// the trail - exactly as ForDay does it. One entry for the range rather than one per
+		// day: it is one read, by one person, of one resident's record.
+		if _, err := tx.Exec(ctx, `SELECT audit_read($1, $2)`, resident, "media_objects"); err != nil {
+			return ErrNotVisible
+		}
+
+		r, err := tx.Query(ctx, `
+			SELECT m.id, m.bucket, m.object_path, cd.care_date
+			FROM media_objects m
+			JOIN care_days cd ON cd.id = m.care_day_id
+			WHERE cd.resident_id = $1 AND cd.care_date BETWEEN $2 AND $3
+			  AND m.uploaded_at IS NOT NULL AND m.deleted_at IS NULL
+			ORDER BY cd.care_date, m.uploaded_at`, resident, from, to)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var f found
+			if err := r.Scan(&f.id, &f.bucket, &f.path, &f.on); err != nil {
+				return err
+			}
+			rows = append(rows, f)
+		}
+		return r.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Signed outside the transaction, same as everything else here.
+	until := time.Now().Add(viewFor)
+	out := make([]Dated, 0, len(rows))
+	for _, f := range rows {
+		url, err := s.signer.SignedGetURL(ctx, f.bucket, f.path, until)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Dated{
+			Photograph: Photograph{ID: f.id, URL: url, ExpiresAt: until},
+			On:         f.on.Format("2006-01-02"),
+		})
 	}
 	return out, nil
 }
