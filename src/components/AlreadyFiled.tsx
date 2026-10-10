@@ -100,6 +100,13 @@ export function AlreadyFiled({
           <Row label="Appetite" value={summary.appetite} />
           <Row label="Sleep" value={summary.sleep} />
 
+          {/* A meal with no tick is not recorded, never not done.
+            *
+            * The rule the family's own summary holds, and it belongs here for a sharper
+            * reason than consistency: this sheet exists because the person reading it is
+            * usually not the person who filled it in. A day filed at one in the morning
+            * said dinner was not done, about a dinner that had not happened yet, to the
+            * caregiver coming on shift to give it. */}
           <Text style={styles.heading}>MEALS</Text>
           {summary.meals.length === 0 ? (
             <Text style={styles.nothing}>Nothing recorded</Text>
@@ -113,15 +120,18 @@ export function AlreadyFiled({
                     ? meal.amount
                       ? MEAL_AMOUNT_LABEL[meal.amount]
                       : 'Yes'
-                    : 'Not done'
+                    : 'Not recorded'
                 }
               />
             ))
           )}
 
           <Text style={styles.heading}>HYGIENE</Text>
-          <Row label="Shower" value={summary.shower ? 'Done' : 'Not done'} />
-          <Row label="Grooming" value={summary.grooming ? 'Done' : 'Not done'} />
+          {/* Not recorded here too. The family's own screen says it of hygiene as well as
+              of meals, and an unticked shower on a sheet headed "what was filed" is a
+              statement about the record rather than about the morning. */}
+          <Row label="Shower" value={summary.shower ? 'Done' : 'Not recorded'} />
+          <Row label="Grooming" value={summary.grooming ? 'Done' : 'Not recorded'} />
 
           {summary.concerns.length > 0 ? (
             <>

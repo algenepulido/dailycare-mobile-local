@@ -117,7 +117,7 @@ export interface ChecklistGroup {
   total: number;
   /** Items that happened. Meals carry how much was eaten. */
   doneItems: string[];
-  /** Items that did not. Rendered as "Not done: …" in the summary. */
+  /** Items the record does not have. Rendered as "Not recorded: …", never "not done". */
   missedItems: string[];
   /** Free text appended to the medication group, when the caregiver entered any. */
   extra?: string;

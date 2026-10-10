@@ -100,10 +100,19 @@ function ChecklistCard({ group }: { group: ChecklistGroup }) {
           <Text style={styles.lineText}>{group.doneItems.join(', ')}</Text>
         </View>
       ) : null}
+      {/* Not recorded, not not done, because the sheet around this says it is what the
+          family sees and the family's own screen says not recorded. Two words for one
+          state, on the one line that promises the two agree - the same way the baseline
+          went wrong, where this is what the family sees sat above a sentence computed
+          from a different normal.
+
+          The flag stays. For a caregiver about to send, a mark against the row that is
+          still blank is a last look before it goes, which is a different job from the
+          claim the words make. */}
       {missed ? (
         <View style={styles.line}>
           <Icon name="flag" size={14} color={color.flag} />
-          <Text style={styles.lineMuted}>Not done: {group.missedItems.join(', ')}</Text>
+          <Text style={styles.lineMuted}>Not recorded: {group.missedItems.join(', ')}</Text>
         </View>
       ) : null}
       {group.extra ? (
