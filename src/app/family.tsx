@@ -367,7 +367,13 @@ export default function FamilyScreen() {
         ) : day === null ? (
           <Nothing name={person?.displayName ?? 'they'} />
         ) : (
-          <Filed day={day} photos={photos} summary={summaryOf(day, person)} />
+          <Filed
+            day={day}
+            photos={photos}
+            summary={summaryOf(day, person)}
+            careDate={date}
+            isToday={date === today()}
+          />
         )}
 
         {/* How the week went, above the days that make it up.
@@ -592,11 +598,26 @@ function Filed({
   day,
   photos,
   summary,
+  careDate,
+  isToday,
 }: {
   day: FiledSummary;
   photos: DayPhoto[] | undefined;
   summary: FamilyDay;
+  /** The day being read, for the one label that names it out loud. */
+  careDate: string;
+  /** Whether that day is today, which is what the headings say. */
+  isToday: boolean;
 }) {
+  /**
+   * Today, or that day.
+   *
+   * Three headings said today whatever day was on screen. That was true of the only day
+   * this screen could show until scrolling back went in, and from then on a family member
+   * three weeks down the list was reading "what changed today" over a Tuesday in
+   * September. Seen on the recording rather than in the code.
+   */
+  const when = isToday ? 'today' : 'that day';
   return (
     <>
       {summary.from ? <Text style={styles.from}>from {summary.from}</Text> : null}
@@ -607,7 +628,7 @@ function Filed({
         <Text style={styles.corrected}>This was updated after it was first written.</Text>
       ) : null}
 
-      <Text style={styles.heading}>What changed today</Text>
+      <Text style={styles.heading}>What changed {when}</Text>
       {summary.changed.length === 0 ? (
         <View style={styles.steady}>
           <Icon name="check" size={18} color={color.sage} />
@@ -621,7 +642,7 @@ function Filed({
         ))
       )}
 
-      <Text style={styles.heading}>Care today</Text>
+      <Text style={styles.heading}>Care {when}</Text>
       {summary.care.map((g) => (
         <CareRow key={g.label} group={g} />
       ))}
@@ -639,7 +660,7 @@ function Filed({
         <ActivityIndicator style={styles.spinner} color={color.clay} />
       ) : photos.length > 0 ? (
         <>
-          <Text style={styles.heading}>Photo from today</Text>
+          <Text style={styles.heading}>Photo from {when}</Text>
           <View style={styles.photos}>
             {photos.map((photo) => (
               <Image
@@ -647,7 +668,7 @@ function Filed({
                 source={{ uri: photo.url }}
                 style={styles.photo}
                 contentFit="cover"
-                accessibilityLabel="A photo from today"
+                accessibilityLabel={`A photo from ${isToday ? 'today' : longLabel(careDate)}`}
               />
             ))}
           </View>
