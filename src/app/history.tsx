@@ -68,7 +68,7 @@ export default function HistoryScreen() {
     let live = true;
     void (async () => {
       try {
-        const got = await fetchHistory(remoteId);
+        const got = (await fetchHistory(remoteId)).days;
         if (live) setDays(got);
       } catch (error) {
         // Two states, not one. Every refusal says the same thing - a caregiver who can

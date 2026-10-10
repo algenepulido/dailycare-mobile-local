@@ -14,7 +14,7 @@ import {
   listResidents,
   waitingGrants,
 } from '@/data/api';
-import type { DayPhoto, HistoryDay, RemoteResident, WaitingGrant } from '@/data/api';
+import type { DayPhoto, History, RemoteResident, WaitingGrant } from '@/data/api';
 import { baselineFromWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { dayNumberLabel, longLabel, today, weekdayLabel } from '@/domain/dates';
@@ -63,7 +63,10 @@ export default function FamilyScreen() {
   // changes. Everything below already keys off it, so moving between days is one piece of
   // state rather than a second screen.
   const [date, setDate] = useState(today());
-  const [earlier, setEarlier] = useState<HistoryDay[] | null>(null);
+  // The days, and the window they were asked over. The window is kept because a week
+  // drawn at the edge of it must not report days nobody asked about as days the home
+  // wrote nothing on.
+  const [earlier, setEarlier] = useState<History | null>(null);
   const signedIn = Boolean(account);
 
   /**
@@ -191,7 +194,7 @@ export default function FamilyScreen() {
 
   // Every day the server returned except the one being read, so the list never offers a
   // way to the day already on screen.
-  const behind = (earlier ?? []).filter((entry) => entry.on !== date);
+  const behind = (earlier?.days ?? []).filter((entry) => entry.on !== date);
 
 
   async function pullToRefresh() {
@@ -282,11 +285,12 @@ export default function FamilyScreen() {
    * back is not shown a week that disagrees with the day in front of them.
    */
   const week = familyWeek({
-    filed: (earlier ?? []).map((entry) => ({ on: entry.on, day: factsOf(entry.summary) })),
+    filed: (earlier?.days ?? []).map((entry) => ({ on: entry.on, day: factsOf(entry.summary) })),
     baseline: person ? baselineFromWire(person.baseline) : DEFAULT_BASELINE,
     residentName: person?.displayName ?? 'They',
     upTo: date,
     todayIs: today(),
+    knownFrom: earlier?.from ?? '',
   });
 
   return (

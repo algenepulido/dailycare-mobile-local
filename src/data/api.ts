@@ -332,18 +332,43 @@ export interface HistoryDay {
  * The range is the server's to decide when it is not given. Twenty-one days is what the
  * screen shows; sending it from here as well would be two places to change it.
  */
-export async function fetchHistory(residentId: string): Promise<HistoryDay[]> {
+/**
+ * The days, and the window they were asked for over.
+ *
+ * The window matters as much as the days. Without it a screen cannot tell a day the home
+ * did not file from a day nobody asked the server about, and the two look identical: both
+ * are simply absent from the list. A week drawn at the edge of the window counted four
+ * days it had never requested as four days the home had written nothing on, and said so.
+ */
+export interface History {
+  /** The first day asked for, inclusive. Nothing is known about anything before it. */
+  from: string;
+  /** The last day asked for, inclusive. */
+  to: string;
+  days: HistoryDay[];
+}
+
+export async function fetchHistory(residentId: string): Promise<History> {
   const body = (await authed(`/v1/residents/${residentId}/days`)) as {
+    from?: string;
+    to?: string;
     days: FiledDay[];
   };
-  const out: HistoryDay[] = [];
+  const days: HistoryDay[] = [];
   for (const day of body.days ?? []) {
     const summary = fromWire(day);
     // fromWire returns null for a day with no filedAt, which the history does not return
     // - but a shape that cannot arrive today is still a shape to not crash on.
-    if (summary) out.push({ on: day.on.slice(0, 10), summary });
+    if (summary) days.push({ on: day.on.slice(0, 10), summary });
   }
-  return out;
+  // A server that did not say falls back to the days themselves, which is the old
+  // behaviour: no worse than before, and still better than inventing a wider window.
+  const dates = days.map((d) => d.on).sort();
+  return {
+    from: body.from?.slice(0, 10) ?? dates[0] ?? '',
+    to: body.to?.slice(0, 10) ?? dates[dates.length - 1] ?? '',
+    days,
+  };
 }
 
 /**

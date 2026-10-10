@@ -22,6 +22,10 @@ import type { Baseline } from './types';
  *   - it will not count a meal nobody ticked as a meal she did not eat. That is the same
  *     distinction familyDay holds for a single day - not recorded is not not done - and it
  *     is easier to lose across seven days than on one.
+ *   - it will not speak about a day nobody asked the server about. The app holds three
+ *     weeks, and the week around the first of those runs back past the edge of it. Counting
+ *     those four days as four days the home wrote nothing on reports a limit of ours as a
+ *     silence of theirs, which is the worst thing this screen can do.
  *   - it will not judge a meal today has not reached. At two in the afternoon lunch and
  *     dinner are not written down because they have not happened, and a sentence reading
  *     that as a missed meal would alarm a family every single evening. Once today's meals
@@ -72,6 +76,12 @@ export interface WeekRequest {
   upTo: string;
   /** Today's date, so an unfinished day can be told from an incomplete one. */
   todayIs: string;
+  /**
+   * The first day the server was asked about. Nothing is known about anything before it,
+   * so the week stops there rather than drawing days it never requested as days nobody
+   * filled in.
+   */
+  knownFrom: string;
 }
 
 export function familyWeek({
@@ -80,11 +90,15 @@ export function familyWeek({
   residentName,
   upTo,
   todayIs,
+  knownFrom,
 }: WeekRequest): FamilyWeek {
   const byDate = new Map(filed.map((entry) => [entry.on, entry.day]));
   const them = givenName(residentName);
 
-  const days: WeekDay[] = daysEnding(upTo, WEEK_DAYS).map((on) => {
+  // ISO dates compare as text, which is the whole reason the care date is one.
+  const inside = daysEnding(upTo, WEEK_DAYS).filter((on) => !knownFrom || on >= knownFrom);
+
+  const days: WeekDay[] = inside.map((on) => {
     const day = byDate.get(on);
     const inProgress = on === todayIs;
     if (!day) return { on, recorded: false, inProgress, meals: 0, of: 0, steady: true };
@@ -110,7 +124,13 @@ export function familyWeek({
   // How much of the week there is an answer for, said first and only when it is not all of
   // it. A family reading "she ate every day" needs to know whether that was seven days or
   // three before it means anything.
-  if (written.length < WEEK_DAYS) {
+  //
+  // Only when the whole week was asked about. At the edge of the three weeks the app holds,
+  // some of this week was never requested, and "3 of the last 7 days have been written
+  // down" would be counting our own window as the home's silence. The sentence below says
+  // "every day there is a record for" in that case, which is true and claims nothing about
+  // the days there is no record here of.
+  if (days.length === WEEK_DAYS && written.length < WEEK_DAYS) {
     lines.push(
       written.length === 1
         ? '1 of the last 7 days has been written down.'

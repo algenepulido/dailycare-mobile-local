@@ -42,6 +42,9 @@ function week(days: { on: string; day: FiledDayFacts }[], upTo: string = LAST) {
     residentName: 'Alma Reyes',
     upTo,
     todayIs: '2026-10-31',
+    // The whole of every week these tests read was asked about, unless a test says
+    // otherwise - the edge of the window has its own tests at the bottom.
+    knownFrom: '2026-01-01',
   });
 }
 
@@ -128,6 +131,7 @@ describe('familyWeek', () => {
         residentName: 'Alma Reyes',
         upTo: LAST,
         todayIs: '2026-10-31',
+        knownFrom: '2026-01-01',
       }).lines.join(' '),
     ).not.toContain('unsettled');
   });
@@ -253,6 +257,7 @@ describe('familyWeek', () => {
         residentName: 'Alma Reyes',
         upTo: LAST,
         todayIs: LAST,
+        knownFrom: '2026-01-01',
       });
     }
 
@@ -334,6 +339,89 @@ describe('familyWeek', () => {
         'Alma ate every day this week so far.',
         'On one of them not every meal was written down.',
       ]);
+    });
+  });
+
+  /**
+   * The edge of the three weeks the app holds.
+   *
+   * Reading the very first day of the window puts four of that week's seven days before
+   * anything the server was asked about. They are not days the home wrote nothing on;
+   * they are days nobody asked after. Saying "3 of the last 7 days have been written
+   * down" about them reports a limit of ours as a silence of theirs, which is the worst
+   * thing a screen a family reads can do. Found on a phone, by opening a photograph from
+   * the oldest day in the gallery and landing on the week around it.
+   */
+  describe('a week that runs off the edge of what was asked for', () => {
+    const KNOWN_FROM = '2026-09-20';
+
+    function atTheEdge(days: { on: string; day: FiledDayFacts }[], upTo: string) {
+      return familyWeek({
+        filed: days,
+        baseline: usual,
+        residentName: 'Alma Reyes',
+        upTo,
+        todayIs: '2026-10-31',
+        knownFrom: KNOWN_FROM,
+      });
+    }
+
+    const threeDays = ['20', '21', '22'].map((d) => ({ on: `2026-09-${d}`, day: day() }));
+
+    it('draws only the days it asked about', () => {
+      const out = atTheEdge(threeDays, '2026-09-22');
+      expect(out.days.map((d) => d.on)).toEqual(['2026-09-22', '2026-09-21', '2026-09-20']);
+    });
+
+    it('does not count a day nobody asked about as a day nobody filled in', () => {
+      expect(atTheEdge(threeDays, '2026-09-22').lines.join(' ')).not.toContain(
+        'of the last 7 days',
+      );
+    });
+
+    it('says only what it has a record for', () => {
+      expect(atTheEdge(threeDays, '2026-09-22').lines[0]).toBe(
+        'Alma ate every meal, every day there is a record for.',
+      );
+    });
+
+    it('still counts a day inside the window that nobody filled in', () => {
+      const out = atTheEdge([threeDays[0], threeDays[2]], '2026-09-22');
+      expect(out.days.find((d) => d.on === '2026-09-21')?.recorded).toBe(false);
+    });
+
+    it('goes back to counting once the whole week was asked about', () => {
+      const week = ['20', '21', '22', '23', '24', '25', '26'].map((d) => ({
+        on: `2026-09-${d}`,
+        day: day(),
+      }));
+      const out = familyWeek({
+        filed: week.slice(0, 5),
+        baseline: usual,
+        residentName: 'Alma Reyes',
+        upTo: '2026-09-26',
+        todayIs: '2026-10-31',
+        knownFrom: KNOWN_FROM,
+      });
+      expect(out.days).toHaveLength(7);
+      expect(out.lines[0]).toBe('5 of the last 7 days have been written down.');
+    });
+
+    it('says nothing at all about a day before anything it holds', () => {
+      expect(atTheEdge(threeDays, '2026-09-10')).toEqual({ days: [], lines: [] });
+    });
+
+    /** A server that did not name its window must not be worse than one that did. */
+    it('treats an unknown window as no limit', () => {
+      const out = familyWeek({
+        filed: threeDays,
+        baseline: usual,
+        residentName: 'Alma Reyes',
+        upTo: '2026-09-22',
+        todayIs: '2026-10-31',
+        knownFrom: '',
+      });
+      expect(out.days).toHaveLength(7);
     });
   });
 });
