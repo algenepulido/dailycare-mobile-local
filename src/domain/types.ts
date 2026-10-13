@@ -33,7 +33,17 @@ export const MEAL_AMOUNT_LABEL: Record<MealAmount, string> = {
 };
 
 export interface MealEntry {
+  /** She ate it. */
   done: boolean;
+  /**
+   * She would not eat it.
+   *
+   * A third answer rather than the absence of the first. Neither of these set is the meal
+   * nobody wrote down, which is what the form starts at and what it stays at if nobody
+   * touches the row. Both set is not a state a caregiver can reach and the database
+   * refuses it.
+   */
+  refused: boolean;
   /** Null when the meal happened but nobody said how much. */
   amount: MealAmount | null;
 }
@@ -137,10 +147,12 @@ export interface CheckIn {
 
 /* ------------------------------------------------------------------ defaults */
 
+// Neither answered. A form nobody has touched says nothing about her meals, which is what
+// the record means by a meal with no tick.
 export const EMPTY_MEALS: Record<Meal, MealEntry> = {
-  breakfast: { done: false, amount: null },
-  lunch: { done: false, amount: null },
-  dinner: { done: false, amount: null },
+  breakfast: { done: false, refused: false, amount: null },
+  lunch: { done: false, refused: false, amount: null },
+  dinner: { done: false, refused: false, amount: null },
 };
 
 export const EMPTY_MEDICATION: Record<MedicationSlot, boolean> = { am: false, pm: false };

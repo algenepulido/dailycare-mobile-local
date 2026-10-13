@@ -66,9 +66,9 @@ const aDay: CheckIn = {
   caregiverId: 'g1',
   careDate: '2026-09-23',
   meals: {
-    breakfast: { done: true, amount: 'most' },
-    lunch: { done: true, amount: null },
-    dinner: { done: false, amount: null },
+    breakfast: { done: true, refused: false, amount: 'most' },
+    lunch: { done: true, refused: false, amount: null },
+    dinner: { done: false, refused: false, amount: null },
   },
   medication: { am: true, pm: false },
   hygiene: { shower: true, grooming: false },
@@ -93,19 +93,51 @@ test('a day the caregiver filed comes out in the database vocabulary', () => {
 
 test('a meal that happened without an amount sends no amount at all', () => {
   const lunch = toWire(aDay).meals.find((m) => m.slot === 'lunch');
-  expect(lunch).toEqual({ slot: 'lunch', happened: true });
+  expect(lunch).toEqual({ slot: 'lunch', happened: true, refused: false });
   expect('amount' in (lunch ?? {})).toBe(false);
 });
 
 test('and a meal that did not happen never carries one', () => {
   const dinner = toWire(aDay).meals.find((m) => m.slot === 'dinner');
-  expect(dinner).toEqual({ slot: 'dinner', happened: false });
+  expect(dinner).toEqual({ slot: 'dinner', happened: false, refused: false });
+});
+
+/**
+ * Three answers reach the server as three answers.
+ *
+ * A meal nobody touched and a meal she turned down both have happened false, and the only
+ * thing that tells them apart on the way out is this field. Sent on every meal rather than
+ * only on a refusal, because a field that is sometimes absent is a field a reader has to
+ * guess the meaning of.
+ */
+test('a meal she would not eat is sent as refused rather than as unanswered', () => {
+  const refusing = {
+    ...aDay,
+    meals: {
+      ...aDay.meals,
+      lunch: { done: false, refused: true, amount: null },
+    },
+  };
+  const lunch = toWire(refusing).meals.find((m) => m.slot === 'lunch');
+  expect(lunch).toEqual({ slot: 'lunch', happened: false, refused: true });
+});
+
+test('and it carries no amount, because there is no amount of a refusal', () => {
+  const refusing = {
+    ...aDay,
+    meals: {
+      ...aDay.meals,
+      lunch: { done: false, refused: true, amount: 'most' as const },
+    },
+  };
+  const lunch = toWire(refusing).meals.find((m) => m.slot === 'lunch');
+  expect('amount' in (lunch ?? {})).toBe(false);
 });
 
 // The schema says an amount without the meal is nonsense and refuses it. Worth a test on
 // this side too: the refusal would arrive as a 400 with nothing useful on the screen.
 test('an amount is never sent for a meal that did not happen', () => {
-  const odd = { ...aDay, meals: { ...aDay.meals, dinner: { done: false, amount: 'all' as const } } };
+  const odd = { ...aDay, meals: { ...aDay.meals, dinner: { done: false, refused: false, amount: 'all' as const } } };
   const dinner = toWire(odd).meals.find((m) => m.slot === 'dinner');
   expect('amount' in (dinner ?? {})).toBe(false);
 });
@@ -129,7 +161,7 @@ describe('reading a day back', () => {
       shower: true,
       grooming: false,
       meals: [
-        { slot: 'breakfast', happened: true, amount: 'most' },
+        { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
         { slot: 'lunch', happened: false },
       ],
       concerns: ['fall_or_near_fall', 'skin_concern'],
@@ -142,8 +174,8 @@ describe('reading a day back', () => {
     expect(got.shower).toBe(true);
     expect(got.grooming).toBe(false);
     expect(got.meals).toEqual([
-      { slot: 'breakfast', happened: true, amount: 'most' },
-      { slot: 'lunch', happened: false, amount: null },
+      { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+      { slot: 'lunch', happened: false, refused: false, amount: null },
     ]);
     expect(got.concerns).toEqual(['Fall / near-fall', 'Skin concern']);
   });
@@ -183,7 +215,7 @@ describe('reading a day back', () => {
       expect(fromWire({ ...empty, filedAt: 'x', concerns: [stored] })!.concerns).toEqual([label]);
     }
     for (const [label, stored] of Object.entries(AMOUNT_WIRE)) {
-      const meals = [{ slot: 'breakfast', happened: true, amount: stored }];
+      const meals = [{ slot: 'breakfast', happened: true, refused: false, amount: stored }];
       expect(fromWire({ ...empty, filedAt: 'x', meals })!.meals[0].amount).toBe(label);
     }
   });

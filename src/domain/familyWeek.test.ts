@@ -13,9 +13,9 @@ function day(over: Partial<FiledDayFacts> = {}): FiledDayFacts {
     shower: true,
     grooming: true,
     meals: [
-      { slot: 'breakfast', happened: true, amount: 'most' },
-      { slot: 'lunch', happened: true, amount: 'most' },
-      { slot: 'dinner', happened: true, amount: 'most' },
+      { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+      { slot: 'lunch', happened: true, refused: false, amount: 'most' },
+      { slot: 'dinner', happened: true, refused: false, amount: 'most' },
     ],
     concerns: [],
     medication: [],
@@ -73,9 +73,9 @@ describe('familyWeek', () => {
   it('counts the days a meal went unwritten, not the meals', () => {
     const days = except(1, {
       meals: [
-        { slot: 'breakfast', happened: false, amount: null },
-        { slot: 'lunch', happened: false, amount: null },
-        { slot: 'dinner', happened: true, amount: 'most' },
+        { slot: 'breakfast', happened: false, refused: false, amount: null },
+        { slot: 'lunch', happened: false, refused: false, amount: null },
+        { slot: 'dinner', happened: true, refused: false, amount: 'most' },
       ],
     });
     expect(week(days).lines.slice(0, 2)).toEqual([
@@ -87,7 +87,7 @@ describe('familyWeek', () => {
   it('does not claim she ate on a day with nothing ticked at all', () => {
     const days = steady.map((entry, i) =>
       i < 3
-        ? { on: entry.on, day: day({ meals: [{ slot: 'lunch', happened: false, amount: null }] }) }
+        ? { on: entry.on, day: day({ meals: [{ slot: 'lunch', happened: false, refused: false, amount: null }] }) }
         : entry,
     );
     expect(week(days).lines[0]).toBe('Alma ate on 4 of the 7 days written down.');
@@ -199,8 +199,8 @@ describe('familyWeek', () => {
         on: LAST,
         day: day({
           meals: [
-            { slot: 'breakfast', happened: true, amount: 'most' },
-            { slot: 'lunch', happened: false, amount: null },
+            { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+            { slot: 'lunch', happened: false, refused: false, amount: null },
           ],
         }),
       },
@@ -211,6 +211,7 @@ describe('familyWeek', () => {
       inProgress: false,
       meals: 1,
       of: 2,
+      refused: 0,
       steady: true,
     });
   });
@@ -223,7 +224,7 @@ describe('familyWeek', () => {
    */
   it('means by steady exactly what the day screen means by it', () => {
     const days = [
-      { on: LAST, day: day({ meals: [{ slot: 'lunch', happened: false, amount: null }] }) },
+      { on: LAST, day: day({ meals: [{ slot: 'lunch', happened: false, refused: false, amount: null }] }) },
     ];
     expect(week(days).days[0].steady).toBe(true);
     expect(week(days).days[0].meals).toBe(0);
@@ -244,9 +245,9 @@ describe('familyWeek', () => {
   describe('a day that is not over yet', () => {
     const partDay = day({
       meals: [
-        { slot: 'breakfast', happened: true, amount: 'most' },
-        { slot: 'lunch', happened: false, amount: null },
-        { slot: 'dinner', happened: false, amount: null },
+        { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+        { slot: 'lunch', happened: false, refused: false, amount: null },
+        { slot: 'dinner', happened: false, refused: false, amount: null },
       ],
     });
 
@@ -320,9 +321,9 @@ describe('familyWeek', () => {
       const days = [
         ...steady.slice(0, 5),
         { on: '2026-10-06', day: day({ meals: [
-          { slot: 'breakfast', happened: true, amount: 'most' },
-          { slot: 'lunch', happened: false, amount: null },
-          { slot: 'dinner', happened: true, amount: 'most' },
+          { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+          { slot: 'lunch', happened: false, refused: false, amount: null },
+          { slot: 'dinner', happened: true, refused: false, amount: 'most' },
         ] }) },
         steady[6],
       ];
@@ -422,6 +423,81 @@ describe('familyWeek', () => {
         knownFrom: '',
       });
       expect(out.days).toHaveLength(7);
+    });
+  });
+
+  /**
+   * A meal she turned down and a meal nobody wrote down are different weeks.
+   *
+   * Until the record could hold a refusal they were the same row, and the week said "not
+   * every meal was written down" about both. One of those is a sentence about the home's
+   * paperwork; the other is a sentence about her appetite, and it is the one her daughter
+   * is reading for.
+   */
+  describe('a meal she would not eat', () => {
+    function refusing(slot: 'breakfast' | 'lunch' | 'dinner') {
+      return day({
+        meals: [
+          { slot: 'breakfast', happened: slot !== 'breakfast', refused: slot === 'breakfast',
+            amount: slot === 'breakfast' ? null : 'most' },
+          { slot: 'lunch', happened: slot !== 'lunch', refused: slot === 'lunch',
+            amount: slot === 'lunch' ? null : 'most' },
+          { slot: 'dinner', happened: slot !== 'dinner', refused: slot === 'dinner',
+            amount: slot === 'dinner' ? null : 'most' },
+        ],
+      });
+    }
+
+    it('is not reported as a meal nobody wrote down', () => {
+      const days = except(1, {
+        meals: refusing('lunch').meals,
+      });
+      const lines = week(days).lines.join(' ');
+      expect(lines).not.toContain('written down');
+    });
+
+    it('is said as what it is', () => {
+      const days = except(1, { meals: refusing('lunch').meals });
+      expect(week(days).lines.slice(0, 2)).toEqual([
+        'Alma ate every day this week.',
+        'On one of them she would not finish a meal.',
+      ]);
+    });
+
+    it('counts the days she turned something away, not the meals', () => {
+      const days = steady.map((entry, i) =>
+        i < 3 ? { on: entry.on, day: refusing('lunch') } : entry,
+      );
+      expect(week(days).lines).toContain('On 3 of them she would not finish a meal.');
+    });
+
+    it('stops the week claiming she ate every meal', () => {
+      const days = except(1, { meals: refusing('lunch').meals });
+      expect(week(days).lines.join(' ')).not.toContain('ate every meal');
+    });
+
+    /** Both can be true in one week, and each is said once. */
+    it('is reported alongside a day the record is short of', () => {
+      const days = [...steady];
+      days[1] = { on: days[1].on, day: refusing('lunch') };
+      days[2] = {
+        on: days[2].on,
+        day: day({
+          meals: [
+            { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+            { slot: 'lunch', happened: false, refused: false, amount: null },
+          ],
+        }),
+      };
+      const lines = week(days).lines;
+      expect(lines).toContain('On one of them she would not finish a meal.');
+      expect(lines).toContain('On one of them not every meal was written down.');
+    });
+
+    it('carries the count to the strip', () => {
+      const days = except(1, { meals: refusing('lunch').meals });
+      const d = week(days).days.find((x) => x.on === steady[1].on);
+      expect(d).toMatchObject({ meals: 2, of: 3, refused: 1 });
     });
   });
 });

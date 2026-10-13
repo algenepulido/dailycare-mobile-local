@@ -117,6 +117,8 @@ export interface ChecklistGroup {
   total: number;
   /** Items that happened. Meals carry how much was eaten. */
   doneItems: string[];
+  /** What she would not have. Only meals can say it. Empty everywhere else. */
+  refusedItems: string[];
   /** Items the record does not have. Rendered as "Not recorded: …", never "not done". */
   missedItems: string[];
   /** Free text appended to the medication group, when the caregiver entered any. */
@@ -138,12 +140,21 @@ const MEAL_LABELS: Record<Meal, string> = {
 export function mealCounts(meals: Record<Meal, MealEntry>): {
   done: number;
   items: string[];
+  /** What she would not eat. Named here so the review sheet can say it before sending. */
+  refused: string[];
   missed: string[];
 } {
   const items: string[] = [];
+  const refused: string[] = [];
   const missed: string[] = [];
   for (const meal of MEALS) {
     const entry = meals[meal];
+    if (entry.refused) {
+      // Its own list rather than one of the missed. A caregiver reading back what she is
+      // about to send should see that she recorded a refusal, not that she left a gap.
+      refused.push(MEAL_LABELS[meal]);
+      continue;
+    }
     if (!entry.done) {
       missed.push(MEAL_LABELS[meal]);
       continue;
@@ -154,7 +165,7 @@ export function mealCounts(meals: Record<Meal, MealEntry>): {
         : MEAL_LABELS[meal],
     );
   }
-  return { done: items.length, items, missed };
+  return { done: items.length, items, refused, missed };
 }
 
 function split(pairs: [string, boolean][]): { done: string[]; missed: string[] } {
@@ -181,6 +192,7 @@ export function buildChecklist(checkIn: CheckIn): ChecklistGroup[] {
       done: meals.done,
       total: MEALS.length,
       doneItems: meals.items,
+      refusedItems: meals.refused,
       missedItems: meals.missed,
     },
     {
@@ -188,6 +200,7 @@ export function buildChecklist(checkIn: CheckIn): ChecklistGroup[] {
       done: meds.done.length,
       total: 2,
       doneItems: meds.done,
+      refusedItems: [],
       missedItems: meds.missed,
       extra: checkIn.supplementalMedication.trim() || undefined,
     },
@@ -196,6 +209,7 @@ export function buildChecklist(checkIn: CheckIn): ChecklistGroup[] {
       done: hygiene.done.length,
       total: 2,
       doneItems: hygiene.done,
+      refusedItems: [],
       missedItems: hygiene.missed,
     },
   ];

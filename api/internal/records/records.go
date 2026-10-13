@@ -223,7 +223,7 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 		// Ordered by the enum rather than by name, so breakfast comes before lunch comes
 		// before dinner instead of breakfast, dinner, lunch.
 		rows, err := tx.Query(ctx,
-			`SELECT slot, happened, amount FROM care_day_meals
+			`SELECT slot, happened, refused, amount FROM care_day_meals
 			 WHERE care_day_id = $1 ORDER BY slot`, id)
 		if err != nil {
 			return err
@@ -231,7 +231,7 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 		defer rows.Close()
 		for rows.Next() {
 			var m Meal
-			if err := rows.Scan(&m.Slot, &m.Happened, &m.Amount); err != nil {
+			if err := rows.Scan(&m.Slot, &m.Happened, &m.Refused, &m.Amount); err != nil {
 				return err
 			}
 			d.Meals = append(d.Meals, m)
@@ -449,7 +449,7 @@ func loadDays(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Care
 	}
 
 	meals, err := tx.Query(ctx,
-		`SELECT care_day_id, slot, happened, amount FROM care_day_meals
+		`SELECT care_day_id, slot, happened, refused, amount FROM care_day_meals
 		 WHERE care_day_id = ANY($1) ORDER BY care_day_id, slot`, ids)
 	if err != nil {
 		return nil, err
@@ -457,7 +457,7 @@ func loadDays(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Care
 	for meals.Next() {
 		var id uuid.UUID
 		var m Meal
-		if err := meals.Scan(&id, &m.Slot, &m.Happened, &m.Amount); err != nil {
+		if err := meals.Scan(&id, &m.Slot, &m.Happened, &m.Refused, &m.Amount); err != nil {
 			meals.Close()
 			return nil, err
 		}
@@ -555,9 +555,15 @@ type MedicationRecord struct {
 }
 
 type Meal struct {
-	Slot     string  `json:"slot"`
-	Happened bool    `json:"happened"`
-	Amount   *string `json:"amount,omitempty"`
+	Slot     string `json:"slot"`
+	// She ate it. Not "the meal happened": a meal with neither this nor Refused is one
+	// nobody wrote down, which is the absence of an answer rather than an answer.
+	Happened bool `json:"happened"`
+	// She would not eat it. A care fact, and the one a family most wants to know, which is
+	// why it is held apart from nobody having written anything. The two cannot both be true
+	// and the database refuses the row that says they are.
+	Refused bool    `json:"refused"`
+	Amount  *string `json:"amount,omitempty"`
 }
 
 // File writes a day, or amends one that is already there.
@@ -617,8 +623,9 @@ func (s *Store) File(ctx context.Context, c db.Caller, resident uuid.UUID, on ti
 
 		for _, m := range f.Meals {
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO care_day_meals (care_day_id, slot, happened, amount)
-				 VALUES ($1, $2, $3, $4)`, id, m.Slot, m.Happened, m.Amount); err != nil {
+				`INSERT INTO care_day_meals (care_day_id, slot, happened, refused, amount)
+				 VALUES ($1, $2, $3, $4, $5)`,
+				id, m.Slot, m.Happened, m.Refused, m.Amount); err != nil {
 				return policyRefusal(err)
 			}
 		}

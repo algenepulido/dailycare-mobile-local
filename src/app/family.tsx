@@ -732,6 +732,13 @@ function CareRow({ group }: { group: CareGroup }) {
       {group.did.length > 0 ? (
         <Text style={styles.careDid}>{group.did.join(', ')}</Text>
       ) : null}
+      {/* What she would not have, before what the record does not have. A family reads
+          the first as news about their mother and the second as news about the paperwork,
+          and putting them in one line would have made the first disappear into the
+          second. */}
+      {group.refused.length > 0 ? (
+        <Text style={styles.careRefused}>Would not eat: {group.refused.join(', ')}</Text>
+      ) : null}
       {group.didNot.length > 0 ? (
         <Text style={styles.careDidNot}>Not recorded: {group.didNot.join(', ')}</Text>
       ) : null}
@@ -880,6 +887,11 @@ const styles = StyleSheet.create({
   careLabel: { ...type.checklistItem, color: color.ink },
   careCount: { ...type.chip, color: color.ink3 },
   careDid: { ...type.body, color: color.ink2, marginTop: 4 },
+  // ink2, the same weight as what she did have, because a refusal is a thing that happened
+  // rather than a quieter version of a gap. Michaela's file proposes a colour of its own for
+  // this state; that belongs to the design pass rather than to the record change, so it is
+  // deliberately not invented here.
+  careRefused: { ...type.body, color: color.ink2, marginTop: 4 },
   careDidNot: { ...type.body, color: color.ink3, marginTop: 4 },
   careSource: { ...type.meta, color: color.ink4, marginTop: 6 },
 

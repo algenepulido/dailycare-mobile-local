@@ -45,9 +45,17 @@ export interface WeekDay {
   recorded: boolean;
   /** Today, whose meals are not all in yet. Shown as a fact, never counted as a shortfall. */
   inProgress: boolean;
-  /** How many of the day's meals were ticked, and out of how many are on the record. */
+  /** How many of the day's meals she ate, and out of how many are on the record. */
   meals: number;
   of: number;
+  /**
+   * How many she would not eat.
+   *
+   * Counted apart from the ones nobody wrote down, because a week that cannot tell them
+   * apart says "not every meal was written down" about a day where somebody watched her
+   * turn her lunch away and wrote exactly that.
+   */
+  refused: number;
   /**
    * Nothing differed from what is usual for them.
    *
@@ -101,13 +109,16 @@ export function familyWeek({
   const days: WeekDay[] = inside.map((on) => {
     const day = byDate.get(on);
     const inProgress = on === todayIs;
-    if (!day) return { on, recorded: false, inProgress, meals: 0, of: 0, steady: true };
+    if (!day) {
+      return { on, recorded: false, inProgress, meals: 0, of: 0, refused: 0, steady: true };
+    }
     return {
       on,
       recorded: true,
       inProgress,
       meals: day.meals.filter((m) => m.happened).length,
       of: day.meals.length,
+      refused: day.meals.filter((m) => m.refused).length,
       steady:
         sameAs(day.mood, baseline.mood) &&
         sameAs(day.appetite, baseline.appetite) &&
@@ -157,17 +168,33 @@ export function familyWeek({
     const span = spanOf(done.length, withMeals.length > done.length);
     const ateEveryDay = done.every((d) => d.meals > 0);
     const everyMeal = done.every((d) => d.meals === d.of);
-    const partial = done.filter((d) => d.meals > 0 && d.meals < d.of).length;
+    // Two different shortfalls, counted apart. A day she refused something is a day the
+    // home watched and wrote down; a day with a meal missing from the record is a day
+    // nobody wrote. Saying the second about the first is the mistake the whole third
+    // answer exists to stop, and it is easier to make over seven days than over one.
+    const turnedAway = done.filter((d) => d.refused > 0).length;
+    const partial = done.filter(
+      (d) => d.meals > 0 && d.of - d.meals - d.refused > 0,
+    ).length;
 
     if (everyMeal) {
       lines.push(`${them} ate every meal, ${span}.`);
     } else if (ateEveryDay) {
       lines.push(`${them} ate ${span}.`);
-      lines.push(
-        partial === 1
-          ? 'On one of them not every meal was written down.'
-          : `On ${partial} of them not every meal was written down.`,
-      );
+      if (turnedAway > 0) {
+        lines.push(
+          turnedAway === 1
+            ? 'On one of them she would not finish a meal.'
+            : `On ${turnedAway} of them she would not finish a meal.`,
+        );
+      }
+      if (partial > 0) {
+        lines.push(
+          partial === 1
+            ? 'On one of them not every meal was written down.'
+            : `On ${partial} of them not every meal was written down.`,
+        );
+      }
     } else {
       const ate = done.filter((d) => d.meals > 0).length;
       lines.push(`${them} ate on ${ate} of the ${done.length} days written down.`);

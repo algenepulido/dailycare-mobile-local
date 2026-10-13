@@ -480,8 +480,10 @@ function CareReport({
             key={meal}
             label={MEAL_LABEL[meal]}
             done={draft.meals[meal].done}
+            refused={draft.meals[meal].refused}
             amount={draft.meals[meal].amount}
             onToggle={(done) => dispatch({ type: 'toggleMeal', meal, done })}
+            onRefuse={(refused) => dispatch({ type: 'refuseMeal', meal, refused })}
             onAmount={(amount) => dispatch({ type: 'setMealAmount', meal, amount })}
           />
         ))}

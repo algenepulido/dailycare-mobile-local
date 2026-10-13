@@ -41,7 +41,7 @@ export interface FiledDayFacts {
   note: string;
   shower: boolean;
   grooming: boolean;
-  meals: { slot: Meal; happened: boolean; amount: MealAmount | null }[];
+  meals: { slot: Meal; happened: boolean; refused: boolean; amount: MealAmount | null }[];
   concerns: Concern[];
   /** What the caregiver recorded about medication, as it came back from the server. */
   medication: { slot: string; status: string; detail: string; recordedBy: string }[];
@@ -55,6 +55,15 @@ export interface CareGroup {
   total: number;
   /** What happened, named. "Breakfast (most)", "Shower". */
   did: string[];
+  /**
+   * What she would not have.
+   *
+   * Its own list rather than part of didNot, because they are opposite kinds of thing. A
+   * refused lunch is something the home observed and wrote down; an unrecorded one is the
+   * absence of anything. Putting them together would have made the first disappear into
+   * the second, which is the mistake this whole distinction exists to stop.
+   */
+  refused: string[];
   /** What the record does not have. Never "not done" — see the note at the top. */
   didNot: string[];
   /**
@@ -181,6 +190,7 @@ export function familyDay(
   /* --------------------------------------------------- the care information */
 
   const ate: string[] = [];
+  const wouldNot: string[] = [];
   const notEaten: string[] = [];
   for (const slot of ['breakfast', 'lunch', 'dinner'] as Meal[]) {
     const m = day.meals.find((x) => x.slot === slot);
@@ -193,6 +203,9 @@ export function familyDay(
           ? `${MEAL_NAME[slot]} (${MEAL_AMOUNT_LABEL[m.amount].toLowerCase()})`
           : MEAL_NAME[slot],
       );
+    } else if (m.refused) {
+      // Somebody watched her turn it down and wrote that. Not the same as the line below.
+      wouldNot.push(MEAL_NAME[slot]);
     } else {
       notEaten.push(MEAL_NAME[slot]);
     }
@@ -230,19 +243,38 @@ export function familyDay(
   }
 
   const care: CareGroup[] = [
-    { label: 'Meals', done: ate.length, total: 3, did: ate, didNot: notEaten },
+    {
+      label: 'Meals',
+      // Out of three, and refusing one does not make it two. The count is how many of her
+      // meals she ate, and a meal she turned down is one of the three she had.
+      done: ate.length,
+      total: 3,
+      did: ate,
+      refused: wouldNot,
+      didNot: notEaten,
+    },
     {
       label: 'Medication',
       done: givenSlots.length,
       total: 2,
       did: supplemental.length > 0 ? [...givenSlots, ...supplemental] : givenSlots,
+      refused: [],
       didNot: notRecorded,
       // Trevor's own distinction, in his words: today this is a caregiver saying they gave
       // it; once PointClickCare feeds the table it becomes a record that a dose was
       // administered. The line changes with the source rather than being decided here.
       source: medicationSource(recorder, givenSlots.length + supplemental.length),
     },
-    { label: 'Hygiene', done: washed.length, total: 2, did: washed, didNot: notWashed },
+    {
+      label: 'Hygiene',
+      done: washed.length,
+      total: 2,
+      did: washed,
+      // A shower is not something a record says she turned down. If that ever becomes a
+      // thing the form can say, it belongs here rather than in didNot.
+      refused: [],
+      didNot: notWashed,
+    },
   ];
 
   return { from: filedBy.trim(), changed, care, note: day.note.trim() };

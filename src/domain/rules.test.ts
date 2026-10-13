@@ -11,9 +11,9 @@ function entry(overrides: Partial<CheckIn> = {}): CheckIn {
     caregiverId: 'caregiver',
     careDate: '2026-09-03',
     meals: {
-      breakfast: { done: true, amount: 'all' },
-      lunch: { done: true, amount: 'half' },
-      dinner: { done: false, amount: null },
+      breakfast: { done: true, refused: false, amount: 'all' },
+      lunch: { done: true, refused: false, amount: 'half' },
+      dinner: { done: false, refused: false, amount: null },
     },
     medication: { am: true, pm: false },
     hygiene: { shower: true, grooming: false },
@@ -83,13 +83,14 @@ describe('the care checklist', () => {
   it('says how much was eaten when the caregiver answered', () => {
     expect(
       mealCounts({
-        breakfast: { done: true, amount: 'all' },
-        lunch: { done: true, amount: 'half' },
-        dinner: { done: false, amount: null },
+        breakfast: { done: true, refused: false, amount: 'all' },
+        lunch: { done: true, refused: false, amount: 'half' },
+        dinner: { done: false, refused: false, amount: null },
       }),
     ).toEqual({
       done: 2,
       items: ['Breakfast (all)', 'Lunch (half)'],
+      refused: [],
       missed: ['Dinner'],
     });
   });
@@ -97,13 +98,14 @@ describe('the care checklist', () => {
   it('still counts a meal that was ticked without an amount, and does not guess one', () => {
     expect(
       mealCounts({
-        breakfast: { done: true, amount: null },
-        lunch: { done: true, amount: 'a-bit' },
-        dinner: { done: false, amount: null },
+        breakfast: { done: true, refused: false, amount: null },
+        lunch: { done: true, refused: false, amount: 'a-bit' },
+        dinner: { done: false, refused: false, amount: null },
       }),
     ).toEqual({
       done: 2,
       items: ['Breakfast', 'Lunch (a bit)'],
+      refused: [],
       missed: ['Dinner'],
     });
   });

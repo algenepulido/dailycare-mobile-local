@@ -104,7 +104,7 @@ export function draftFromFiled(
 ): CheckInDraft {
   const meals = { ...EMPTY_MEALS };
   for (const meal of summary.meals) {
-    meals[meal.slot] = { done: meal.happened, amount: meal.amount };
+    meals[meal.slot] = { done: meal.happened, refused: meal.refused, amount: meal.amount };
   }
   return {
     careDate,
@@ -130,6 +130,7 @@ export function draftFromFiled(
 type Action =
   | { type: 'replace'; draft: CheckInDraft }
   | { type: 'toggleMeal'; meal: Meal; done: boolean }
+  | { type: 'refuseMeal'; meal: Meal; refused: boolean }
   | { type: 'setMealAmount'; meal: Meal; amount: MealAmount | null }
   | { type: 'toggleMedication'; slot: MedicationSlot }
   | { type: 'toggleHygiene'; task: HygieneTask }
@@ -150,16 +151,32 @@ function reducer(state: CheckInDraft, action: Action): CheckInDraft {
         ...state,
         meals: {
           ...state.meals,
-          // Unticking clears the amount: a meal that did not happen cannot have one.
+          // Unticking clears the amount: a meal nobody recorded cannot have one. Ticking
+          // clears the refusal, because she cannot have both eaten it and turned it away,
+          // and the database refuses the row that says she did.
           [action.meal]: action.done
-            ? { done: true, amount: state.meals[action.meal].amount }
-            : { done: false, amount: null },
+            ? { done: true, refused: false, amount: state.meals[action.meal].amount }
+            : { done: false, refused: false, amount: null },
+        },
+      };
+    case 'refuseMeal':
+      return {
+        ...state,
+        meals: {
+          ...state.meals,
+          // Refusing clears both the tick and the amount. Taking the refusal back leaves
+          // the meal where it started: nobody has written anything about it, which is not
+          // the same as her having eaten it.
+          [action.meal]: { done: false, refused: action.refused, amount: null },
         },
       };
     case 'setMealAmount':
       return {
         ...state,
-        meals: { ...state.meals, [action.meal]: { done: true, amount: action.amount } },
+        meals: {
+          ...state.meals,
+          [action.meal]: { done: true, refused: false, amount: action.amount },
+        },
       };
     case 'toggleMedication':
       return {

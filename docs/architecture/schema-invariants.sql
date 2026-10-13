@@ -118,6 +118,55 @@ SELECT must_accept('a meal ticked with no amount — not observed is a real answ
 $$);
 
 
+-- ── a meal has three answers, and the database holds them apart ────────────────
+--
+-- A second day of its own, because these checks each need a slot nobody else has taken.
+-- Sharing one meant that when the pair constraint was removed to see whether these checks
+-- could feel it, the insert that should have been refused succeeded and the next one failed
+-- on the primary key - so a real regression would have been reported as a duplicate key
+-- rather than as a meal the database should never have accepted.
+\set QUIET on
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, filed_by)
+VALUES ('6a6a6a6a-6a6a-6a6a-6a6a-6a6a6a6a6a6a',
+        '11111111-1111-1111-1111-111111111111',
+        '55555555-5555-5555-5555-555555555555',
+        '2026-09-15', 'calm', 'good', 'slept_well',
+        '22222222-2222-2222-2222-222222222222');
+\set QUIET off
+--
+-- Nobody wrote it down, she ate, she would not eat. The first two have been here since the
+-- beginning and the product has been careful that happened = false is the first of them
+-- rather than the third. refused is the third, and the pair has to be a pair that cannot be
+-- wrong: a row saying she both ate it and refused it is not a meal anybody can describe,
+-- and a screen left to pick one of the two would pick differently in different places.
+
+SELECT must_accept('a meal she would not eat', $$
+  INSERT INTO care_day_meals (care_day_id, slot, happened, refused)
+  VALUES ('66666666-6666-6666-6666-666666666666', 'lunch', false, true)
+$$);
+
+-- Each of these takes its own slot. Sharing one meant that when the pair constraint was
+-- taken out to see whether these checks could feel it, the insert that should have been
+-- refused succeeded and the next one failed on the primary key instead - so a real
+-- regression would have been reported as a duplicate rather than as the thing it is.
+SELECT must_reject('a meal she both ate and refused', $$
+  INSERT INTO care_day_meals (care_day_id, slot, happened, refused)
+  VALUES ('66666666-6666-6666-6666-666666666666', 'dinner', true, true)
+$$);
+
+-- How much of a meal she refused is not a quantity anybody can give.
+SELECT must_reject('an amount on a meal she refused', $$
+  INSERT INTO care_day_meals (care_day_id, slot, happened, refused, amount)
+  VALUES ('6a6a6a6a-6a6a-6a6a-6a6a-6a6a6a6a6a6a', 'dinner', false, true, 'half')
+$$);
+
+-- The state the record has always held, still reachable and still meaning what it meant.
+SELECT must_accept('a meal nobody wrote down', $$
+  INSERT INTO care_day_meals (care_day_id, slot, happened, refused)
+  VALUES ('6a6a6a6a-6a6a-6a6a-6a6a-6a6a6a6a6a6a', 'dinner', false, false)
+$$);
+
+
 -- ── who granted the access ─────────────────────────────────────────────────────
 --
 -- facility_members.invited_by says who let somebody into the building. An assignment is

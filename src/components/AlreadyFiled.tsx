@@ -120,7 +120,12 @@ export function AlreadyFiled({
                     ? meal.amount
                       ? MEAL_AMOUNT_LABEL[meal.amount]
                       : 'Yes'
-                    : 'Not recorded'
+                    : // Three answers, and the caregiver coming on shift needs the middle
+                      // one. She would not eat it is something the last person watched; not
+                      // recorded is something nobody wrote.
+                      meal.refused
+                      ? 'Would not eat'
+                      : 'Not recorded'
                 }
               />
             ))

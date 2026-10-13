@@ -109,6 +109,15 @@ function ChecklistCard({ group }: { group: ChecklistGroup }) {
           The flag stays. For a caregiver about to send, a mark against the row that is
           still blank is a last look before it goes, which is a different job from the
           claim the words make. */}
+      {/* What she would not have, above what nobody wrote down, and without the flag.
+          A refusal is something the caregiver watched and recorded; the flag beside the
+          line below means "this row is still blank, look before you send". */}
+      {group.refusedItems.length > 0 ? (
+        <View style={styles.line}>
+          <Icon name="check" size={14} color={color.ink3} />
+          <Text style={styles.lineText}>Would not eat: {group.refusedItems.join(', ')}</Text>
+        </View>
+      ) : null}
       {missed ? (
         <View style={styles.line}>
           <Icon name="flag" size={14} color={color.flag} />

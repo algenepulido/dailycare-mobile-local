@@ -13,9 +13,9 @@ function day(over: Partial<FiledDayFacts> = {}): FiledDayFacts {
     shower: true,
     grooming: true,
     meals: [
-      { slot: 'breakfast', happened: true, amount: null },
-      { slot: 'lunch', happened: true, amount: null },
-      { slot: 'dinner', happened: true, amount: null },
+      { slot: 'breakfast', happened: true, refused: false, amount: null },
+      { slot: 'lunch', happened: true, refused: false, amount: null },
+      { slot: 'dinner', happened: true, refused: false, amount: null },
     ],
     concerns: [],
     medication: [],
@@ -76,9 +76,9 @@ describe('a day as a family reads it', () => {
     const d = familyDay(
       day({
         meals: [
-          { slot: 'breakfast', happened: true, amount: 'most' },
-          { slot: 'lunch', happened: true, amount: null },
-          { slot: 'dinner', happened: false, amount: null },
+          { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+          { slot: 'lunch', happened: true, refused: false, amount: null },
+          { slot: 'dinner', happened: false, refused: false, amount: null },
         ],
         grooming: false,
       }),
@@ -184,9 +184,9 @@ describe('a day as a family reads it', () => {
         shower: false,
         grooming: false,
         meals: [
-          { slot: 'breakfast', happened: false, amount: null },
-          { slot: 'lunch', happened: false, amount: null },
-          { slot: 'dinner', happened: false, amount: null },
+          { slot: 'breakfast', happened: false, refused: false, amount: null },
+          { slot: 'lunch', happened: false, refused: false, amount: null },
+          { slot: 'dinner', happened: false, refused: false, amount: null },
         ],
       }),
       usual,
@@ -276,5 +276,66 @@ describe('whatTheVersionChanged', () => {
   it('says nothing about a kind of change it does not know', () => {
     expect(whatTheVersionChanged('something-else', at)).toBeNull();
     expect(whatTheVersionChanged('', at)).toBeNull();
+  });
+});
+
+/**
+ * A meal she turned down is a thing that happened, not a gap in the paperwork.
+ *
+ * The record held one boolean until now and the product was careful that false meant
+ * "nobody wrote it down". A refusal is the third answer, and it belongs on its own line:
+ * folded into the same list as the unrecorded ones it would read as the home having
+ * forgotten rather than as her having said no.
+ */
+describe('a meal she would not eat', () => {
+  function withLunch(happened: boolean, refused: boolean) {
+    return familyDay(
+      {
+        mood: 'Calm',
+        appetite: 'Good',
+        sleep: 'Slept well',
+        note: '',
+        shower: false,
+        grooming: false,
+        meals: [
+          { slot: 'breakfast', happened: true, refused: false, amount: 'most' },
+          { slot: 'lunch', happened, refused, amount: null },
+          { slot: 'dinner', happened: true, refused: false, amount: 'most' },
+        ],
+        concerns: [],
+        medication: [],
+      },
+      { mood: 'Calm', appetite: 'Good', sleep: 'Slept well' },
+      'Alma Reyes',
+      'Nadia',
+    );
+  }
+
+  const meals = (d: ReturnType<typeof withLunch>) =>
+    d.care.find((g) => g.label === 'Meals')!;
+
+  it('is named as refused rather than as missing', () => {
+    expect(meals(withLunch(false, true)).refused).toEqual(['Lunch']);
+  });
+
+  it('and is not in the list of what the record does not have', () => {
+    expect(meals(withLunch(false, true)).didNot).toEqual([]);
+  });
+
+  it('while a meal nobody wrote down still is', () => {
+    expect(meals(withLunch(false, false)).didNot).toEqual(['Lunch']);
+    expect(meals(withLunch(false, false)).refused).toEqual([]);
+  });
+
+  it('does not count towards what she ate', () => {
+    expect(meals(withLunch(false, true)).done).toBe(2);
+    expect(meals(withLunch(false, true)).total).toBe(3);
+  });
+
+  it('leaves the meals she did eat where they were', () => {
+    expect(meals(withLunch(false, true)).did).toEqual([
+      'Breakfast (most)',
+      'Dinner (most)',
+    ]);
   });
 });

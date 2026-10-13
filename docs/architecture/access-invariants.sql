@@ -920,12 +920,33 @@ INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
 SELECT expect('a note that changed is a correction',
   (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a6') = 'care'));
 
+-- A meal that went from unrecorded to refused. The comparison reads the meals as a set, and
+-- a set that cannot see the third answer treats a correction as no change at all - so this
+-- day would have told her daughter a photo had been added, over a record now saying her
+-- mother would not eat her lunch. The worst of the three ways this function can be wrong.
+\set QUIET on
+UPDATE care_days SET superseded_at = now()
+ WHERE id = 'cd000000-0000-0000-0000-0000000000a6';
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by, amends_id) VALUES
+  ('cd000000-0000-0000-0000-0000000000a7', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'anxious', 'good', 'slept_well',
+   'She was up a lot in the afternoon.', true, false,
+   'a0000000-0000-0000-0000-00000000000a', 'cd000000-0000-0000-0000-0000000000a6');
+INSERT INTO care_day_meals (care_day_id, slot, happened, refused, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a7', 'breakfast', true, false, 'all'),
+  ('cd000000-0000-0000-0000-0000000000a7', 'lunch', false, true, NULL);
+\set QUIET off
+
+SELECT expect('a meal that went from unrecorded to refused is a correction',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a7') = 'care'));
+
 -- A caregiver at another building gets nothing rather than an answer, the same way
 -- resident_photograph does. The function runs as the caller and that is why it can be
 -- granted at all.
 SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false);
 SELECT expect('another building is told nothing',
-  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a6') IS NULL));
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a7') IS NULL));
 
 RESET ROLE;
 

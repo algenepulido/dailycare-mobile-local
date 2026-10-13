@@ -17,9 +17,9 @@ function day(over: Partial<FiledDayFacts> = {}): FiledDayFacts {
     shower: true,
     grooming: true,
     meals: [
-      { slot: 'breakfast', happened: true, amount: null },
-      { slot: 'lunch', happened: true, amount: null },
-      { slot: 'dinner', happened: true, amount: null },
+      { slot: 'breakfast', happened: true, refused: false, amount: null },
+      { slot: 'lunch', happened: true, refused: false, amount: null },
+      { slot: 'dinner', happened: true, refused: false, amount: null },
     ],
     concerns: [],
     medication: [],

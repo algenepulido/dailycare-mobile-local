@@ -7,8 +7,12 @@ import { color, radii, sizes, type } from '@/theme/tokens';
 interface MealRowProps {
   label: string;
   done: boolean;
+  /** She would not eat it. Never true at the same time as done. */
+  refused: boolean;
   amount: MealAmount | null;
   onToggle: (done: boolean) => void;
+  /** Tapping it again takes the refusal back, to a meal nobody has written about. */
+  onRefuse: (refused: boolean) => void;
   /** Null clears the answer: tapping the chosen amount again takes it back. */
   onAmount: (amount: MealAmount | null) => void;
 }
@@ -20,7 +24,15 @@ interface MealRowProps {
  * ticks three boxes and moves on. It also stays optional, so ticking without answering
  * is a complete record rather than a half-filled one.
  */
-export function MealRow({ label, done, amount, onToggle, onAmount }: MealRowProps) {
+export function MealRow({
+  label,
+  done,
+  refused,
+  amount,
+  onToggle,
+  onRefuse,
+  onAmount,
+}: MealRowProps) {
   return (
     <View>
       <Pressable
@@ -33,19 +45,42 @@ export function MealRow({ label, done, amount, onToggle, onAmount }: MealRowProp
         <View style={[styles.box, done && styles.boxChecked]}>
           {done ? <Text style={styles.tick}>✓</Text> : null}
         </View>
-        <Text style={[styles.label, done && styles.labelDone]}>{label}</Text>
+        <Text style={[styles.label, (done || refused) && styles.labelDone]}>{label}</Text>
         {done && amount ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{MEAL_AMOUNT_LABEL[amount]}</Text>
           </View>
         ) : null}
+        {/* The third answer, beside the tick rather than under it.
+          *
+          * A meal nobody has written about and a meal she turned away are different things,
+          * and until now the form could only say the first. It is on the row so that saying
+          * it costs one tap, which is what it costs to say she ate it - a caregiver who has
+          * to open something to record a refusal records fewer of them. */}
+        <Pressable
+          onPress={() => onRefuse(!refused)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: refused }}
+          accessibilityLabel={`${label}, would not eat`}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.refuse,
+            refused && styles.refuseOn,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={[styles.refuseText, refused && styles.refuseTextOn]}>Refused</Text>
+        </Pressable>
       </Pressable>
 
       {done ? (
         <View style={styles.detail}>
           <View style={styles.promptRow}>
             <Text style={styles.prompt}>How much did they eat?</Text>
-            {amount ? null : <Text style={styles.unanswered}>not observed</Text>}
+            {/* "not observed" until the design pass settled it. A meal she ate with nobody
+              * saying how much is a meal eaten and an amount not recorded, which is the
+              * same words the rest of the product uses for a thing nobody wrote down. */}
+            {amount ? null : <Text style={styles.unanswered}>not recorded</Text>}
           </View>
           <View style={styles.amounts}>
             {MEAL_AMOUNTS.map((option) => {
@@ -103,6 +138,20 @@ const styles = StyleSheet.create({
     backgroundColor: color.sageSoft,
   },
   badgeText: { fontFamily: type.chip.fontFamily, fontSize: 13, color: color.ink },
+
+  /** Reads as an answer rather than as a warning: she turned it down, nothing went wrong. */
+  refuse: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radii.chip,
+    borderWidth: 1,
+    borderColor: color.line2,
+    minHeight: sizes.minTouchTarget - 10,
+    justifyContent: 'center',
+  },
+  refuseOn: { backgroundColor: color.claySoft, borderColor: color.clay },
+  refuseText: { fontFamily: type.chip.fontFamily, fontSize: 13, color: color.ink3 },
+  refuseTextOn: { color: color.ink },
 
   /** Indented past the checkbox with a hairline rule, so it reads as belonging to the row. */
   promptRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

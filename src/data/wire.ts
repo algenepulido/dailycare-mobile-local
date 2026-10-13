@@ -68,7 +68,7 @@ export interface WireDay {
   note: string;
   shower: boolean;
   grooming: boolean;
-  meals: { slot: string; happened: boolean; amount?: string }[];
+  meals: { slot: string; happened: boolean; refused?: boolean; amount?: string }[];
   concerns: string[];
   /**
    * The medication the caregiver ticked, as a caregiver's own record of it.
@@ -102,8 +102,9 @@ export function toWire(checkIn: CheckIn): WireDay {
       return {
         slot,
         happened: entry.done,
-        // Left off entirely rather than sent as null. The column is "not observed", which
-        // is a real answer, and the absence says it more plainly than a null does.
+        refused: entry.refused,
+        // Left off entirely rather than sent as null. A meal she ate with nobody saying how
+        // much is a real answer, and the absence says it more plainly than a null does.
         ...(entry.done && entry.amount ? { amount: AMOUNT_WIRE[entry.amount] } : {}),
       };
     }),
@@ -132,7 +133,7 @@ export interface FiledDay {
   note?: string;
   shower?: boolean;
   grooming?: boolean;
-  meals: { slot: string; happened: boolean; amount?: string }[];
+  meals: { slot: string; happened: boolean; refused?: boolean; amount?: string }[];
   concerns: string[];
   filedBy?: string;
   /** The caregiver's name. A family member cannot resolve filedBy - users is closed to them
@@ -173,7 +174,7 @@ export interface FiledSummary {
   note: string;
   shower: boolean;
   grooming: boolean;
-  meals: { slot: Meal; happened: boolean; amount: MealAmount | null }[];
+  meals: { slot: Meal; happened: boolean; refused: boolean; amount: MealAmount | null }[];
   concerns: Concern[];
 }
 
@@ -232,6 +233,8 @@ export function fromWire(day: FiledDay): FiledSummary | null {
       .map((m) => ({
         slot: m.slot as Meal,
         happened: m.happened,
+        // An older server does not send it, and a meal it never heard of was not refused.
+        refused: m.refused ?? false,
         amount: (m.amount && AMOUNT_BACK[m.amount]) || null,
       })),
     concerns: (day.concerns ?? []).map((c) => CONCERN_BACK[c]).filter(Boolean),

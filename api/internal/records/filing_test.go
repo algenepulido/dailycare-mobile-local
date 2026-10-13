@@ -571,3 +571,74 @@ func TestAPhotographIsNotACorrection(t *testing.T) {
 		t.Errorf("a changed note says %q, want care", after.AmendedWith)
 	}
 }
+
+// Three answers survive the round trip, and the database refuses the fourth.
+//
+// A meal nobody wrote down and a meal she would not eat were the same row until now, and
+// the product has been careful that the one boolean meant the first of them. The third
+// answer is only worth adding if it comes back as itself.
+func TestAMealSheWouldNotEatComesBackAsRefused(t *testing.T) {
+	s, caller, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+
+	most := "most"
+	filing := aDay()
+	filing.Meals = []Meal{
+		{Slot: "breakfast", Happened: true, Amount: &most},
+		{Slot: "lunch", Refused: true},
+		{Slot: "dinner"},
+	}
+	if _, err := s.File(ctx, caller, resident, on, filing); err != nil {
+		t.Fatal(err)
+	}
+
+	day, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Meal{}
+	for _, m := range day.Meals {
+		by[m.Slot] = m
+	}
+	if !by["breakfast"].Happened || by["breakfast"].Refused {
+		t.Errorf("breakfast came back as %+v", by["breakfast"])
+	}
+	if by["lunch"].Happened || !by["lunch"].Refused {
+		t.Errorf("a refused lunch came back as %+v", by["lunch"])
+	}
+	// The one the whole column exists for: nobody wrote dinner down, and that is not a
+	// refusal.
+	if by["dinner"].Happened || by["dinner"].Refused {
+		t.Errorf("a meal nobody wrote down came back as %+v", by["dinner"])
+	}
+}
+
+// Eaten and refused is not a meal anybody can describe, and the database says so rather
+// than leaving a screen to pick which half it believes.
+func TestAMealCannotBeBothEatenAndRefused(t *testing.T) {
+	s, caller, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+
+	filing := aDay()
+	filing.Meals = []Meal{{Slot: "breakfast", Happened: true, Refused: true}}
+	if _, err := s.File(ctx, caller, resident, on, filing); err == nil {
+		t.Fatal("the database accepted a meal she both ate and refused")
+	}
+
+	// And nothing was left behind by it. A day refused partway through has to leave no day
+	// at all, not a day with the meals missing: the care_days row goes in before the meals
+	// do, and a transaction that did not take the row back with it would leave a record
+	// saying somebody filed a day they never managed to file.
+	//
+	// Day() answers an unfiled day with an empty one rather than an error, which is
+	// deliberate and is what the first version of this test got wrong.
+	after, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatalf("reading the day afterwards: %v", err)
+	}
+	if after.FiledAt != nil || len(after.Meals) != 0 {
+		t.Errorf("the refused filing left a day behind: %+v", after)
+	}
+}
