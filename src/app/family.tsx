@@ -114,9 +114,13 @@ export default function FamilyScreen() {
     [loadPeople],
   );
 
+  // Keyed on who is signed in rather than on whether anybody is. A boolean cannot say
+  // that a different person is holding the phone, and the next person's list is not this
+  // person's.
+  const signedInAs = account?.userId ?? null;
   useEffect(() => {
-    if (signedIn) void loadPeople();
-  }, [signedIn, loadPeople]);
+    if (signedInAs) void loadPeople();
+  }, [signedInAs, loadPeople]);
 
   /**
    * Nothing of one person's record survives the next person signing in.
@@ -220,7 +224,27 @@ export default function FamilyScreen() {
             ? 'This session has ended. Sign in again to see today.'
             : 'Sign in to see how your person is doing today.'}
         </Text>
-        <SignInSheet open={signInOpen} opened="family" onClose={() => setSignInOpen(false)} />
+        {/* Asking again when the sheet closes, which is the only moment this screen hears
+            that somebody signed in.
+            
+            A session that expires leaves the account on the phone and kills only the token
+            behind it, so nothing about the account changes when she signs in again as
+            herself - not the id, not whether there is one. This screen is on the "your
+            session has ended" branch because a request failed, and the only thing that
+            takes it off is asking again and getting an answer. Without this she signed in
+            correctly and stayed on the screen telling her it had ended, with no way out
+            but to kill the app. Found on a phone, after a session really did expire.
+
+            It also runs when she closes the sheet without signing in, which costs one
+            request that fails the same way it failed a moment ago. */}
+        <SignInSheet
+          open={signInOpen}
+          opened="family"
+          onClose={() => {
+            setSignInOpen(false);
+            void loadPeople();
+          }}
+        />
       </Screen>
     );
   }
