@@ -516,3 +516,58 @@ func TestCorrectingADayLeavesMedicationAlone(t *testing.T) {
 		t.Errorf("re-filing duplicated medication: %+v", again.Medication)
 	}
 }
+
+// A photograph joining a day is not the home changing its account of it.
+//
+// A photograph belongs to the version it arrives with, so a caregiver who files at noon and
+// comes back at four with a picture sends the day again. Corrected alone cannot tell that
+// apart from a real correction, and the family screen read it as one: "this was updated
+// after it was first written", over a day where nothing about the care had changed.
+//
+// That is the one direction a care record must not be wrong in. A family told the home
+// changed its account of their mother has no way to check.
+func TestAPhotographIsNotACorrection(t *testing.T) {
+	s, caller, resident := ward(t)
+	ctx := context.Background()
+	on := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+
+	if _, err := s.File(ctx, caller, resident, on, aDay()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AmendedWith != "" {
+		t.Errorf("a day filed once says it amended %q", first.AmendedWith)
+	}
+
+	// Four o'clock, with a picture. The day is sent back exactly as it stands.
+	if _, err := s.File(ctx, caller, resident, on, aDay()); err != nil {
+		t.Fatal(err)
+	}
+	same, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !same.Corrected {
+		t.Error("a second filing did not replace the first")
+	}
+	if same.AmendedWith != "photograph" {
+		t.Errorf("a version that changed none of the care says %q, want photograph", same.AmendedWith)
+	}
+
+	// And a real correction still says so.
+	changed := aDay()
+	changed.Note = "and a second look at it"
+	if _, err := s.File(ctx, caller, resident, on, changed); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.Day(ctx, caller, resident, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.AmendedWith != "care" {
+		t.Errorf("a changed note says %q, want care", after.AmendedWith)
+	}
+}

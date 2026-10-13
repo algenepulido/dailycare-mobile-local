@@ -145,6 +145,8 @@ export interface FiledDay {
   supersededAt?: string;
   /** True when this version replaced an earlier one. */
   corrected?: boolean;
+  /** What that version changed: "care" or "photograph". Absent on a day filed once. */
+  amendedWith?: string;
 }
 
 /** What the app shows for a day somebody else already filed. Domain values, which are
@@ -161,6 +163,10 @@ export interface FiledSummary {
   /** Whether what stands here replaced something. A history marks these without having to
    *  ask for the revisions of every day it shows. */
   corrected: boolean;
+  /** What that version changed: "care" or "photograph". Empty on a day filed once. A
+   *  photograph has to arrive with a version of its own, so a picture added in the evening
+   *  makes a correction that changed nothing about the care. */
+  amendedWith: string;
   mood: Mood | null;
   appetite: Appetite | null;
   sleep: Sleep | null;
@@ -214,6 +220,7 @@ export function fromWire(day: FiledDay): FiledSummary | null {
     })),
     supersededAt: day.supersededAt ?? null,
     corrected: day.corrected ?? false,
+    amendedWith: day.amendedWith ?? '',
     mood: (day.mood && MOOD_BACK[day.mood]) || null,
     appetite: (day.appetite && APPETITE_BACK[day.appetite]) || null,
     sleep: (day.sleep && SLEEP_BACK[day.sleep]) || null,

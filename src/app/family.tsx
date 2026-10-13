@@ -18,7 +18,7 @@ import type { DayPhoto, History, RemoteResident, WaitingGrant } from '@/data/api
 import { baselineFromWire } from '@/data/wire';
 import type { FiledSummary } from '@/data/wire';
 import { dayNumberLabel, longLabel, today, weekdayLabel } from '@/domain/dates';
-import { STEADY_DAY, familyDay } from '@/domain/familyDay';
+import { STEADY_DAY, familyDay, whatTheVersionChanged } from '@/domain/familyDay';
 import type { CareGroup, FamilyDay, FiledDayFacts } from '@/domain/familyDay';
 import { familyWeek } from '@/domain/familyWeek';
 import type { WeekDay } from '@/domain/familyWeek';
@@ -618,15 +618,17 @@ function Filed({
    * September. Seen on the recording rather than in the code.
    */
   const when = isToday ? 'today' : 'that day';
+  // What the version changed, if it changed anything worth saying. A photograph has to
+  // arrive with a version of its own, so a picture added in the evening used to read to a
+  // family as the home having changed its account of the day.
+  const versionLine = whatTheVersionChanged(day.amendedWith, day.filedAt);
   return (
     <>
       {summary.from ? <Text style={styles.from}>from {summary.from}</Text> : null}
 
       {/* That it was updated, not what it used to say. A family is told the record changed;
           the versions behind it are a care manager's to read. */}
-      {day.corrected ? (
-        <Text style={styles.corrected}>This was updated after it was first written.</Text>
-      ) : null}
+      {versionLine ? <Text style={styles.corrected}>{versionLine}</Text> : null}
 
       <Text style={styles.heading}>What changed {when}</Text>
       {summary.changed.length === 0 ? (

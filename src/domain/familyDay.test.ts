@@ -1,4 +1,4 @@
-import { STEADY_DAY, familyDay } from './familyDay';
+import { STEADY_DAY, familyDay, whatTheVersionChanged } from './familyDay';
 import type { FiledDayFacts } from './familyDay';
 import type { Baseline } from './types';
 
@@ -238,5 +238,43 @@ describe('the name a family reads', () => {
   it('and a single-word name is left alone', () => {
     const d = familyDay({ ...base, appetite: 'Poor' }, usual, 'Cathy', 'Maria');
     expect(d.changed.join(' ')).toContain("Cathy's appetite");
+  });
+});
+
+/**
+ * A photograph joining a day is not the home changing its account of it.
+ *
+ * The record cannot hold a picture without a version to hold it, so a caregiver who comes
+ * back in the evening files the day again. Reading that as "updated after it was first
+ * written" tells a family something untrue in the one direction a care record must never
+ * be wrong in, and gives them no way to check it.
+ */
+describe('whatTheVersionChanged', () => {
+  const at = '2026-10-13T16:12:00.000Z';
+
+  it('says nothing about a day that was filed once', () => {
+    expect(whatTheVersionChanged(undefined, at)).toBeNull();
+  });
+
+  it('says the day was updated when the care changed', () => {
+    expect(whatTheVersionChanged('care', at)).toBe(
+      'This was updated after it was first written.',
+    );
+  });
+
+  it('says a photo was added, with the time, when only a picture joined it', () => {
+    const line = whatTheVersionChanged('photograph', at);
+    expect(line).toMatch(/^A photo was added at .+\.$/);
+    expect(line).not.toContain('updated');
+  });
+
+  it('still says a photo was added when the time is unreadable', () => {
+    expect(whatTheVersionChanged('photograph', 'not a time')).toBe('A photo was added.');
+  });
+
+  /** A word nobody has defined yet is not a reason to tell a family anything. */
+  it('says nothing about a kind of change it does not know', () => {
+    expect(whatTheVersionChanged('something-else', at)).toBeNull();
+    expect(whatTheVersionChanged('', at)).toBeNull();
   });
 });

@@ -103,6 +103,40 @@ function medicationSource(recorder: string, recorded: number): string | undefine
 /** Shown in place of the list when nothing differed from what is normal. */
 export const STEADY_DAY = 'A steady day — everything as usual.';
 
+/**
+ * What a family is told about a day that replaced an earlier one.
+ *
+ * A caregiver who files at noon and comes back at four with a picture has to send the day
+ * again, because a photograph belongs to the version it arrives with. The record is right
+ * about that. What a family was told about it was not: they read that the day had been
+ * updated after it was first written, which says the home changed its account of their
+ * mother, over a day where the only thing that changed was that a photograph joined it.
+ *
+ * Nothing at all when the day was filed once, and nothing when a version replaced another
+ * without changing the care or bringing a picture. A line about a version is a line about
+ * something a family has no way to check, so it is only worth printing when there is
+ * something to say.
+ *
+ * `at` is when the version was filed, so "added at 4:12 PM" is the moment the photograph
+ * reached the record rather than the moment it was taken.
+ */
+export function whatTheVersionChanged(
+  amendedWith: string | undefined,
+  at: string,
+): string | null {
+  if (amendedWith === 'care') return 'This was updated after it was first written.';
+  if (amendedWith !== 'photograph') return null;
+  const when = timeOfDay(at);
+  return when ? `A photo was added ${when}.` : 'A photo was added.';
+}
+
+/** "at 4:12 PM", or nothing when the record does not carry a usable time. */
+function timeOfDay(iso: string): string | null {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return `at ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 const MEAL_NAME: Record<Meal, string> = {
   breakfast: 'Breakfast',
   lunch: 'Lunch',

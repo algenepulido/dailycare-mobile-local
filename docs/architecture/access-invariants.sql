@@ -765,6 +765,171 @@ $$);
 RESET ROLE;
 
 
+-- ── a photograph is not a correction ───────────────────────────────────────────
+--
+-- A caregiver who files at noon and comes back at four with a picture has to send the day
+-- again, because a photograph belongs to the version it arrives with. amends_id then says
+-- a version replaced another, and the family screen said "this was updated after it was
+-- first written" over a day where nothing about the care had changed.
+--
+-- That is the one direction a care record must not be wrong in. care_day_amended_with is
+-- what tells the two apart, and these are the cases that decide whether it can be trusted.
+
+\echo ''
+\echo '── a photograph is not a correction'
+
+SET ROLE dailycare_app;
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+
+\set QUIET on
+-- Her own day, on a date nothing else in this file touches, so superseding it here cannot
+-- change the answer to a question asked somewhere above.
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by) VALUES
+  ('cd000000-0000-0000-0000-0000000000a1', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'calm', 'good', 'slept_well',
+   'A quiet day.', true, false, 'a0000000-0000-0000-0000-00000000000a');
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a1', 'breakfast', true, 'most'),
+  ('cd000000-0000-0000-0000-0000000000a1', 'lunch', false, NULL);
+INSERT INTO care_day_concerns (care_day_id, concern) VALUES
+  ('cd000000-0000-0000-0000-0000000000a1', 'sundowning');
+\set QUIET off
+
+SELECT expect('a day filed once amends nothing',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a1') IS NULL));
+
+-- Four o'clock. The same day, sent again so a photograph has a version to belong to.
+\set QUIET on
+UPDATE care_days SET superseded_at = now()
+ WHERE id = 'cd000000-0000-0000-0000-0000000000a1';
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by, amends_id) VALUES
+  ('cd000000-0000-0000-0000-0000000000a2', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'calm', 'good', 'slept_well',
+   'A quiet day.', true, false, 'a0000000-0000-0000-0000-00000000000a',
+   'cd000000-0000-0000-0000-0000000000a1');
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a2', 'breakfast', true, 'most'),
+  ('cd000000-0000-0000-0000-0000000000a2', 'lunch', false, NULL);
+INSERT INTO care_day_concerns (care_day_id, concern) VALUES
+  ('cd000000-0000-0000-0000-0000000000a2', 'sundowning');
+\set QUIET off
+
+SELECT expect('a version that changed none of the care is a photograph',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a2') = 'photograph'));
+
+-- Medication is keyed by resident and date rather than by a version, so a dose recorded
+-- after the fact cannot make a photograph look like a correction. The product says the
+-- same thing in words: "Maria Santos recorded this" stays with Maria.
+\set QUIET on
+INSERT INTO medication_events (facility_id, resident_id, care_date, slot, status,
+                               occurred_at, source, recorded_by) VALUES
+  ('f1000000-0000-0000-0000-000000000001','e1000000-0000-0000-0000-000000000001',
+   '2026-09-16','pm','given', now(), 'caregiver', 'a0000000-0000-0000-0000-00000000000a');
+\set QUIET off
+
+SELECT expect('a dose recorded afterwards does not make it a correction',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a2') = 'photograph'));
+
+-- Her daughter has to be told the same thing as the staff. The previous version is a
+-- superseded row and the read policy has no clause about superseded_at, which is the only
+-- reason this works - if that ever changes, this check goes red rather than the family
+-- quietly being told a corrected day was only a photograph.
+SELECT set_config('app.user_id', 'c0000000-0000-0000-0000-00000000000c', false);
+SELECT expect('and her daughter is told the same',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a2') = 'photograph'));
+SELECT set_config('app.user_id', 'a0000000-0000-0000-0000-00000000000a', false);
+
+-- One observation different, and nothing else.
+\set QUIET on
+UPDATE care_days SET superseded_at = now()
+ WHERE id = 'cd000000-0000-0000-0000-0000000000a2';
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by, amends_id) VALUES
+  ('cd000000-0000-0000-0000-0000000000a3', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'anxious', 'good', 'slept_well',
+   'A quiet day.', true, false, 'a0000000-0000-0000-0000-00000000000a',
+   'cd000000-0000-0000-0000-0000000000a2');
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a3', 'breakfast', true, 'most'),
+  ('cd000000-0000-0000-0000-0000000000a3', 'lunch', false, NULL);
+INSERT INTO care_day_concerns (care_day_id, concern) VALUES
+  ('cd000000-0000-0000-0000-0000000000a3', 'sundowning');
+\set QUIET off
+
+SELECT expect('a mood that changed is a correction',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a3') = 'care'));
+
+-- Only a meal amount. The smallest thing that is still a change to her care, and the one
+-- most likely to slip through a comparison written over the day row alone.
+\set QUIET on
+UPDATE care_days SET superseded_at = now()
+ WHERE id = 'cd000000-0000-0000-0000-0000000000a3';
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by, amends_id) VALUES
+  ('cd000000-0000-0000-0000-0000000000a4', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'anxious', 'good', 'slept_well',
+   'A quiet day.', true, false, 'a0000000-0000-0000-0000-00000000000a',
+   'cd000000-0000-0000-0000-0000000000a3');
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a4', 'breakfast', true, 'all'),
+  ('cd000000-0000-0000-0000-0000000000a4', 'lunch', false, NULL);
+INSERT INTO care_day_concerns (care_day_id, concern) VALUES
+  ('cd000000-0000-0000-0000-0000000000a4', 'sundowning');
+\set QUIET off
+
+SELECT expect('a meal amount that changed is a correction',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a4') = 'care'));
+
+-- A concern taken off. Removing one is as much a change as adding one, and a comparison
+-- that only looks for new rows misses it.
+\set QUIET on
+UPDATE care_days SET superseded_at = now()
+ WHERE id = 'cd000000-0000-0000-0000-0000000000a4';
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by, amends_id) VALUES
+  ('cd000000-0000-0000-0000-0000000000a5', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'anxious', 'good', 'slept_well',
+   'A quiet day.', true, false, 'a0000000-0000-0000-0000-00000000000a',
+   'cd000000-0000-0000-0000-0000000000a4');
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a5', 'breakfast', true, 'all'),
+  ('cd000000-0000-0000-0000-0000000000a5', 'lunch', false, NULL);
+\set QUIET off
+
+SELECT expect('a concern taken off is a correction',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a5') = 'care'));
+
+-- The note is what a family actually reads, so a changed note is a correction even when
+-- every tick on the day is identical.
+\set QUIET on
+UPDATE care_days SET superseded_at = now()
+ WHERE id = 'cd000000-0000-0000-0000-0000000000a5';
+INSERT INTO care_days (id, facility_id, resident_id, care_date, mood, appetite, sleep, note,
+                       hygiene_shower, hygiene_grooming, filed_by, amends_id) VALUES
+  ('cd000000-0000-0000-0000-0000000000a6', 'f1000000-0000-0000-0000-000000000001',
+   'e1000000-0000-0000-0000-000000000001', '2026-09-16', 'anxious', 'good', 'slept_well',
+   'She was up a lot in the afternoon.', true, false,
+   'a0000000-0000-0000-0000-00000000000a', 'cd000000-0000-0000-0000-0000000000a5');
+INSERT INTO care_day_meals (care_day_id, slot, happened, amount) VALUES
+  ('cd000000-0000-0000-0000-0000000000a6', 'breakfast', true, 'all'),
+  ('cd000000-0000-0000-0000-0000000000a6', 'lunch', false, NULL);
+\set QUIET off
+
+SELECT expect('a note that changed is a correction',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a6') = 'care'));
+
+-- A caregiver at another building gets nothing rather than an answer, the same way
+-- resident_photograph does. The function runs as the caller and that is why it can be
+-- granted at all.
+SELECT set_config('app.user_id', 'd0000000-0000-0000-0000-00000000000d', false);
+SELECT expect('another building is told nothing',
+  (SELECT care_day_amended_with('cd000000-0000-0000-0000-0000000000a6') IS NULL));
+
+RESET ROLE;
+
+
 -- ── the clinical feed, which could not write at all ────────────────────────────
 --
 -- The matrix said the feed may insert a medication event with a source and a reference.

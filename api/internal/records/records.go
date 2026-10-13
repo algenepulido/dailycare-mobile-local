@@ -95,6 +95,14 @@ type CareDay struct {
 	// what lets a history mark the days that were corrected without asking for the
 	// revisions of every day on the screen.
 	Corrected bool `json:"corrected"`
+	// What this version changed, when it replaced an earlier one: "care" or "photograph".
+	// Empty on a day filed once.
+	//
+	// A caregiver who files at noon and comes back at four with a picture sends the day
+	// again, because a photograph belongs to the version it arrives with. Corrected alone
+	// then tells a family their mother's day was updated, when the only thing that joined
+	// it was a photograph. That is the one direction a care record must not be wrong in.
+	AmendedWith string `json:"amendedWith,omitempty"`
 	// What the caregiver recorded about medication for this day, if anything. Empty rather
 	// than absent so a client can tell "nothing recorded" from "this server does not say".
 	Medication []MedicationRecord `json:"medication"`
@@ -152,6 +160,20 @@ func (s *Store) Day(ctx context.Context, c db.Caller, resident uuid.UUID, on tim
 			resident, on).Scan(&id, &d.ResidentID, &d.On, &d.Mood, &d.Appetite, &d.Sleep,
 			&d.Note, &d.Shower, &d.Grooming, &d.FiledBy, &d.FiledAt, &d.Corrected); err != nil {
 			return err
+		}
+
+		// What the version changed, for a day that replaced one. In the model rather than
+		// here because only the database can see both versions at once, and because the
+		// comparison has to run as the caller: the previous version is a superseded row,
+		// and a family member reaching it is the whole reason this answer is the same for
+		// them as for the staff.
+		var amended *string
+		if err := tx.QueryRow(ctx,
+			`SELECT care_day_amended_with($1)`, id).Scan(&amended); err != nil {
+			return err
+		}
+		if amended != nil {
+			d.AmendedWith = *amended
 		}
 
 		// The name, through the function that is scoped to this record rather than to the
